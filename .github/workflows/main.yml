@@ -1,4 +1,4 @@
-name: ACIRM R2V OSA init smoke test
+name: ACIRM R2W OSA ISDC ENV PFILES repair smoke test
 
 on:
   workflow_dispatch:
@@ -7,191 +7,363 @@ on:
       - main
 
 jobs:
-  acirm-r2v-osa-init-smoke-test:
+  acirm-r2w-osa-env-repair-smoke-test:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
       - name: Prepare folders
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R2V_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R2V_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS
+          mkdir -p ACIRM_R21AX_R7G_R2W_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R2W_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS
 
       - name: System diagnostics
         run: |
           {
-            echo "ACIRM R2V OSA init and command smoke test"
+            echo "ACIRM R2W OSA ISDC_ENV PFILES repair smoke test"
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "claim_ceiling=OSA_INIT_AND_COMMAND_SMOKE_TEST_ONLY_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY"
+            echo "claim_ceiling=OSA_ENV_REPAIR_SMOKE_TEST_ONLY_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY"
+            echo ""
             uname -a || true
+            echo ""
             df -h || true
+            echo ""
             free -h || true
+            echo ""
             echo "HEASARC IPv4 probe"
             curl -4 -I -L --connect-timeout 30 --max-time 90 https://heasarc.gsfc.nasa.gov/FTP/integral/data/ || true
-          } | tee ACIRM_R21AX_R7G_R2V_RESULTS/logs/system_diagnostics.log
+          } | tee ACIRM_R21AX_R7G_R2W_RESULTS/logs/system_diagnostics.log
 
-      - name: Pull OSA Docker image and initialize OSA environment
+      - name: Pull OSA Docker image
         continue-on-error: true
         run: |
           {
             echo "Docker version"
             docker --version || true
             docker info || true
-
+            echo ""
             echo "Pull integralsw/osa:latest"
             docker pull integralsw/osa:latest || true
+          } | tee ACIRM_R21AX_R7G_R2W_RESULTS/logs/docker_pull.log
 
-            echo "OSA init smoke test inside container"
+      - name: Inspect OSA tree and parameter directories
+        continue-on-error: true
+        run: |
+          {
             docker run --rm integralsw/osa:latest bash -lc '
               set +e
               echo "inside container"
               uname -a || true
+              echo ""
               echo "default PATH=$PATH"
-
-              echo "absolute path existence"
+              echo ""
+              echo "list /opt/osa"
+              find /opt/osa -maxdepth 4 -type d 2>/dev/null | sort | head -300 || true
+              echo ""
+              echo "OSA binaries"
               ls -l /opt/osa/bin/og_create /opt/osa/bin/spi_science_analysis /opt/osa/bin/spiros /opt/osa/bin/spimodfit /opt/osa/bin/dal_verify || true
+              echo ""
+              echo "OSA init scripts"
               ls -l /opt/osa/bin/isdc_init_env.sh /opt/osa/bin/isdc_setup_env.sh || true
+              echo ""
+              echo "PAR files and candidate system pfiles"
+              find /opt/osa -type f -name "*.par" 2>/dev/null | head -300 || true
+              echo ""
+              echo "directories containing par files"
+              find /opt/osa -type f -name "*.par" 2>/dev/null | sed "s#/[^/]*$##" | sort -u | head -100 || true
+              echo ""
+              echo "libraries"
+              find /opt/osa -maxdepth 5 -type d \( -name lib -o -name lib64 \) 2>/dev/null | sort || true
+            '
+          } | tee ACIRM_R21AX_R7G_R2W_RESULTS/logs/osa_tree_parameter_scan.log
 
-              echo "source isdc_init_env.sh"
-              source /opt/osa/bin/isdc_init_env.sh || true
-              echo "after init PATH=$PATH"
-              env | sort | grep -E "^(ISDC|OSA|REP|PFILES|PATH|LD_LIBRARY_PATH|ROOTSYS|CFITSIO|HEADAS)" || true
-
-              echo "command visibility after init"
-              for c in og_create spi_science_analysis spiros spimodfit dal_verify fkeyprint ftcopy; do
-                echo "--- $c ---"
-                command -v "$c" || true
-                which "$c" || true
-              done
-
-              echo "help/version probes"
-              for c in og_create spi_science_analysis spiros spimodfit dal_verify; do
-                echo "--- ${c} help/version probe ---"
-                timeout 20 "$c" --help 2>&1 | head -80 || true
-                timeout 20 "$c" -h 2>&1 | head -80 || true
-                timeout 20 "$c" 2>&1 | head -80 || true
-              done
-            ' || true
-          } | tee ACIRM_R21AX_R7G_R2V_RESULTS/logs/osa_init_command_smoke_test.log
-
-      - name: Download minimal target products for DAL smoke test
+      - name: Download minimal target products
         run: |
           python3 - <<'PY'
           import csv, hashlib, json, subprocess, time
           from pathlib import Path
 
-          out = Path('ACIRM_R21AX_R7G_R2V_RESULTS')
-          data = out / 'data'
+          out = Path("ACIRM_R21AX_R7G_R2W_RESULTS")
+          data = out / "data"
           data.mkdir(parents=True, exist_ok=True)
 
-          base = 'https://heasarc.gsfc.nasa.gov/FTP/integral/data'
-          rev = '2504'
-          scws = ['250400090010']
-          products = ['swg.fits', 'spi_oper.fits.gz', 'spi_spectra.fits.gz', 'spi_gti.fits.gz']
+          base = "https://heasarc.gsfc.nasa.gov/FTP/integral/data"
+          rev = "2504"
+          scw = "250400090010"
+
+          products = [
+              "swg.fits",
+              "spi_oper.fits.gz",
+              "spi_spectra.fits.gz",
+              "spi_gti.fits.gz",
+          ]
 
           def sha256_file(path):
               h = hashlib.sha256()
-              with open(path, 'rb') as f:
-                  for chunk in iter(lambda: f.read(1024 * 1024), b''):
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
                       h.update(chunk)
               return h.hexdigest()
 
           rows = []
-          for scw in scws:
-              for product in products:
-                  url = f'{base}/scw/{rev}/{scw}.001/{product}'
-                  dest = data / 'scw' / rev / f'{scw}.001' / product
-                  dest.parent.mkdir(parents=True, exist_ok=True)
-                  tmp = str(dest) + '.part'
-                  cmd = ['curl','-4','-L','--retry','5','--retry-delay','10','--connect-timeout','60','--max-time','900','-o',tmp,url]
-                  row = {'scw_id':scw,'product':product,'url':url,'dest':str(dest),'ok':False,'returncode':'','bytes':0,'sha256':'','error':''}
+          for product in products:
+              url = f"{base}/scw/{rev}/{scw}.001/{product}"
+              dest = data / "scw" / rev / f"{scw}.001" / product
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              tmp = str(dest) + ".part"
 
-                  try:
-                      p = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-                      row['returncode'] = p.returncode
-                      if p.returncode == 0 and Path(tmp).exists() and Path(tmp).stat().st_size > 0:
-                          if dest.exists():
-                              dest.unlink()
-                          Path(tmp).rename(dest)
-                          row['ok'] = True
-                          row['bytes'] = dest.stat().st_size
-                          row['sha256'] = sha256_file(dest)
-                      else:
-                          row['error'] = p.stdout[-2000:]
-                  except Exception as e:
-                      row['error'] = repr(e)
+              row = {
+                  "scw_id": scw,
+                  "product": product,
+                  "url": url,
+                  "dest": str(dest),
+                  "ok": False,
+                  "returncode": "",
+                  "bytes": 0,
+                  "sha256": "",
+                  "error": "",
+              }
 
-                  rows.append(row)
-                  print(row)
+              cmd = [
+                  "curl",
+                  "-4",
+                  "-L",
+                  "--retry", "5",
+                  "--retry-delay", "10",
+                  "--connect-timeout", "60",
+                  "--max-time", "900",
+                  "-o", tmp,
+                  url,
+              ]
 
-          with open(out / 'r2v_minimal_download_manifest.csv','w',newline='',encoding='utf-8') as f:
+              try:
+                  p = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                  row["returncode"] = p.returncode
+                  if p.returncode == 0 and Path(tmp).exists() and Path(tmp).stat().st_size > 0:
+                      if dest.exists():
+                          dest.unlink()
+                      Path(tmp).rename(dest)
+                      row["ok"] = True
+                      row["bytes"] = dest.stat().st_size
+                      row["sha256"] = sha256_file(dest)
+                  else:
+                      row["error"] = p.stdout[-3000:]
+              except Exception as e:
+                  row["error"] = repr(e)
+
+              rows.append(row)
+              print(row)
+
+          with open(out / "r2w_minimal_download_manifest.csv", "w", newline="", encoding="utf-8") as f:
               w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
               w.writeheader()
               w.writerows(rows)
 
           summary = {
-              'run_id':'ACIRM_R21AX_R7G_R2V_OSA_INIT_AND_COMMAND_SMOKE_TEST_LIGHT',
-              'created_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-              'claim_ceiling':'OSA_INIT_AND_COMMAND_SMOKE_TEST_ONLY_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY',
-              'minimal_download_ok_count':sum(1 for r in rows if r['ok']),
-              'minimal_download_total_count':len(rows),
-              'final_status':'R21AX_R7G_R2V_OSA_INIT_SMOKE_TEST_RAN_LIGHT_ARTIFACT_READY_FOR_AUDIT_NO_511_YET'
+              "run_id": "ACIRM_R21AX_R7G_R2W_OSA_ISDC_ENV_PFILES_REPAIR_AND_PARAM_SMOKE_TEST_LIGHT",
+              "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "claim_ceiling": "OSA_ENV_REPAIR_SMOKE_TEST_ONLY_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
+              "minimal_download_ok_count": sum(1 for r in rows if r["ok"]),
+              "minimal_download_total_count": len(rows),
+              "final_status": "R21AX_R7G_R2W_MINIMAL_DATA_DOWNLOADED_READY_FOR_ENV_REPAIR_SMOKE_NO_511_YET",
           }
 
-          with open(out / 'R2V_SMOKE_TEST_SUMMARY.json','w',encoding='utf-8') as f:
+          with open(out / "R2W_PRE_SMOKE_SUMMARY.json", "w", encoding="utf-8") as f:
               json.dump(summary, f, indent=2, sort_keys=True)
 
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Run DAL verify smoke test inside OSA container on downloaded SWG
+      - name: Run OSA environment repair smoke tests
         continue-on-error: true
         run: |
           {
-            echo "DAL verify smoke test with mounted data"
-            docker run --rm -v "$PWD/ACIRM_R21AX_R7G_R2V_RESULTS/data:/data" integralsw/osa:latest bash -lc '
-              set +e
-              source /opt/osa/bin/isdc_init_env.sh || true
-              export PATH=/opt/osa/bin:$PATH
-              echo "PATH=$PATH"
-              echo "find mounted files"
-              find /data -maxdepth 5 -type f -printf "%p %s\n" | sort || true
-              echo "dal_verify on swg.fits"
-              dal_verify /data/scw/2504/250400090010.001/swg.fits 2>&1 | head -200 || true
-              echo "og_create empty/help probe"
-              og_create 2>&1 | head -120 || true
-            ' || true
-          } | tee ACIRM_R21AX_R7G_R2V_RESULTS/logs/dal_verify_mounted_data_smoke_test.log
+            echo "Run OSA environment repair smoke tests"
+            docker run --rm \
+              -v "$PWD/ACIRM_R21AX_R7G_R2W_RESULTS/data:/data" \
+              -v "$PWD/ACIRM_R21AX_R7G_R2W_RESULTS/logs:/logs" \
+              integralsw/osa:latest bash -lc '
+                set +e
+
+                echo "inside container"
+                uname -a || true
+                echo ""
+
+                mkdir -p /tmp/acirm_pfiles
+                mkdir -p /tmp/acirm_work
+                mkdir -p /tmp/acirm_rep
+
+                echo "candidate system pfiles"
+                PAR_DIRS=$(find /opt/osa -type f -name "*.par" 2>/dev/null | sed "s#/[^/]*$##" | sort -u | tr "\n" ":")
+                echo "PAR_DIRS=$PAR_DIRS"
+
+                export ISDC_ENV=/opt/osa
+                export REP_BASE_PROD=/tmp/acirm_rep
+                export COMMONLOGFILE=/tmp/acirm_work/commonlog.txt
+                export PATH=/opt/osa/bin:$PATH
+
+                if [ -d /opt/osa/lib ]; then
+                  export LD_LIBRARY_PATH=/opt/osa/lib:${LD_LIBRARY_PATH:-}
+                fi
+
+                if [ -d /opt/osa/lib64 ]; then
+                  export LD_LIBRARY_PATH=/opt/osa/lib64:${LD_LIBRARY_PATH:-}
+                fi
+
+                if [ -n "$PAR_DIRS" ]; then
+                  export PFILES="/tmp/acirm_pfiles;$PAR_DIRS"
+                else
+                  export PFILES="/tmp/acirm_pfiles;/opt/osa/bin"
+                fi
+
+                echo "before source:"
+                echo "ISDC_ENV=$ISDC_ENV"
+                echo "PFILES=$PFILES"
+                echo "PATH=$PATH"
+                echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}"
+                echo "REP_BASE_PROD=$REP_BASE_PROD"
+                echo ""
+
+                echo "try source isdc_init_env.sh"
+                source /opt/osa/bin/isdc_init_env.sh || true
+                echo ""
+
+                echo "try source isdc_setup_env.sh"
+                source /opt/osa/bin/isdc_setup_env.sh || true
+                echo ""
+
+                export ISDC_ENV=${ISDC_ENV:-/opt/osa}
+                export PATH=/opt/osa/bin:$PATH
+
+                if [ -n "$PAR_DIRS" ]; then
+                  export PFILES="/tmp/acirm_pfiles;$PAR_DIRS"
+                else
+                  export PFILES="/tmp/acirm_pfiles;/opt/osa/bin"
+                fi
+
+                echo "after repair/source:"
+                env | sort | grep -E "^(ISDC|OSA|REP|PFILES|PATH|LD_LIBRARY_PATH|COMMONLOGFILE|HEADAS|CFITSIO)" || true
+                echo ""
+
+                echo "command visibility"
+                for c in og_create spi_science_analysis spiros spimodfit dal_verify fkeyprint ftcopy; do
+                  echo "--- $c ---"
+                  command -v "$c" || true
+                  which "$c" || true
+                done
+                echo ""
+
+                echo "parameter/help probes after repair"
+                for c in og_create spi_science_analysis spiros spimodfit dal_verify; do
+                  echo "===== $c probe ====="
+                  timeout 30 "$c" 2>&1 | head -120 || true
+                  echo ""
+                done
+                echo ""
+
+                echo "mounted files"
+                find /data -maxdepth 5 -type f -printf "%p %s\n" | sort || true
+                echo ""
+
+                echo "dal_verify swg.fits"
+                dal_verify /data/scw/2504/250400090010.001/swg.fits 2>&1 | head -240 || true
+                echo ""
+
+                echo "fkeyprint swg.fits primary"
+                fkeyprint /data/scw/2504/250400090010.001/swg.fits 2>&1 | head -120 || true
+                echo ""
+
+                echo "og_create parameter smoke probe"
+                og_create 2>&1 | head -180 || true
+                echo ""
+
+                echo "commonlog tail"
+                cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -200 || true
+              '
+          } | tee ACIRM_R21AX_R7G_R2W_RESULTS/logs/osa_env_pfiles_repair_smoke_test.log
+
+      - name: Analyze R2W smoke logs
+        run: |
+          python3 - <<'PY'
+          import json, time
+          from pathlib import Path
+
+          out = Path("ACIRM_R21AX_R7G_R2W_RESULTS")
+          log_path = out / "logs" / "osa_env_pfiles_repair_smoke_test.log"
+          txt = log_path.read_text(errors="replace") if log_path.exists() else ""
+
+          checks = {
+              "log_exists": log_path.exists(),
+              "isdc_env_missing_seen": "ISDC_ENV is not set" in txt or "env. variable ISDC_ENV is not set" in txt,
+              "parameter_init_error_seen": "Parameter initialization error" in txt or "status -3003" in txt,
+              "og_create_visible": "/opt/osa/bin/og_create" in txt or "og_create" in txt,
+              "dal_verify_invoked": "dal_verify swg.fits" in txt,
+              "fkeyprint_invoked": "fkeyprint swg.fits primary" in txt,
+              "mounted_swg_seen": "/data/scw/2504/250400090010.001/swg.fits" in txt,
+              "pfiles_set_seen": "PFILES=" in txt,
+              "isdc_env_set_seen": "ISDC_ENV=" in txt,
+          }
+
+          if checks["mounted_swg_seen"] and checks["dal_verify_invoked"] and not checks["isdc_env_missing_seen"]:
+              status = "R21AX_R7G_R2W_ENV_REPAIR_SMOKE_REACHED_DAL_LAYER_NO_511_YET_REVIEW_REQUIRED"
+          elif checks["isdc_env_missing_seen"] or checks["parameter_init_error_seen"]:
+              status = "R21AX_R7G_R2W_ENV_REPAIR_STILL_INCOMPLETE_NO_511_NO_PHYSICAL_NULL"
+          else:
+              status = "R21AX_R7G_R2W_SMOKE_LOGS_READY_FOR_AUDIT_NO_511_NO_PHYSICAL_NULL"
+
+          summary = {
+              "run_id": "ACIRM_R21AX_R7G_R2W_OSA_ISDC_ENV_PFILES_REPAIR_AND_PARAM_SMOKE_TEST_LIGHT",
+              "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "claim_ceiling": "OSA_ENV_REPAIR_SMOKE_TEST_ONLY_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
+              "checks": checks,
+              "final_status": status,
+          }
+
+          with open(out / "R2W_SMOKE_TEST_SUMMARY.json", "w", encoding="utf-8") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          print(json.dumps(summary, indent=2))
+          PY
 
       - name: Build LIGHT audit package only
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS/logs
-          cp -r ACIRM_R21AX_R7G_R2V_RESULTS/logs/* ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS/logs/ || true
-          cp ACIRM_R21AX_R7G_R2V_RESULTS/*.json ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS/ || true
-          cp ACIRM_R21AX_R7G_R2V_RESULTS/*.csv ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS/ || true
+          mkdir -p ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/logs
 
-          echo "Heavy data excluded from artifact; minimal smoke files were downloaded only on runner." > ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          cp -r ACIRM_R21AX_R7G_R2W_RESULTS/logs/* ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/logs/ || true
+          cp ACIRM_R21AX_R7G_R2W_RESULTS/*.json ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R2W_RESULTS/*.csv ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/ || true
 
-          du -h ACIRM_R21AX_R7G_R2V_RESULTS/data > ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS/data_size_report.txt || true
-          find ACIRM_R21AX_R7G_R2V_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS/data_file_list.csv || true
+          echo "Heavy FITS data excluded from phone artifact." > ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "This is OSA environment/PFILES smoke-test only." >> ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "No 511 keV metric is computed here." >> ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
 
-          cat > ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS/R2V_CLAIM_BOUNDARY.txt <<'EOF'
-          ACIRM R2V claim boundary:
-          - OSA init and command smoke test only.
+          du -h ACIRM_R21AX_R7G_R2W_RESULTS/data > ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/data_size_report.txt || true
+          find ACIRM_R21AX_R7G_R2W_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/data_file_list.csv || true
+
+          cat > ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/R2W_CLAIM_BOUNDARY.txt <<'EOF'
+          ACIRM R2W claim boundary:
+          - OSA ISDC_ENV/PFILES repair smoke test only.
           - Minimal data/DAL smoke test only.
           - No 511 keV metric is computed.
           - Not OSA proof and not discovery.
+          - Any environment failure is not a physical null.
           EOF
 
-          zip -r ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS
-          sha256sum ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS.zip.sha256.txt
-          cat ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS.zip.sha256.txt
+          cat > ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS/R2W_NEXT_STEP.txt <<'EOF'
+          Upload ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS.zip to ChatGPT.
+          Do not upload heavy FITS data.
+          The next step depends on whether ISDC_ENV/PFILES repair reached a clean DAL/OSA command layer.
+          EOF
 
-      - name: Upload ACIRM R2V LIGHT artifact
+          zip -r ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS
+          sha256sum ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS.zip.sha256.txt
+          cat ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS.zip.sha256.txt
+
+      - name: Upload ACIRM R2W LIGHT artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R2V_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R2W_LIGHT_RESULTS.zip.sha256.txt
