@@ -1,4 +1,4 @@
-name: ACIRM R2U OSA remote repair preflight
+name: ACIRM R2U LIGHT OSA remote repair preflight
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  acirm-r2u-osa-repair-preflight:
+  acirm-r2u-light-osa-repair-preflight:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -16,20 +16,30 @@ jobs:
         run: |
           mkdir -p ACIRM_R21AX_R7G_R2U_RESULTS/logs
           mkdir -p ACIRM_R21AX_R7G_R2U_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS
 
       - name: System and network diagnostics
         run: |
           {
-            echo "ACIRM R2U GitHub Actions OSA remote repair preflight"
+            echo "ACIRM R2U LIGHT GitHub Actions OSA remote repair preflight"
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "claim_ceiling=REMOTE_OSA_PREFLIGHT_REPAIR_ONLY_NOT_OSA_PROOF_NOT_DISCOVERY"
+            echo ""
+            echo "System:"
             uname -a || true
+            echo ""
+            echo "Disk:"
             df -h || true
+            echo ""
+            echo "Memory:"
             free -h || true
+            echo ""
             echo "DNS HEASARC:"
             getent hosts heasarc.gsfc.nasa.gov || true
+            echo ""
             echo "curl IPv4 HEASARC:"
             curl -4 -I -L --connect-timeout 30 --max-time 90 https://heasarc.gsfc.nasa.gov/FTP/integral/data/ || true
+            echo ""
             echo "curl IPv6 HEASARC:"
             curl -6 -I -L --connect-timeout 30 --max-time 90 https://heasarc.gsfc.nasa.gov/FTP/integral/data/ || true
           } | tee ACIRM_R21AX_R7G_R2U_RESULTS/logs/system_network_diagnostics.log
@@ -42,17 +52,21 @@ jobs:
             docker --version || true
             docker info || true
 
+            echo ""
             echo "Pull integralsw/osa:latest"
             docker pull integralsw/osa:latest || true
 
+            echo ""
             echo "Deep scan inside integralsw/osa"
             docker run --rm integralsw/osa:latest bash -lc '
               echo "inside container"
               uname -a || true
               echo "PATH=$PATH"
+              echo ""
               echo "environment preview"
               env | sort | head -200 || true
 
+              echo ""
               echo "direct command check"
               for c in og_create spi_science_analysis spiros spimodfit dal_verify fkeyprint ftcopy; do
                 echo "--- $c ---"
@@ -61,12 +75,15 @@ jobs:
                 "$c" --version || true
               done
 
+              echo ""
               echo "find OSA executables"
               find / -type f \( -name og_create -o -name spi_science_analysis -o -name spiros -o -name spimodfit -o -name dal_verify \) 2>/dev/null | head -200 || true
 
+              echo ""
               echo "find OSA init scripts"
               find / -maxdepth 6 -type f \( -iname "*osa*" -o -iname "*isdc*" -o -iname "*init*" -o -iname "*heasoft*" \) 2>/dev/null | head -300 || true
 
+              echo ""
               echo "find OSA directories"
               find / -maxdepth 6 -type d \( -iname "*osa*" -o -iname "*isdc*" -o -iname "bin" \) 2>/dev/null | head -300 || true
             ' || true
@@ -75,16 +92,17 @@ jobs:
       - name: Download target SCW products using curl IPv4 retry
         run: |
           python3 - <<'PY'
-          import csv, hashlib, json, os, subprocess, time
+          import csv, hashlib, json, subprocess, time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R2U_GITHUB_ACTIONS_IPV4_CURL_RETRY_AND_OSA_INIT_SCAN"
+          RUN_ID = "ACIRM_R21AX_R7G_R2U_GITHUB_ACTIONS_IPV4_CURL_RETRY_AND_OSA_INIT_SCAN_LIGHT"
           out = Path("ACIRM_R21AX_R7G_R2U_RESULTS")
           data = out / "data"
           data.mkdir(parents=True, exist_ok=True)
 
           base = "https://heasarc.gsfc.nasa.gov/FTP/integral/data"
           rev = "2504"
+
           scws = [
               "250400090010",
               "250400020010",
@@ -95,6 +113,7 @@ jobs:
               "250400060010",
               "250400050010",
           ]
+
           products = [
               "swg.fits",
               "spi_oper.fits.gz",
@@ -126,6 +145,7 @@ jobs:
               ]
 
               p = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
               if p.returncode != 0:
                   return False, p.returncode, p.stdout[-3000:]
 
@@ -134,10 +154,12 @@ jobs:
 
               if dest.exists():
                   dest.unlink()
+
               Path(tmp).rename(dest)
               return True, p.returncode, p.stdout[-3000:]
 
           rows = []
+
           for scw in scws:
               for product in products:
                   url = f"{base}/scw/{rev}/{scw}.001/{product}"
@@ -182,16 +204,18 @@ jobs:
               w.writerows(rows)
 
           ok_count = sum(1 for r in rows if r["ok"])
+
           summary = {
               "run_id": RUN_ID,
               "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "claim_ceiling": "REMOTE_OSA_PREFLIGHT_REPAIR_ONLY_NOT_OSA_PROOF_NOT_DISCOVERY",
               "download_ok_count": ok_count,
               "download_total_count": len(rows),
+              "heavy_fits_data_excluded_from_artifact": True,
               "final_status": (
-                  "R21AX_R7G_R2U_REMOTE_IPV4_FETCH_OK_READY_FOR_OSA_NEXT_STAGE_NO_511_YET"
+                  "R21AX_R7G_R2U_REMOTE_IPV4_FETCH_OK_LIGHT_ARTIFACT_READY_FOR_AUDIT_NO_511_YET"
                   if ok_count == len(rows)
-                  else "R21AX_R7G_R2U_REMOTE_IPV4_FETCH_PARTIAL_OR_FAILED_NO_PHYSICAL_NULL"
+                  else "R21AX_R7G_R2U_REMOTE_IPV4_FETCH_PARTIAL_OR_FAILED_LIGHT_ARTIFACT_NO_PHYSICAL_NULL"
               ),
           }
 
@@ -246,33 +270,48 @@ jobs:
               )
           PY
 
-      - name: Build final claim boundary
+      - name: Build LIGHT audit package only
         run: |
-          cat > ACIRM_R21AX_R7G_R2U_RESULTS/R2U_CLAIM_BOUNDARY.txt <<'EOF'
+          mkdir -p ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS
+          mkdir -p ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/logs
+
+          cp -r ACIRM_R21AX_R7G_R2U_RESULTS/logs/* ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/logs/ || true
+          cp ACIRM_R21AX_R7G_R2U_RESULTS/*.json ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R2U_RESULTS/*.csv ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R2U_RESULTS/*.txt ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/ || true
+
+          echo "Heavy FITS data were downloaded on the GitHub runner but excluded from the phone artifact." > ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "This artifact is intentionally light for phone upload." >> ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "No 511 keV proof is claimed here." >> ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+
+          du -h ACIRM_R21AX_R7G_R2U_RESULTS/data > ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/heavy_data_size_report.txt || true
+          find ACIRM_R21AX_R7G_R2U_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/heavy_data_file_list.csv || true
+
+          cat > ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/R2U_CLAIM_BOUNDARY.txt <<'EOF'
           ACIRM R2U claim boundary:
           - This is remote OSA runtime/data preflight repair only.
           - It computes no 511 keV physical metric.
           - It is not OSA proof.
           - It is not 511 keV discovery.
           - Network/runtime failure is not a physical null.
+          - Heavy FITS data are excluded from this artifact for phone upload.
           EOF
 
-          cat > ACIRM_R21AX_R7G_R2U_RESULTS/R2U_NEXT_STEP.txt <<'EOF'
+          cat > ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS/R2U_NEXT_STEP.txt <<'EOF'
           Next:
-          Upload ACIRM_R21AX_R7G_R2U_RESULTS.zip to ChatGPT.
+          Upload ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS.zip to ChatGPT.
+          Do not upload the heavy 600MB artifact.
           Audit will decide whether R2V can attempt actual OSA execution or whether a different external Linux/OSA runner is required.
           EOF
 
-      - name: Package results
-        run: |
-          zip -r ACIRM_R21AX_R7G_R2U_RESULTS.zip ACIRM_R21AX_R7G_R2U_RESULTS
-          sha256sum ACIRM_R21AX_R7G_R2U_RESULTS.zip > ACIRM_R21AX_R7G_R2U_RESULTS.zip.sha256.txt
-          cat ACIRM_R21AX_R7G_R2U_RESULTS.zip.sha256.txt
+          zip -r ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS
+          sha256sum ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS.zip.sha256.txt
+          cat ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS.zip.sha256.txt
 
-      - name: Upload ACIRM R2U artifact
+      - name: Upload ACIRM R2U LIGHT artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R2U_RESULTS
+          name: ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R2U_RESULTS.zip
-            ACIRM_R21AX_R7G_R2U_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R2U_LIGHT_RESULTS.zip.sha256.txt
