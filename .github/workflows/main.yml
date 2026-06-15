@@ -1,0 +1,203 @@
+name: ACIRM R2T OSA remote preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  acirm-r2t-osa-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create result folders
+        run: |
+          mkdir -p ACIRM_R21AX_R7G_R2T_RESULTS
+          mkdir -p ACIRM_R21AX_R7G_R2T_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R2T_RESULTS/data
+
+      - name: System information
+        run: |
+          {
+            echo "ACIRM R2T GitHub Actions OSA remote preflight"
+            echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "runner_os=$RUNNER_OS"
+            echo "github_repository=$GITHUB_REPOSITORY"
+            echo "github_ref=$GITHUB_REF"
+            echo "claim_ceiling=REMOTE_OSA_PREFLIGHT_ONLY_NOT_OSA_PROOF_NOT_DISCOVERY"
+            echo ""
+            echo "uname:"
+            uname -a
+            echo ""
+            echo "disk:"
+            df -h
+            echo ""
+            echo "memory:"
+            free -h || true
+          } | tee ACIRM_R21AX_R7G_R2T_RESULTS/system_info.txt
+
+      - name: Check Docker
+        run: |
+          {
+            echo "Checking docker"
+            which docker || true
+            docker --version || true
+            docker info || true
+          } | tee ACIRM_R21AX_R7G_R2T_RESULTS/logs/docker_check.log
+
+      - name: Pull OSA Docker image
+        continue-on-error: true
+        run: |
+          {
+            echo "Pulling integralsw/osa"
+            docker pull integralsw/osa:latest
+          } | tee ACIRM_R21AX_R7G_R2T_RESULTS/logs/docker_pull_integralsw_osa.log
+
+      - name: Check OSA commands inside Docker
+        continue-on-error: true
+        run: |
+          {
+            echo "Checking OSA commands inside integralsw/osa"
+            docker run --rm integralsw/osa:latest bash -lc '
+              echo "inside container"
+              uname -a || true
+              which og_create || true
+              which spi_science_analysis || true
+              which spiros || true
+              which spimodfit || true
+              which dal_verify || true
+              og_create --version || true
+              spi_science_analysis --version || true
+              spiros --version || true
+              spimodfit --version || true
+            '
+          } | tee ACIRM_R21AX_R7G_R2T_RESULTS/logs/osa_command_check_inside_docker.log
+
+      - name: Download target INTEGRAL SCW products
+        run: |
+          python3 - <<'PY'
+          import os, csv, json, hashlib, time, urllib.request
+          from pathlib import Path
+
+          out = Path("ACIRM_R21AX_R7G_R2T_RESULTS")
+          data = out / "data"
+          data.mkdir(parents=True, exist_ok=True)
+
+          base = "https://heasarc.gsfc.nasa.gov/FTP/integral/data"
+          rev = "2504"
+          scws = [
+              "250400090010",
+              "250400020010",
+              "250400080010",
+              "250400030010",
+              "250400070021",
+              "250400040010",
+              "250400060010",
+              "250400050010",
+          ]
+          products = [
+              "swg.fits",
+              "spi_oper.fits.gz",
+              "spi_spectra.fits.gz",
+              "spi_gti.fits.gz",
+          ]
+
+          def sha256_file(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          rows = []
+          for scw in scws:
+              for product in products:
+                  url = f"{base}/scw/{rev}/{scw}.001/{product}"
+                  dest = data / "scw" / rev / f"{scw}.001" / product
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+
+                  row = {
+                      "scw_id": scw,
+                      "product": product,
+                      "url": url,
+                      "dest": str(dest),
+                      "ok": False,
+                      "bytes": 0,
+                      "sha256": "",
+                      "error": "",
+                  }
+
+                  try:
+                      if dest.exists() and dest.stat().st_size > 0:
+                          row["ok"] = True
+                          row["bytes"] = dest.stat().st_size
+                          row["sha256"] = sha256_file(dest)
+                      else:
+                          urllib.request.urlretrieve(url, dest)
+                          row["ok"] = True
+                          row["bytes"] = dest.stat().st_size
+                          row["sha256"] = sha256_file(dest)
+                  except Exception as e:
+                      row["error"] = repr(e)
+
+                  rows.append(row)
+                  print(row)
+
+          with open(out / "r2t_target_scw_download_manifest.csv", "w", newline="", encoding="utf-8") as f:
+              w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+              w.writeheader()
+              w.writerows(rows)
+
+          summary = {
+              "run_id": "ACIRM_R21AX_R7G_R2T_GITHUB_ACTIONS_OSA_REMOTE_RUNNER_FOR_PHONE",
+              "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "claim_ceiling": "REMOTE_OSA_PREFLIGHT_ONLY_NOT_OSA_PROOF_NOT_DISCOVERY",
+              "target_scw_count": len(scws),
+              "product_count": len(products),
+              "download_ok_count": sum(1 for r in rows if r["ok"]),
+              "download_total_count": len(rows),
+              "final_status": "R2T_REMOTE_PREFLIGHT_RAN_DOWNLOAD_AND_DOCKER_CHECK_LOGS_READY_FOR_AUDIT",
+          }
+
+          with open(out / "R2T_REMOTE_PREFLIGHT_SUMMARY.json", "w", encoding="utf-8") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - name: Create portable external runner files
+        run: |
+          cat > ACIRM_R21AX_R7G_R2T_RESULTS/R2T_CLAIM_BOUNDARY.txt <<'EOF'
+          ACIRM R2T claim boundary:
+          - This GitHub Actions run is remote preflight / environment check only.
+          - It does not establish OSA proof.
+          - It does not establish 511 keV discovery.
+          - Docker/OSA failure is an environment limitation, not a physical null.
+          - Full OSA/SPIMODFIT audit remains required.
+          EOF
+
+          cat > ACIRM_R21AX_R7G_R2T_RESULTS/R2T_NEXT_STEP.txt <<'EOF'
+          Next step:
+          Upload this artifact ZIP and SHA256 to ChatGPT for audit.
+          If Docker image and OSA commands are available, proceed to R2U/R2V execution design.
+          If Docker image or OSA commands fail, use external Linux/OSA runner route.
+          EOF
+
+      - name: Package results
+        run: |
+          zip -r ACIRM_R21AX_R7G_R2T_RESULTS.zip ACIRM_R21AX_R7G_R2T_RESULTS
+          sha256sum ACIRM_R21AX_R7G_R2T_RESULTS.zip > ACIRM_R21AX_R7G_R2T_RESULTS.zip.sha256.txt
+          cat ACIRM_R21AX_R7G_R2T_RESULTS.zip.sha256.txt
+
+      - name: Upload ACIRM R2T artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ACIRM_R21AX_R7G_R2T_RESULTS
+          path: |
+            ACIRM_R21AX_R7G_R2T_RESULTS.zip
+            ACIRM_R21AX_R7G_R2T_RESULTS.zip.sha256.txt
