@@ -1,4 +1,4 @@
-name: ACIRM R3I actual SPI511 obs_group execution fixed
+name: ACIRM R3J robust SPI511 obs_group execution with full error capture
 
 on:
   workflow_dispatch:
@@ -7,24 +7,24 @@ on:
       - main
 
 jobs:
-  acirm-r3i-actual-spi511-obs-group-execution-fixed:
+  acirm-r3j-robust-spi511-obs-group:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
       - name: Prepare folders
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R3I_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3I_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3I_RESULTS/work
-          mkdir -p ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS
+          mkdir -p ACIRM_R21AX_R7G_R3J_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3J_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3J_RESULTS/work
+          mkdir -p ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS
 
       - name: System diagnostics
         run: |
           {
-            echo "ACIRM R3I actual SPI511 obs_group execution fixed"
+            echo "ACIRM R3J robust SPI511 obs_group execution with full error capture"
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "claim_ceiling=ACTUAL_SPI511_OBS_GROUP_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF"
+            echo "claim_ceiling=ROBUST_SPI511_OBS_GROUP_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF"
             echo ""
             uname -a || true
             echo ""
@@ -34,7 +34,7 @@ jobs:
             echo ""
             echo "HEASARC IPv4 HTTPS probe"
             curl -4 -I -L --connect-timeout 30 --max-time 90 https://heasarc.gsfc.nasa.gov/FTP/integral/data/ || true
-          } | tee ACIRM_R21AX_R7G_R3I_RESULTS/logs/system_diagnostics.log
+          } | tee ACIRM_R21AX_R7G_R3J_RESULTS/logs/system_diagnostics.log
 
       - name: Pull OSA Docker image
         continue-on-error: true
@@ -46,12 +46,16 @@ jobs:
             echo ""
             echo "Pull integralsw/osa:latest"
             docker pull integralsw/osa:latest || true
-          } | tee ACIRM_R21AX_R7G_R3I_RESULTS/logs/docker_pull.log
+          } | tee ACIRM_R21AX_R7G_R3J_RESULTS/logs/docker_pull.log
 
-      - name: Assemble data, verify DAL, create OG, run SPI511 with obs_group
+      - name: Robust assemble DAL OG and SPI511 execution
         continue-on-error: true
         run: |
-          python3 - <<'PY'
+          set +e
+          mkdir -p ACIRM_R21AX_R7G_R3J_RESULTS/logs
+          echo "Starting R3J main Python execution" | tee ACIRM_R21AX_R7G_R3J_RESULTS/logs/main_execution.log
+
+          python3 -u <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3J_RESULTS/logs/main_execution.log
           import csv
           import gzip
           import hashlib
@@ -61,11 +65,12 @@ jobs:
           import shutil
           import subprocess
           import time
+          import traceback
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3I_ACTUAL_SPI511_OBS_GROUP_EXECUTION_FIXED"
+          RUN_ID = "ACIRM_R21AX_R7G_R3J_ROBUST_SPI511_OBS_GROUP_EXECUTION_FULL_CAPTURE"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3I_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3J_RESULTS")
           DATA = OUT / "data"
           LOGS = OUT / "logs"
           WORK = OUT / "work"
@@ -92,6 +97,10 @@ jobs:
           download_rows = []
           dal_iteration_rows = []
           missing_rows = []
+          command_rows = []
+
+          def now_utc():
+              return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
           def sha256_file(path):
               h = hashlib.sha256()
@@ -99,6 +108,17 @@ jobs:
                   for chunk in iter(lambda: f.read(1024 * 1024), b""):
                       h.update(chunk)
               return h.hexdigest()
+
+          def safe_sha(path):
+              try:
+                  p = Path(path)
+                  if p.exists() and p.is_file() and p.stat().st_size <= 50 * 1024 * 1024:
+                      return sha256_file(p)
+                  if p.exists() and p.is_file():
+                      return "SKIPPED_LARGE_FILE"
+              except Exception:
+                  return ""
+              return ""
 
           def is_gzip(path):
               try:
@@ -116,14 +136,15 @@ jobs:
                   return False
 
           def accept(path):
-              if not path.exists():
+              p = Path(path)
+              if not p.exists():
                   return False, "missing"
-              size = path.stat().st_size
+              size = p.stat().st_size
               if size <= 1024:
-                  return False, f"too_small_{size}"
-              if is_gzip(path):
+                  return False, "too_small_" + str(size)
+              if is_gzip(p):
                   return True, "gzip"
-              if is_fits(path):
+              if is_fits(p):
                   return True, "fits"
               return False, "not_fits_or_gzip"
 
@@ -133,17 +154,20 @@ jobs:
               return Path(x).name
 
           def materialize(tmp, final_path):
+              final_path = Path(final_path)
               final_path.parent.mkdir(parents=True, exist_ok=True)
+
               if is_gzip(tmp):
                   with gzip.open(tmp, "rb") as src, open(final_path, "wb") as dst:
                       shutil.copyfileobj(src, dst)
-                  tmp.unlink(missing_ok=True)
+                  Path(tmp).unlink(missing_ok=True)
               else:
                   if final_path.exists():
                       final_path.unlink()
-                  tmp.rename(final_path)
+                  Path(tmp).rename(final_path)
 
           def curl_download(url, tmp):
+              tmp = Path(tmp)
               if tmp.exists():
                   tmp.unlink()
 
@@ -185,18 +209,18 @@ jobs:
               if logical_path.startswith("/data/"):
                   rel = logical_path[len("/data/"):]
                   for base in BASES:
-                      candidates.append(f"{base}/{rel}")
+                      candidates.append(base + "/" + rel)
                       if rel.endswith(".fits") and not rel.endswith(".fits.gz"):
-                          candidates.append(f"{base}/{rel}.gz")
+                          candidates.append(base + "/" + rel + ".gz")
                       if rel.endswith(".fits.gz"):
-                          candidates.append(f"{base}/{rel[:-3]}")
+                          candidates.append(base + "/" + rel[:-3])
                   return candidates
 
               name = norm_name(logical_path)
 
               roots = [
-                  f"scw/{REV}/{SCW}.001",
-                  f"aux/adp/{REV}.001",
+                  "scw/" + REV + "/" + SCW + ".001",
+                  "aux/adp/" + REV + ".001",
                   "aux/adp",
                   "aux",
                   "idx",
@@ -206,11 +230,11 @@ jobs:
 
               for base in BASES:
                   for root in roots:
-                      candidates.append(f"{base}/{root}/{name}")
+                      candidates.append(base + "/" + root + "/" + name)
                       if name.endswith(".fits") and not name.endswith(".fits.gz"):
-                          candidates.append(f"{base}/{root}/{name}.gz")
+                          candidates.append(base + "/" + root + "/" + name + ".gz")
                       if name.endswith(".fits.gz"):
-                          candidates.append(f"{base}/{root}/{name[:-3]}")
+                          candidates.append(base + "/" + root + "/" + name[:-3])
 
               return candidates
 
@@ -238,7 +262,7 @@ jobs:
               urls = candidate_urls_for_logical_path(logical_path)
 
               for i, url in enumerate(urls, start=1):
-                  tmp = final_path.parent / f".download_{final_name}_{i}.part"
+                  tmp = final_path.parent / (".download_" + final_name + "_" + str(i) + ".part")
 
                   row = {
                       "source_iteration": source_iteration,
@@ -322,10 +346,10 @@ jobs:
               ]
 
               for x in scw_seed:
-                  download_logical(f"/data/scw/{REV}/{SCW}.001/{x}", "initial_scw_seed", 0)
+                  download_logical("/data/scw/" + REV + "/" + SCW + ".001/" + x, "initial_scw_seed", 0)
 
               for x in aux_adp_seed:
-                  download_logical(f"/data/aux/adp/{REV}.001/{x}", "initial_aux_adp_seed", 0)
+                  download_logical("/data/aux/adp/" + REV + ".001/" + x, "initial_aux_adp_seed", 0)
 
           def discover_members_from_swg():
               swg_path = SCW_DIR / "swg.fits"
@@ -340,22 +364,22 @@ jobs:
                   for ref in sorted(set(found)):
                       name = norm_name(ref)
                       if name and name != "swg.fits":
-                          refs.append(f"/data/scw/{REV}/{SCW}.001/{name}")
+                          refs.append("/data/scw/" + REV + "/" + SCW + ".001/" + name)
               except Exception as e:
-                  refs.append(f"ERROR_READING_SWG:{repr(e)}")
+                  refs.append("ERROR_READING_SWG:" + repr(e))
 
               return refs
 
           def run_container_script(script, name, timeout_seconds):
-              log_path = LOGS / f"{name}.log"
+              log_path = LOGS / (name + ".log")
 
               cmd = [
                   "docker",
                   "run",
                   "--rm",
-                  "-v", f"{os.getcwd()}/ACIRM_R21AX_R7G_R3I_RESULTS/data:/data",
-                  "-v", f"{os.getcwd()}/ACIRM_R21AX_R7G_R3I_RESULTS/work:/work",
-                  "-v", f"{os.getcwd()}/ACIRM_R21AX_R7G_R3I_RESULTS/logs:/logs",
+                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3J_RESULTS/data:/data",
+                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3J_RESULTS/work:/work",
+                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3J_RESULTS/logs:/logs",
                   "integralsw/osa:latest",
                   "bash",
                   "-lc",
@@ -373,16 +397,28 @@ jobs:
                   txt = p.stdout
                   rc = p.returncode
               except subprocess.TimeoutExpired as e:
-                  txt = (e.stdout or "") + "\nACIRM_TIMEOUT_EXPIRED\n"
+                  raw = e.stdout or ""
+                  if isinstance(raw, bytes):
+                      raw = raw.decode("utf-8", "replace")
+                  txt = raw + "\nACIRM_TIMEOUT_EXPIRED\n"
                   rc = 124
+              except Exception:
+                  txt = traceback.format_exc()
+                  rc = 999
 
               log_path.write_text(txt, encoding="utf-8", errors="replace")
+              command_rows.append({
+                  "name": name,
+                  "returncode": rc,
+                  "log_path": str(log_path),
+                  "log_bytes": len(txt.encode("utf-8", "replace")),
+              })
               return rc, txt
 
           def osa_env_prefix():
               return '''
                 set +e
-                mkdir -p /tmp/acirm_pfiles /tmp/acirm_work /tmp/acirm_rep /work/osa_products /work/og /work/logs
+                mkdir -p /tmp/acirm_pfiles /tmp/acirm_work /tmp/acirm_rep /work/osa_products /work/og /work/logs /work/products
                 cp -f /opt/osa/pfiles/*.par /tmp/acirm_pfiles/ 2>/dev/null || true
 
                 export ISDC_ENV=/opt/osa
@@ -409,10 +445,10 @@ jobs:
               '''
 
           def run_dal_verify(iteration):
-              script = osa_env_prefix() + f'''
-                TARGET=/data/scw/{REV}/{SCW}.001/swg.fits
+              script = osa_env_prefix() + '''
+                TARGET=/data/scw/2504/250400090010.001/swg.fits
 
-                echo "ACIRM_R3I_DAL_ITERATION={iteration}"
+                echo "ACIRM_R3J_DAL_ITERATION=''' + str(iteration) + '''"
                 echo "environment"
                 env | sort | grep -E "^(ISDC|OSA|REP|PFILES|PATH|LD_LIBRARY_PATH|COMMONLOGFILE|HEADAS|CFITSIO)" || true
                 echo ""
@@ -426,7 +462,7 @@ jobs:
                 cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -800 || true
               '''
 
-              rc, txt = run_container_script(script, f"dal_verify_iteration_{iteration:02d}", 720)
+              rc, txt = run_container_script(script, "dal_verify_iteration_" + str(iteration).zfill(2), 720)
               return txt
 
           def parse_missing_from_dal_log(txt):
@@ -462,15 +498,15 @@ jobs:
                       ]
 
                       if name.startswith("orbit") or "attitude" in name or "pointing" in name or name in aux_names:
-                          filtered.append(f"/data/aux/adp/{REV}.001/{name}")
+                          filtered.append("/data/aux/adp/" + REV + ".001/" + name)
                       else:
-                          filtered.append(f"/data/scw/{REV}/{SCW}.001/{name}")
+                          filtered.append("/data/scw/" + REV + "/" + SCW + ".001/" + name)
 
               return sorted(set(filtered))
 
           def run_command_discovery():
               script = osa_env_prefix() + '''
-                echo "OSA command discovery R3I"
+                echo "OSA command discovery R3J"
                 echo ""
                 echo "PATH=$PATH"
                 echo ""
@@ -485,23 +521,23 @@ jobs:
                 echo "og_create.par"
                 cat /opt/osa/pfiles/og_create.par 2>/dev/null || true
               '''
-              return run_container_script(script, "r3i_command_discovery", 240)
+              return run_container_script(script, "r3j_command_discovery", 240)
 
           def run_actual_spi511_obs_group():
-              script = osa_env_prefix() + f'''
+              script = osa_env_prefix() + '''
                 set +e
 
-                TARGET=/data/scw/{REV}/{SCW}.001/swg.fits
+                TARGET=/data/scw/2504/250400090010.001/swg.fits
                 mkdir -p /work/og /work/products /work/logs /work/run
 
                 echo "$TARGET" > /work/scwlist.txt
 
-                echo "ACIRM R3I actual SPI511 obs_group execution"
+                echo "ACIRM R3J actual SPI511 obs_group execution"
                 echo "TARGET=$TARGET"
                 echo ""
 
                 echo "Step 1: create SPI observation group"
-                timeout 900 og_create idxSwg="$TARGET" ogid=ACIRM_R3I baseDir=/work/og instrument=SPI 2>&1 | tee /work/logs/og_create_r3i.log || true
+                timeout 900 og_create idxSwg="$TARGET" ogid=ACIRM_R3J baseDir=/work/og instrument=SPI 2>&1 | tee /work/logs/og_create_r3j.log || true
 
                 echo ""
                 echo "Step 2: list OG products"
@@ -524,16 +560,16 @@ jobs:
                 PAR=/opt/osa/pfiles/spi_science_analysis.par
 
                 echo ""
-                echo "Step 3: validate spi_science_analysis parameters"
+                echo "Step 3: parameter file scan"
                 echo "PAR=$PAR"
-                grep -E "^(obs_group|spibounds_regions|spibounds_nbins|spibounds|energy|out|result|run|og)" "$PAR" 2>/dev/null || true
+                cat "$PAR" 2>/dev/null | head -220 || true
 
                 has_par() {
                   grep -q -E "^ *$1[,) ]" "$PAR" 2>/dev/null
                 }
 
                 if [ -z "$OG_FILE" ]; then
-                  echo "ACIRM_R3I_NO_OG_FILE_CREATED"
+                  echo "ACIRM_R3J_NO_OG_FILE_CREATED"
                 else
                   cd /work/products || exit 0
 
@@ -542,7 +578,7 @@ jobs:
                   if has_par obs_group; then
                     CMD1="$CMD1 obs_group=$OG_FILE"
                   else
-                    echo "ACIRM_R3I_MISSING_REQUIRED_PARAMETER_obs_group_IN_PAR_FILE"
+                    echo "ACIRM_R3J_MISSING_REQUIRED_PARAMETER_obs_group_IN_PAR_FILE"
                   fi
 
                   if has_par spibounds_regions; then
@@ -580,11 +616,11 @@ jobs:
 
                 echo ""
                 echo "Step 6: products after SPI attempts"
-                find /work -maxdepth 9 -type f -printf "%p %s\\n" | sort | tee /work/logs/work_files_after_r3i_spi_attempts.txt || true
+                find /work -maxdepth 9 -type f -printf "%p %s\\n" | sort | tee /work/logs/work_files_after_r3j_spi_attempts.txt || true
 
                 echo ""
                 echo "Step 7: selected text hits"
-                grep -R -n -E "508|511|514|490|500|522|532|PIL_BOGUS_CMDLINE|status|error|Error|ERROR|spi|spectrum|PHA|RMF|ARF" /work/logs /work/products 2>/dev/null | head -1000 | tee /work/logs/r3i_selected_text_hits.txt || true
+                grep -R -n -E "508|511|514|490|500|522|532|PIL_BOGUS_CMDLINE|status|error|Error|ERROR|spi|spectrum|PHA|RMF|ARF" /work/logs /work/products 2>/dev/null | head -1200 | tee /work/logs/r3j_selected_text_hits.txt || true
 
                 echo ""
                 echo "Copy /work/logs to /logs"
@@ -594,7 +630,7 @@ jobs:
                 echo "commonlog tail"
                 cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -1200 || true
               '''
-              return run_container_script(script, "r3i_actual_spi511_obs_group_execution", 5400)
+              return run_container_script(script, "r3j_actual_spi511_obs_group_execution", 5400)
 
           def write_csv(path, rows, fieldnames):
               with open(path, "w", newline="", encoding="utf-8") as f:
@@ -605,305 +641,358 @@ jobs:
                           r.setdefault(k, "")
                       w.writerow(r)
 
-          print("R3I: seed initial files")
-          seed_initial_files()
+          def list_files(root):
+              rows = []
+              root = Path(root)
+              if not root.exists():
+                  return rows
+              for p in sorted(root.rglob("*")):
+                  if p.is_file():
+                      rows.append({
+                          "path": str(p),
+                          "bytes": p.stat().st_size,
+                          "sha256": safe_sha(p),
+                      })
+              return rows
 
-          print("R3I: discover members from swg")
-          for ref in discover_members_from_swg():
-              if ref.startswith("ERROR_"):
-                  missing_rows.append({
-                      "iteration": 0,
-                      "missing_ref": ref,
-                      "download_ok": False,
-                      "category": "swg_parse_error",
-                  })
-              else:
-                  ok = download_logical(ref, "swg_regex_discovered_member", 0)
-                  missing_rows.append({
-                      "iteration": 0,
-                      "missing_ref": ref,
-                      "download_ok": ok,
-                      "category": "swg_regex_discovered_member",
-                  })
+          def main():
+              print("R3J main started at", now_utc())
 
-          max_iterations = 20
-          dependency_status = "NOT_STARTED"
-          repeated_guard = set()
+              print("R3J: seed initial files")
+              seed_initial_files()
 
-          for iteration in range(1, max_iterations + 1):
-              print(f"R3I: DAL iteration {iteration}")
-              txt = run_dal_verify(iteration)
+              print("R3J: discover members from swg")
+              for ref in discover_members_from_swg():
+                  if ref.startswith("ERROR_"):
+                      missing_rows.append({
+                          "iteration": 0,
+                          "missing_ref": ref,
+                          "download_ok": False,
+                          "category": "swg_parse_error",
+                      })
+                  else:
+                      ok = download_logical(ref, "swg_regex_discovered_member", 0)
+                      missing_rows.append({
+                          "iteration": 0,
+                          "missing_ref": ref,
+                          "download_ok": ok,
+                          "category": "swg_regex_discovered_member",
+                      })
 
-              dal_file_not_accessible = ("DAL_FILE_NOT_ACCESSIBLE" in txt) or ("status -2004" in txt)
-              isdc_env_missing = ("ISDC_ENV is not set" in txt) or ("env. variable ISDC_ENV is not set" in txt)
-              parameter_init_error = ("Parameter initialization error" in txt) or ("status -3003" in txt)
-              missing = parse_missing_from_dal_log(txt)
+              max_iterations = 20
+              dependency_status = "NOT_STARTED"
+              repeated_guard = set()
 
-              dal_iteration_rows.append({
-                  "iteration": iteration,
-                  "dal_file_not_accessible": dal_file_not_accessible,
-                  "isdc_env_missing": isdc_env_missing,
-                  "parameter_init_error": parameter_init_error,
-                  "missing_count": len(missing),
-                  "missing_refs_joined": "|".join(missing),
-              })
+              for iteration in range(1, max_iterations + 1):
+                  print("R3J: DAL iteration", iteration)
+                  txt = run_dal_verify(iteration)
 
-              if isdc_env_missing or parameter_init_error:
-                  dependency_status = "OSA_ENV_OR_PARAMETER_REGRESSION_NO_511_NO_PHYSICAL_NULL"
-                  break
+                  dal_file_not_accessible = ("DAL_FILE_NOT_ACCESSIBLE" in txt) or ("status -2004" in txt)
+                  isdc_env_missing = ("ISDC_ENV is not set" in txt) or ("env. variable ISDC_ENV is not set" in txt)
+                  parameter_init_error = ("Parameter initialization error" in txt) or ("status -3003" in txt)
+                  missing = parse_missing_from_dal_log(txt)
 
-              if not dal_file_not_accessible:
-                  dependency_status = "DAL_DEPENDENCIES_RESOLVED_READY_FOR_SPI511_OBS_GROUP"
-                  break
-
-              if not missing:
-                  dependency_status = "DAL_FILE_NOT_ACCESSIBLE_BUT_NO_PARSEABLE_MISSING_REFERENCE"
-                  break
-
-              key = tuple(missing)
-
-              if key in repeated_guard:
-                  dependency_status = "REPEATED_MISSING_REFERENCE_AFTER_DOWNLOAD_ATTEMPTS"
-                  break
-
-              repeated_guard.add(key)
-
-              any_new_ok = False
-
-              for ref in missing:
-                  ok = download_logical(ref, "dal_missing_auto_resolve", iteration)
-                  any_new_ok = any_new_ok or ok
-                  missing_rows.append({
+                  dal_iteration_rows.append({
                       "iteration": iteration,
-                      "missing_ref": ref,
-                      "download_ok": ok,
-                      "category": "dal_missing_auto_resolve",
+                      "dal_file_not_accessible": dal_file_not_accessible,
+                      "isdc_env_missing": isdc_env_missing,
+                      "parameter_init_error": parameter_init_error,
+                      "missing_count": len(missing),
+                      "missing_refs_joined": "|".join(missing),
                   })
 
-              if not any_new_ok:
-                  dependency_status = "UNABLE_TO_DOWNLOAD_NEXT_MISSING_REFERENCES"
-                  break
+                  if isdc_env_missing or parameter_init_error:
+                      dependency_status = "OSA_ENV_OR_PARAMETER_REGRESSION_NO_511_NO_PHYSICAL_NULL"
+                      break
 
-          else:
-              dependency_status = "MAX_ITERATIONS_REACHED"
+                  if not dal_file_not_accessible:
+                      dependency_status = "DAL_DEPENDENCIES_RESOLVED_READY_FOR_SPI511_OBS_GROUP"
+                      break
 
-          print("R3I: command discovery")
-          discovery_rc, discovery_txt = run_command_discovery()
+                  if not missing:
+                      dependency_status = "DAL_FILE_NOT_ACCESSIBLE_BUT_NO_PARSEABLE_MISSING_REFERENCE"
+                      break
 
-          actual_spi_started = False
-          actual_spi_rc = ""
-          actual_spi_txt = ""
+                  key = tuple(missing)
 
-          if dependency_status == "DAL_DEPENDENCIES_RESOLVED_READY_FOR_SPI511_OBS_GROUP":
-              print("R3I: actual SPI511 obs_group run")
-              actual_spi_started = True
-              actual_spi_rc, actual_spi_txt = run_actual_spi511_obs_group()
-          else:
-              print("R3I: SPI511 execution skipped because dependency status is not ready")
+                  if key in repeated_guard:
+                      dependency_status = "REPEATED_MISSING_REFERENCE_AFTER_DOWNLOAD_ATTEMPTS"
+                      break
 
-          final_files = []
+                  repeated_guard.add(key)
 
-          for p in sorted(DATA.rglob("*.fits")):
-              final_files.append({
-                  "path": str(p),
-                  "bytes": p.stat().st_size,
-                  "sha256": sha256_file(p),
-              })
+                  any_new_ok = False
 
-          work_files = []
+                  for ref in missing:
+                      ok = download_logical(ref, "dal_missing_auto_resolve", iteration)
+                      any_new_ok = any_new_ok or ok
+                      missing_rows.append({
+                          "iteration": iteration,
+                          "missing_ref": ref,
+                          "download_ok": ok,
+                          "category": "dal_missing_auto_resolve",
+                      })
 
-          for p in sorted(WORK.rglob("*")):
-              if p.is_file():
-                  size = p.stat().st_size
-                  work_files.append({
-                      "path": str(p),
-                      "bytes": size,
-                      "sha256": sha256_file(p) if size <= 50 * 1024 * 1024 else "SKIPPED_LARGE_FILE",
-                  })
+                  if not any_new_ok:
+                      dependency_status = "UNABLE_TO_DOWNLOAD_NEXT_MISSING_REFERENCES"
+                      break
 
-          product_hints = []
+              else:
+                  dependency_status = "MAX_ITERATIONS_REACHED"
 
-          for p in work_files:
-              low = p["path"].lower()
-              if any(k in low for k in ["spi", "spec", "spectrum", "pha", "rmf", "arf", "og", "energy", "511", "508", "514"]):
-                  product_hints.append(p)
+              print("R3J: command discovery")
+              discovery_rc, discovery_txt = run_command_discovery()
 
-          joined_logs = discovery_txt + "\n" + actual_spi_txt
+              actual_spi_started = False
+              actual_spi_rc = ""
+              actual_spi_txt = ""
 
-          wrong_param_seen = "PIL_BOGUS_CMDLINE" in joined_logs or "bogus parameter name" in joined_logs
-          obs_group_seen = "obs_group" in joined_logs
-          line_band_seen = "508,514" in joined_logs or "508" in joined_logs and "514" in joined_logs
-          status_3023_seen = "status -3023" in joined_logs
-          status_3003_seen = "status -3003" in joined_logs
+              if dependency_status == "DAL_DEPENDENCIES_RESOLVED_READY_FOR_SPI511_OBS_GROUP":
+                  print("R3J: actual SPI511 obs_group run")
+                  actual_spi_started = True
+                  actual_spi_rc, actual_spi_txt = run_actual_spi511_obs_group()
+              else:
+                  print("R3J: SPI511 execution skipped because dependency status is not ready")
 
-          if actual_spi_started and product_hints and not wrong_param_seen:
-              final_status = "R21AX_R7G_R3I_SPI511_OBS_GROUP_EXECUTION_RAN_PRODUCTS_PRESENT_REVIEW_REQUIRED_NOT_FINAL_PROOF"
-          elif actual_spi_started and wrong_param_seen:
-              final_status = "R21AX_R7G_R3I_SPI511_OBS_GROUP_ATTEMPT_HIT_PARAMETER_ERROR_REVIEW_REQUIRED_NO_511_NO_PHYSICAL_NULL"
-          elif actual_spi_started:
-              final_status = "R21AX_R7G_R3I_SPI511_OBS_GROUP_ATTEMPT_RAN_NO_CLEAR_PRODUCT_HINT_REVIEW_LOGS_NO_PHYSICAL_NULL"
-          else:
-              final_status = "R21AX_R7G_R3I_SPI511_NOT_STARTED_DEPENDENCY_STAGE_NOT_READY_NO_PHYSICAL_NULL"
+              final_files = list_files(DATA)
+              work_files = list_files(WORK)
 
-          write_csv(
-              OUT / "r3i_download_manifest.csv",
-              download_rows,
-              [
-                  "source_iteration",
-                  "category",
-                  "logical_path",
-                  "final_path",
-                  "url",
-                  "attempt",
-                  "returncode",
-                  "ok",
-                  "reason",
-                  "bytes",
-                  "sha256",
-                  "log_tail",
-              ],
-          )
+              product_hints = []
+              for p in work_files:
+                  low = p["path"].lower()
+                  if any(k in low for k in ["spi", "spec", "spectrum", "pha", "rmf", "arf", "og", "energy", "511", "508", "514"]):
+                      product_hints.append(p)
 
-          write_csv(
-              OUT / "r3i_dal_iterations.csv",
-              dal_iteration_rows,
-              [
-                  "iteration",
-                  "dal_file_not_accessible",
-                  "isdc_env_missing",
-                  "parameter_init_error",
-                  "missing_count",
-                  "missing_refs_joined",
-              ],
-          )
+              joined_logs = discovery_txt + "\n" + actual_spi_txt
 
-          write_csv(
-              OUT / "r3i_missing_reference_resolution.csv",
-              missing_rows,
-              [
-                  "iteration",
-                  "missing_ref",
-                  "download_ok",
-                  "category",
-              ],
-          )
+              wrong_param_seen = "PIL_BOGUS_CMDLINE" in joined_logs or "bogus parameter name" in joined_logs
+              obs_group_seen = "obs_group" in joined_logs
+              line_band_seen = ("508,514" in joined_logs) or ("508" in joined_logs and "514" in joined_logs)
+              status_3023_seen = "status -3023" in joined_logs
+              status_3003_seen = "status -3003" in joined_logs
+              og_created = "og_spi.fits" in joined_logs or any("og_spi.fits" in r["path"] for r in work_files)
 
-          write_csv(
-              OUT / "r3i_final_local_fits_files.csv",
-              final_files,
-              [
-                  "path",
-                  "bytes",
-                  "sha256",
-              ],
-          )
+              if actual_spi_started and product_hints and not wrong_param_seen:
+                  final_status = "R21AX_R7G_R3J_SPI511_OBS_GROUP_EXECUTION_RAN_PRODUCTS_PRESENT_REVIEW_REQUIRED_NOT_FINAL_PROOF"
+              elif actual_spi_started and wrong_param_seen:
+                  final_status = "R21AX_R7G_R3J_SPI511_OBS_GROUP_ATTEMPT_HIT_PARAMETER_ERROR_REVIEW_REQUIRED_NO_511_NO_PHYSICAL_NULL"
+              elif actual_spi_started:
+                  final_status = "R21AX_R7G_R3J_SPI511_OBS_GROUP_ATTEMPT_RAN_NO_CLEAR_PRODUCT_HINT_REVIEW_LOGS_NO_PHYSICAL_NULL"
+              else:
+                  final_status = "R21AX_R7G_R3J_SPI511_NOT_STARTED_DEPENDENCY_STAGE_NOT_READY_NO_PHYSICAL_NULL"
 
-          write_csv(
-              OUT / "r3i_work_files_after_spi_attempt.csv",
-              work_files,
-              [
-                  "path",
-                  "bytes",
-                  "sha256",
-              ],
-          )
+              write_csv(
+                  OUT / "r3j_download_manifest.csv",
+                  download_rows,
+                  [
+                      "source_iteration",
+                      "category",
+                      "logical_path",
+                      "final_path",
+                      "url",
+                      "attempt",
+                      "returncode",
+                      "ok",
+                      "reason",
+                      "bytes",
+                      "sha256",
+                      "log_tail",
+                  ],
+              )
 
-          write_csv(
-              OUT / "r3i_product_hints.csv",
-              product_hints,
-              [
-                  "path",
-                  "bytes",
-                  "sha256",
-              ],
-          )
+              write_csv(
+                  OUT / "r3j_dal_iterations.csv",
+                  dal_iteration_rows,
+                  [
+                      "iteration",
+                      "dal_file_not_accessible",
+                      "isdc_env_missing",
+                      "parameter_init_error",
+                      "missing_count",
+                      "missing_refs_joined",
+                  ],
+              )
 
-          checks = {
-              "dependency_status": dependency_status,
-              "actual_spi_started": actual_spi_started,
-              "actual_spi_returncode": actual_spi_rc,
-              "wrong_param_seen": wrong_param_seen,
-              "obs_group_seen": obs_group_seen,
-              "line_band_seen": line_band_seen,
-              "status_3023_seen": status_3023_seen,
-              "status_3003_seen": status_3003_seen,
-              "work_file_count": len(work_files),
-              "product_hint_count": len(product_hints),
-              "local_fits_file_count": len(final_files),
-          }
+              write_csv(
+                  OUT / "r3j_missing_reference_resolution.csv",
+                  missing_rows,
+                  [
+                      "iteration",
+                      "missing_ref",
+                      "download_ok",
+                      "category",
+                  ],
+              )
 
-          with open(OUT / "r3i_checks_flat.csv", "w", newline="", encoding="utf-8") as f:
-              w = csv.DictWriter(f, fieldnames=["check", "value"])
-              w.writeheader()
-              for k, v in checks.items():
-                  w.writerow({"check": k, "value": v})
+              write_csv(
+                  OUT / "r3j_commands.csv",
+                  command_rows,
+                  [
+                      "name",
+                      "returncode",
+                      "log_path",
+                      "log_bytes",
+                  ],
+              )
 
-          summary = {
-              "run_id": RUN_ID,
-              "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "claim_ceiling": "ACTUAL_SPI511_OBS_GROUP_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF",
-              "scw": SCW,
-              "rev": REV,
-              "dependency_status": dependency_status,
-              "dal_iteration_count": len(dal_iteration_rows),
-              "local_fits_file_count": len(final_files),
-              "actual_spi_started": actual_spi_started,
-              "actual_spi_returncode": actual_spi_rc,
-              "work_file_count": len(work_files),
-              "product_hint_count": len(product_hints),
-              "wrong_param_seen": wrong_param_seen,
-              "obs_group_seen": obs_group_seen,
-              "line_band_seen": line_band_seen,
-              "status_3023_seen": status_3023_seen,
-              "status_3003_seen": status_3003_seen,
-              "final_status": final_status,
-          }
+              write_csv(
+                  OUT / "r3j_final_local_files.csv",
+                  final_files,
+                  [
+                      "path",
+                      "bytes",
+                      "sha256",
+                  ],
+              )
 
-          (OUT / "R3I_ACTUAL_SPI511_OBS_GROUP_EXECUTION_SUMMARY.json").write_text(
-              json.dumps(summary, indent=2, sort_keys=True),
-              encoding="utf-8",
-          )
+              write_csv(
+                  OUT / "r3j_work_files_after_spi_attempt.csv",
+                  work_files,
+                  [
+                      "path",
+                      "bytes",
+                      "sha256",
+                  ],
+              )
 
-          print(json.dumps(summary, indent=2))
+              write_csv(
+                  OUT / "r3j_product_hints.csv",
+                  product_hints,
+                  [
+                      "path",
+                      "bytes",
+                      "sha256",
+                  ],
+              )
+
+              checks = {
+                  "dependency_status": dependency_status,
+                  "actual_spi_started": actual_spi_started,
+                  "actual_spi_returncode": actual_spi_rc,
+                  "wrong_param_seen": wrong_param_seen,
+                  "obs_group_seen": obs_group_seen,
+                  "line_band_seen": line_band_seen,
+                  "status_3023_seen": status_3023_seen,
+                  "status_3003_seen": status_3003_seen,
+                  "og_created": og_created,
+                  "work_file_count": len(work_files),
+                  "product_hint_count": len(product_hints),
+                  "local_file_count": len(final_files),
+              }
+
+              with open(OUT / "r3j_checks_flat.csv", "w", newline="", encoding="utf-8") as f:
+                  w = csv.DictWriter(f, fieldnames=["check", "value"])
+                  w.writeheader()
+                  for k, v in checks.items():
+                      w.writerow({"check": k, "value": v})
+
+              summary = {
+                  "run_id": RUN_ID,
+                  "created_utc": now_utc(),
+                  "claim_ceiling": "ROBUST_SPI511_OBS_GROUP_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF",
+                  "scw": SCW,
+                  "rev": REV,
+                  "dependency_status": dependency_status,
+                  "dal_iteration_count": len(dal_iteration_rows),
+                  "local_file_count": len(final_files),
+                  "actual_spi_started": actual_spi_started,
+                  "actual_spi_returncode": actual_spi_rc,
+                  "work_file_count": len(work_files),
+                  "product_hint_count": len(product_hints),
+                  "wrong_param_seen": wrong_param_seen,
+                  "obs_group_seen": obs_group_seen,
+                  "line_band_seen": line_band_seen,
+                  "status_3023_seen": status_3023_seen,
+                  "status_3003_seen": status_3003_seen,
+                  "og_created": og_created,
+                  "final_status": final_status,
+              }
+
+              (OUT / "R3J_ROBUST_SPI511_OBS_GROUP_EXECUTION_SUMMARY.json").write_text(
+                  json.dumps(summary, indent=2, sort_keys=True),
+                  encoding="utf-8",
+              )
+
+              print(json.dumps(summary, indent=2))
+
+          try:
+              main()
+          except Exception:
+              err = traceback.format_exc()
+              print("ACIRM_R3J_FATAL_EXCEPTION")
+              print(err)
+              fallback = {
+                  "run_id": RUN_ID,
+                  "created_utc": now_utc(),
+                  "claim_ceiling": "ROBUST_SPI511_OBS_GROUP_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF",
+                  "final_status": "R21AX_R7G_R3J_FATAL_PYTHON_EXCEPTION_CAPTURED_NO_511_NO_PHYSICAL_NULL",
+                  "exception": err,
+              }
+              (OUT / "R3J_FATAL_EXCEPTION.json").write_text(json.dumps(fallback, indent=2), encoding="utf-8")
+              (OUT / "R3J_ROBUST_SPI511_OBS_GROUP_EXECUTION_SUMMARY.json").write_text(json.dumps(fallback, indent=2), encoding="utf-8")
           PY
+
+          PY_RC=${PIPESTATUS[0]}
+          echo "R3J_MAIN_PYTHON_EXIT_CODE=${PY_RC}" | tee -a ACIRM_R21AX_R7G_R3J_RESULTS/logs/main_execution.log
+          echo "${PY_RC}" > ACIRM_R21AX_R7G_R3J_RESULTS/logs/main_python_exit_code.txt
+
+          if [ ! -f ACIRM_R21AX_R7G_R3J_RESULTS/R3J_ROBUST_SPI511_OBS_GROUP_EXECUTION_SUMMARY.json ]; then
+            echo "Summary missing after Python step; creating shell fallback summary" | tee -a ACIRM_R21AX_R7G_R3J_RESULTS/logs/main_execution.log
+            python3 - <<'PY'
+          import json, time
+          from pathlib import Path
+          out = Path("ACIRM_R21AX_R7G_R3J_RESULTS")
+          logs = out / "logs"
+          summary = {
+              "run_id": "ACIRM_R21AX_R7G_R3J_ROBUST_SPI511_OBS_GROUP_EXECUTION_FULL_CAPTURE",
+              "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "claim_ceiling": "ROBUST_SPI511_OBS_GROUP_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF",
+              "final_status": "R21AX_R7G_R3J_SHELL_FALLBACK_SUMMARY_PYTHON_OUTPUT_MISSING_NO_511_NO_PHYSICAL_NULL",
+              "main_execution_log_exists": (logs / "main_execution.log").exists(),
+          }
+          (out / "R3J_ROBUST_SPI511_OBS_GROUP_EXECUTION_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+          PY
+          fi
 
       - name: Build LIGHT audit package only
         if: always()
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/logs
 
-          cp ACIRM_R21AX_R7G_R3I_RESULTS/logs/*.log ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/logs/ || true
-          cp ACIRM_R21AX_R7G_R3I_RESULTS/*.json ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/ || true
-          cp ACIRM_R21AX_R7G_R3I_RESULTS/*.csv ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R3J_RESULTS/logs/*.log ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/logs/ || true
+          cp ACIRM_R21AX_R7G_R3J_RESULTS/logs/*.txt ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/logs/ || true
+          cp ACIRM_R21AX_R7G_R3J_RESULTS/*.json ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R3J_RESULTS/*.csv ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/ || true
 
-          echo "R3I performs actual SPI511 execution using obs_group parameter after OG creation." > ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
-          echo "FITS and heavy OSA products are excluded from phone artifact." >> ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
-          echo "This is not a final 511 keV proof/discovery claim." >> ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "R3J performs robust SPI511 obs_group execution with full error capture." > ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "FITS and heavy OSA products are excluded from phone artifact." >> ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "This is not a final 511 keV proof/discovery claim." >> ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
 
-          du -h ACIRM_R21AX_R7G_R3I_RESULTS/data > ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/data_size_report.txt || true
-          du -h ACIRM_R21AX_R7G_R3I_RESULTS/work > ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/work_size_report.txt || true
+          du -h ACIRM_R21AX_R7G_R3J_RESULTS/data > ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/data_size_report.txt || true
+          du -h ACIRM_R21AX_R7G_R3J_RESULTS/work > ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/work_size_report.txt || true
 
-          find ACIRM_R21AX_R7G_R3I_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/data_file_list.csv || true
-          find ACIRM_R21AX_R7G_R3I_RESULTS/work -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/work_file_list.csv || true
+          find ACIRM_R21AX_R7G_R3J_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/data_file_list.csv || true
+          find ACIRM_R21AX_R7G_R3J_RESULTS/work -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/work_file_list.csv || true
 
-          cat > ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS/R3I_CLAIM_BOUNDARY.txt <<'EOF'
-          ACIRM R3I claim boundary:
-          - Actual SPI511 execution attempt using obs_group after OG creation.
+          cat > ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS/R3J_CLAIM_BOUNDARY.txt <<'EOF'
+          ACIRM R3J claim boundary:
+          - Robust SPI511 obs_group execution attempt.
+          - Full Python/shell error capture is included in logs/main_execution.log.
           - Not final 511 keV proof.
           - Not 511 keV discovery.
           - Runtime/parameter/OSA product failure is not a physical null.
           - The artifact is LIGHT only and excludes heavy FITS/OSA products.
           EOF
 
-          zip -r ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS
-          sha256sum ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS.zip.sha256.txt
-          cat ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS.zip.sha256.txt
+          zip -r ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS
+          sha256sum ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS.zip.sha256.txt
+          cat ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS.zip.sha256.txt
 
-      - name: Upload ACIRM R3I LIGHT artifact
+      - name: Upload ACIRM R3J LIGHT artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3I_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3J_LIGHT_RESULTS.zip.sha256.txt
