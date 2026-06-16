@@ -1,4 +1,4 @@
-name: ACIRM R3K headless SPI511 final technical execution
+name: ACIRM R3L headless SPI511 safe parameter execution
 
 on:
   workflow_dispatch:
@@ -7,24 +7,24 @@ on:
       - main
 
 jobs:
-  acirm-r3k-headless-spi511-final-technical-execution:
+  acirm-r3l-headless-spi511-safe-parameter-execution:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
       - name: Prepare folders
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R3K_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3K_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3K_RESULTS/work
-          mkdir -p ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS
+          mkdir -p ACIRM_R21AX_R7G_R3L_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3L_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3L_RESULTS/work
+          mkdir -p ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS
 
       - name: System diagnostics
         run: |
           {
-            echo "ACIRM R3K headless SPI511 final technical execution"
+            echo "ACIRM R3L headless SPI511 safe parameter execution"
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "claim_ceiling=HEADLESS_SPI511_OSA_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF_UNTIL_AUDITED"
+            echo "claim_ceiling=HEADLESS_SPI511_SAFE_PARAMETER_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF_UNTIL_AUDITED"
             echo ""
             uname -a || true
             echo ""
@@ -34,7 +34,7 @@ jobs:
             echo ""
             echo "HEASARC IPv4 HTTPS probe"
             curl -4 -I -L --connect-timeout 30 --max-time 90 https://heasarc.gsfc.nasa.gov/FTP/integral/data/ || true
-          } | tee ACIRM_R21AX_R7G_R3K_RESULTS/logs/system_diagnostics.log
+          } | tee ACIRM_R21AX_R7G_R3L_RESULTS/logs/system_diagnostics.log
 
       - name: Pull OSA Docker image
         continue-on-error: true
@@ -46,16 +46,16 @@ jobs:
             echo ""
             echo "Pull integralsw/osa:latest"
             docker pull integralsw/osa:latest || true
-          } | tee ACIRM_R21AX_R7G_R3K_RESULTS/logs/docker_pull.log
+          } | tee ACIRM_R21AX_R7G_R3L_RESULTS/logs/docker_pull.log
 
-      - name: R3K robust headless data assemble DAL OG SPI511 execution
+      - name: R3L robust data assemble DAL OG and headless SPI511 safe execution
         continue-on-error: true
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3K_RESULTS/logs
-          echo "Starting R3K main execution" | tee ACIRM_R21AX_R7G_R3K_RESULTS/logs/main_execution.log
+          mkdir -p ACIRM_R21AX_R7G_R3L_RESULTS/logs
+          echo "Starting R3L main execution" | tee ACIRM_R21AX_R7G_R3L_RESULTS/logs/main_execution.log
 
-          python3 -u <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3K_RESULTS/logs/main_execution.log
+          python3 -u <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3L_RESULTS/logs/main_execution.log
           import csv
           import gzip
           import hashlib
@@ -68,9 +68,9 @@ jobs:
           import traceback
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3K_HEADLESS_SPI511_FINAL_TECHNICAL_EXECUTION"
+          RUN_ID = "ACIRM_R21AX_R7G_R3L_HEADLESS_SPI511_SAFE_PARAMETER_EXECUTION"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3K_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3L_RESULTS")
           DATA = OUT / "data"
           LOGS = OUT / "logs"
           WORK = OUT / "work"
@@ -378,9 +378,9 @@ jobs:
                   "docker",
                   "run",
                   "--rm",
-                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3K_RESULTS/data:/data",
-                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3K_RESULTS/work:/work",
-                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3K_RESULTS/logs:/logs",
+                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3L_RESULTS/data:/data",
+                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3L_RESULTS/work:/work",
+                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3L_RESULTS/logs:/logs",
                   "integralsw/osa:latest",
                   "bash",
                   "-lc",
@@ -425,7 +425,7 @@ jobs:
                 export PIL_NO_GUI=1
                 export PIL_NOTTY=1
 
-                mkdir -p /tmp/acirm_pfiles /tmp/acirm_work /tmp/acirm_rep /work/osa_products /work/og /work/logs /work/products
+                mkdir -p /tmp/acirm_pfiles /tmp/acirm_work /tmp/acirm_rep /work/osa_products /work/og /work/logs /work/products_line /work/products_sidebands
                 cp -f /opt/osa/pfiles/*.par /tmp/acirm_pfiles/ 2>/dev/null || true
 
                 if [ -f /tmp/acirm_pfiles/spi_science_analysis.par ]; then
@@ -468,7 +468,7 @@ jobs:
               script = osa_env_prefix() + '''
                 TARGET=/data/scw/2504/250400090010.001/swg.fits
 
-                echo "ACIRM_R3K_DAL_ITERATION=''' + str(iteration) + '''"
+                echo "ACIRM_R3L_DAL_ITERATION=''' + str(iteration) + '''"
                 echo "environment"
                 env | sort | grep -E "^(ISDC|OSA|REP|PFILES|PATH|LD_LIBRARY_PATH|COMMONLOGFILE|HEADAS|CFITSIO|HEADASNOQUERY|PIL|DISPLAY)" || true
                 echo ""
@@ -526,11 +526,11 @@ jobs:
 
           def run_command_discovery():
               script = osa_env_prefix() + '''
-                echo "OSA command discovery R3K"
+                echo "OSA command discovery R3L"
                 echo ""
                 echo "PATH=$PATH"
                 echo ""
-                for c in dal_verify og_create spi_science_analysis spi_obs_create spi_obs_hist spi_obs_back spi_obs_fit spiselect spi_extract spi_spec fdump fstruct ftlist; do
+                for c in dal_verify og_create spi_science_analysis spi_obs_create spi_obs_hist spi_obs_back spi_obs_fit spiselect spi_extract spi_spec fdump fstruct ftlist plist pset punlearn; do
                   echo "COMMAND $c"
                   command -v "$c" || true
                 done
@@ -541,9 +541,9 @@ jobs:
                 echo "og_create.par"
                 cat /tmp/acirm_pfiles/og_create.par 2>/dev/null || true
               '''
-              return run_container_script(script, "r3k_command_discovery", 300)
+              return run_container_script(script, "r3l_command_discovery", 300)
 
-          def run_actual_headless_spi511():
+          def run_actual_headless_spi511_safe():
               script = osa_env_prefix() + '''
                 set +e
 
@@ -552,12 +552,13 @@ jobs:
 
                 echo "$TARGET" > /work/scwlist.txt
 
-                echo "ACIRM R3K headless SPI511 execution"
+                echo "ACIRM R3L headless SPI511 safe-parameter execution"
                 echo "TARGET=$TARGET"
                 echo ""
 
                 echo "Step 1: create SPI observation group"
-                timeout 900 og_create idxSwg="$TARGET" ogid=ACIRM_R3K baseDir=/work/og instrument=SPI mode=h 2>&1 | tee /work/logs/og_create_r3k.log || true
+                echo "IMPORTANT: no mode parameter is passed to og_create"
+                timeout 900 og_create idxSwg="$TARGET" ogid=ACIRM_R3L baseDir=/work/og instrument=SPI 2>&1 | tee /work/logs/og_create_r3l.log || true
 
                 echo ""
                 echo "Step 2: list OG products"
@@ -582,67 +583,94 @@ jobs:
                 echo ""
                 echo "Step 3: verify patched parameter file"
                 echo "PAR=$PAR"
-                grep -n -E "^(obs_group|run_cat_extract|run_pointing|run_binning|run_background|run_spiros|run_phase_analysis|run_fullcheck|spibounds_nregions|spibounds_regions|spibounds_nbins|clobber|log_File)" "$PAR" 2>/dev/null || true
+                grep -n -E "^(obs_group|run_cat_extract|run_pointing|run_binning|run_background|run_spiros|run_phase_analysis|run_fullcheck|run_gaincorrection|use_pointing_filter|spibounds_nregions|spibounds_regions|spibounds_nbins|detectors|clobber|log_File|mode)" "$PAR" 2>/dev/null || true
+
+                has_par() {
+                  grep -q -E "^ *$1[,) ]" "$PAR" 2>/dev/null
+                }
+
+                add_if_has() {
+                  local pname="$1"
+                  local pvalue="$2"
+                  if has_par "$pname"; then
+                    CMD+=("$pname=$pvalue")
+                    echo "ADD_PARAM $pname=$pvalue"
+                  else
+                    echo "SKIP_PARAM_NOT_IN_PAR $pname=$pvalue"
+                  fi
+                }
 
                 if [ -z "$OG_FILE" ]; then
-                  echo "ACIRM_R3K_NO_OG_FILE_CREATED"
+                  echo "ACIRM_R3L_NO_OG_FILE_CREATED"
                 else
                   echo ""
-                  echo "Step 4: line-only 508-514 keV binning attempt, headless hidden mode"
+                  echo "Step 4: line-only 508-514 keV binning attempt, safe parameters only"
                   cd /work/products_line || exit 0
 
-                  timeout 3600 spi_science_analysis \
-                    obs_group="$OG_FILE" \
-                    run_cat_extract=no \
-                    run_pointing=yes \
-                    run_binning=yes \
-                    run_background=no \
-                    run_spiros=no \
-                    run_phase_analysis=no \
-                    run_gaincorrection=no \
-                    run_fullcheck=no \
-                    use_pointing_filter=no \
-                    spibounds_nregions=1 \
-                    spibounds_regions=508,514 \
-                    spibounds_nbins=1 \
-                    detectors=0-18 \
-                    clobber=yes \
-                    log_File=spi_sa_line_508_514.log \
-                    mode=h \
-                    </dev/null 2>&1 | tee /work/logs/spi_science_analysis_HEADLESS_LINE_508_514.log || true
+                  CMD=(spi_science_analysis)
+                  add_if_has obs_group "$OG_FILE"
+                  add_if_has run_cat_extract no
+                  add_if_has run_pointing yes
+                  add_if_has run_binning yes
+                  add_if_has run_background no
+                  add_if_has run_spiros no
+                  add_if_has run_phase_analysis no
+                  add_if_has run_gaincorrection no
+                  add_if_has run_fullcheck no
+                  add_if_has use_pointing_filter no
+                  add_if_has spibounds_nregions 1
+                  add_if_has spibounds_regions 508,514
+                  add_if_has spibounds_nbins 1
+                  add_if_has detectors 0-18
+                  add_if_has clobber yes
+                  add_if_has log_File spi_sa_line_508_514.log
+                  add_if_has mode h
+
+                  echo "CMD_LINE_BEGIN"
+                  printf '%q ' "${CMD[@]}"
+                  echo ""
+                  echo "CMD_LINE_END"
+
+                  timeout 3600 "${CMD[@]}" </dev/null 2>&1 | tee /work/logs/spi_science_analysis_HEADLESS_LINE_508_514.log || true
 
                   echo ""
-                  echo "Step 5: sideband-context 490-500 / 508-514 / 522-532 keV binning attempt, headless hidden mode"
+                  echo "Step 5: sideband-context 490-500 / 508-514 / 522-532 keV binning attempt, safe parameters only"
                   cd /work/products_sidebands || exit 0
 
-                  timeout 3600 spi_science_analysis \
-                    obs_group="$OG_FILE" \
-                    run_cat_extract=no \
-                    run_pointing=yes \
-                    run_binning=yes \
-                    run_background=no \
-                    run_spiros=no \
-                    run_phase_analysis=no \
-                    run_gaincorrection=no \
-                    run_fullcheck=no \
-                    use_pointing_filter=no \
-                    spibounds_nregions=3 \
-                    spibounds_regions=490,500,508,514,522,532 \
-                    spibounds_nbins=1,1,1 \
-                    detectors=0-18 \
-                    clobber=yes \
-                    log_File=spi_sa_sidebands_490_500_508_514_522_532.log \
-                    mode=h \
-                    </dev/null 2>&1 | tee /work/logs/spi_science_analysis_HEADLESS_SIDEBANDS.log || true
+                  CMD=(spi_science_analysis)
+                  add_if_has obs_group "$OG_FILE"
+                  add_if_has run_cat_extract no
+                  add_if_has run_pointing yes
+                  add_if_has run_binning yes
+                  add_if_has run_background no
+                  add_if_has run_spiros no
+                  add_if_has run_phase_analysis no
+                  add_if_has run_gaincorrection no
+                  add_if_has run_fullcheck no
+                  add_if_has use_pointing_filter no
+                  add_if_has spibounds_nregions 3
+                  add_if_has spibounds_regions 490,500,508,514,522,532
+                  add_if_has spibounds_nbins 1,1,1
+                  add_if_has detectors 0-18
+                  add_if_has clobber yes
+                  add_if_has log_File spi_sa_sidebands_490_500_508_514_522_532.log
+                  add_if_has mode h
+
+                  echo "CMD_SIDEBAND_BEGIN"
+                  printf '%q ' "${CMD[@]}"
+                  echo ""
+                  echo "CMD_SIDEBAND_END"
+
+                  timeout 3600 "${CMD[@]}" </dev/null 2>&1 | tee /work/logs/spi_science_analysis_HEADLESS_SIDEBANDS.log || true
                 fi
 
                 echo ""
                 echo "Step 6: products after headless SPI attempts"
-                find /work -maxdepth 10 -type f -printf "%p %s\\n" | sort | tee /work/logs/work_files_after_r3k_headless_spi_attempts.txt || true
+                find /work -maxdepth 10 -type f -printf "%p %s\\n" | sort | tee /work/logs/work_files_after_r3l_headless_spi_attempts.txt || true
 
                 echo ""
                 echo "Step 7: FITS structure quicklook"
-                for f in $(find /work -type f -name "*.fits" | sort | head -80); do
+                for f in $(find /work -type f -name "*.fits" | sort | head -120); do
                   echo "### FITS_FILE $f"
                   if command -v fstruct >/dev/null 2>&1; then
                     timeout 60 fstruct "$f" 2>&1 | head -160 || true
@@ -654,7 +682,7 @@ jobs:
 
                 echo ""
                 echo "Step 8: selected text hits"
-                grep -R -n -E "508|511|514|490|500|522|532|PIL_BOGUS_CMDLINE|segmentation|Attempting to launch GUI|status|error|Error|ERROR|spi|spectrum|PHA|RMF|ARF|evts|det|hist" /work/logs /work/products_line /work/products_sidebands 2>/dev/null | head -1800 | tee /work/logs/r3k_selected_text_hits.txt || true
+                grep -R -n -E "508|511|514|490|500|522|532|PIL_BOGUS_CMDLINE|segmentation|Attempting to launch GUI|status|error|Error|ERROR|spi|spectrum|PHA|RMF|ARF|evts|det|hist|ADD_PARAM|SKIP_PARAM" /work/logs /work/products_line /work/products_sidebands 2>/dev/null | head -2200 | tee /work/logs/r3l_selected_text_hits.txt || true
 
                 echo ""
                 echo "Step 9: copy /work/logs to /logs"
@@ -662,9 +690,9 @@ jobs:
 
                 echo ""
                 echo "commonlog tail"
-                cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -1500 || true
+                cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -1800 || true
               '''
-              return run_container_script(script, "r3k_headless_spi511_execution", 7600)
+              return run_container_script(script, "r3l_headless_spi511_safe_execution", 7600)
 
           def write_csv(path, rows, fieldnames):
               with open(path, "w", newline="", encoding="utf-8") as f:
@@ -690,12 +718,12 @@ jobs:
               return rows
 
           def main():
-              print("R3K main started at", now_utc())
+              print("R3L main started at", now_utc())
 
-              print("R3K: seed initial files")
+              print("R3L: seed initial files")
               seed_initial_files()
 
-              print("R3K: discover members from swg")
+              print("R3L: discover members from swg")
               for ref in discover_members_from_swg():
                   if ref.startswith("ERROR_"):
                       missing_rows.append({
@@ -718,7 +746,7 @@ jobs:
               repeated_guard = set()
 
               for iteration in range(1, max_iterations + 1):
-                  print("R3K: DAL iteration", iteration)
+                  print("R3L: DAL iteration", iteration)
                   txt = run_dal_verify(iteration)
 
                   dal_file_not_accessible = ("DAL_FILE_NOT_ACCESSIBLE" in txt) or ("status -2004" in txt)
@@ -774,7 +802,7 @@ jobs:
               else:
                   dependency_status = "MAX_ITERATIONS_REACHED"
 
-              print("R3K: command discovery")
+              print("R3L: command discovery")
               discovery_rc, discovery_txt = run_command_discovery()
 
               actual_spi_started = False
@@ -782,11 +810,11 @@ jobs:
               actual_spi_txt = ""
 
               if dependency_status == "DAL_DEPENDENCIES_RESOLVED_READY_FOR_HEADLESS_SPI511":
-                  print("R3K: actual headless SPI511 run")
+                  print("R3L: actual headless SPI511 safe run")
                   actual_spi_started = True
-                  actual_spi_rc, actual_spi_txt = run_actual_headless_spi511()
+                  actual_spi_rc, actual_spi_txt = run_actual_headless_spi511_safe()
               else:
-                  print("R3K: SPI511 execution skipped because dependency status is not ready")
+                  print("R3L: SPI511 execution skipped because dependency status is not ready")
 
               data_files = list_files(DATA)
               work_files = list_files(WORK)
@@ -800,6 +828,7 @@ jobs:
               joined_logs = discovery_txt + "\n" + actual_spi_txt
 
               wrong_param_seen = "PIL_BOGUS_CMDLINE" in joined_logs or "bogus parameter name" in joined_logs
+              og_mode_bogus_seen = "bogus parameter name = mode" in joined_logs and "og_create" in joined_logs
               gui_seen = "Attempting to launch GUI" in joined_logs
               segfault_seen = "segmentation violation" in joined_logs or "*** Break ***" in joined_logs
               obs_group_seen = "obs_group" in joined_logs
@@ -813,20 +842,22 @@ jobs:
               headless_sideband_log_present = any("HEADLESS_SIDEBANDS" in r["path"] for r in work_files) or "HEADLESS_SIDEBANDS" in joined_logs
 
               if actual_spi_started and product_hints and not wrong_param_seen and not gui_seen and not segfault_seen:
-                  final_status = "R21AX_R7G_R3K_HEADLESS_SPI511_RAN_PRODUCTS_PRESENT_REVIEW_REQUIRED_NOT_FINAL_PROOF"
+                  final_status = "R21AX_R7G_R3L_HEADLESS_SPI511_RAN_PRODUCTS_PRESENT_REVIEW_REQUIRED_NOT_FINAL_PROOF"
+              elif actual_spi_started and og_mode_bogus_seen:
+                  final_status = "R21AX_R7G_R3L_OG_CREATE_MODE_BOGUS_STILL_PRESENT_NO_511_NO_PHYSICAL_NULL"
               elif actual_spi_started and gui_seen:
-                  final_status = "R21AX_R7G_R3K_GUI_STILL_TRIGGERED_DESPITE_HEADLESS_GUARDS_NO_511_NO_PHYSICAL_NULL"
+                  final_status = "R21AX_R7G_R3L_GUI_STILL_TRIGGERED_DESPITE_HEADLESS_GUARDS_NO_511_NO_PHYSICAL_NULL"
               elif actual_spi_started and segfault_seen:
-                  final_status = "R21AX_R7G_R3K_SEGFAULT_STILL_PRESENT_AFTER_HEADLESS_GUARDS_NO_511_NO_PHYSICAL_NULL"
+                  final_status = "R21AX_R7G_R3L_SEGFAULT_STILL_PRESENT_AFTER_HEADLESS_GUARDS_NO_511_NO_PHYSICAL_NULL"
               elif actual_spi_started and wrong_param_seen:
-                  final_status = "R21AX_R7G_R3K_PARAMETER_ERROR_PRESENT_REVIEW_REQUIRED_NO_511_NO_PHYSICAL_NULL"
+                  final_status = "R21AX_R7G_R3L_PARAMETER_ERROR_PRESENT_REVIEW_REQUIRED_NO_511_NO_PHYSICAL_NULL"
               elif actual_spi_started:
-                  final_status = "R21AX_R7G_R3K_HEADLESS_SPI511_ATTEMPT_RAN_NO_CLEAR_PRODUCT_HINT_REVIEW_LOGS_NO_PHYSICAL_NULL"
+                  final_status = "R21AX_R7G_R3L_HEADLESS_SPI511_ATTEMPT_RAN_NO_CLEAR_PRODUCT_HINT_REVIEW_LOGS_NO_PHYSICAL_NULL"
               else:
-                  final_status = "R21AX_R7G_R3K_SPI511_NOT_STARTED_DEPENDENCY_STAGE_NOT_READY_NO_PHYSICAL_NULL"
+                  final_status = "R21AX_R7G_R3L_SPI511_NOT_STARTED_DEPENDENCY_STAGE_NOT_READY_NO_PHYSICAL_NULL"
 
               write_csv(
-                  OUT / "r3k_download_manifest.csv",
+                  OUT / "r3l_download_manifest.csv",
                   download_rows,
                   [
                       "source_iteration",
@@ -845,7 +876,7 @@ jobs:
               )
 
               write_csv(
-                  OUT / "r3k_dal_iterations.csv",
+                  OUT / "r3l_dal_iterations.csv",
                   dal_iteration_rows,
                   [
                       "iteration",
@@ -858,7 +889,7 @@ jobs:
               )
 
               write_csv(
-                  OUT / "r3k_missing_reference_resolution.csv",
+                  OUT / "r3l_missing_reference_resolution.csv",
                   missing_rows,
                   [
                       "iteration",
@@ -869,7 +900,7 @@ jobs:
               )
 
               write_csv(
-                  OUT / "r3k_commands.csv",
+                  OUT / "r3l_commands.csv",
                   command_rows,
                   [
                       "name",
@@ -880,7 +911,7 @@ jobs:
               )
 
               write_csv(
-                  OUT / "r3k_data_files.csv",
+                  OUT / "r3l_data_files.csv",
                   data_files,
                   [
                       "path",
@@ -890,7 +921,7 @@ jobs:
               )
 
               write_csv(
-                  OUT / "r3k_work_files_after_headless_spi.csv",
+                  OUT / "r3l_work_files_after_headless_spi.csv",
                   work_files,
                   [
                       "path",
@@ -900,7 +931,7 @@ jobs:
               )
 
               write_csv(
-                  OUT / "r3k_product_hints.csv",
+                  OUT / "r3l_product_hints.csv",
                   product_hints,
                   [
                       "path",
@@ -914,6 +945,7 @@ jobs:
                   "actual_spi_started": actual_spi_started,
                   "actual_spi_returncode": actual_spi_rc,
                   "wrong_param_seen": wrong_param_seen,
+                  "og_mode_bogus_seen": og_mode_bogus_seen,
                   "gui_seen": gui_seen,
                   "segfault_seen": segfault_seen,
                   "obs_group_seen": obs_group_seen,
@@ -929,7 +961,7 @@ jobs:
                   "data_file_count": len(data_files),
               }
 
-              with open(OUT / "r3k_checks_flat.csv", "w", newline="", encoding="utf-8") as f:
+              with open(OUT / "r3l_checks_flat.csv", "w", newline="", encoding="utf-8") as f:
                   w = csv.DictWriter(f, fieldnames=["check", "value"])
                   w.writeheader()
                   for k, v in checks.items():
@@ -938,7 +970,7 @@ jobs:
               summary = {
                   "run_id": RUN_ID,
                   "created_utc": now_utc(),
-                  "claim_ceiling": "HEADLESS_SPI511_OSA_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF_UNTIL_AUDITED",
+                  "claim_ceiling": "HEADLESS_SPI511_SAFE_PARAMETER_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF_UNTIL_AUDITED",
                   "scw": SCW,
                   "rev": REV,
                   "dependency_status": dependency_status,
@@ -949,6 +981,7 @@ jobs:
                   "work_file_count": len(work_files),
                   "product_hint_count": len(product_hints),
                   "wrong_param_seen": wrong_param_seen,
+                  "og_mode_bogus_seen": og_mode_bogus_seen,
                   "gui_seen": gui_seen,
                   "segfault_seen": segfault_seen,
                   "obs_group_seen": obs_group_seen,
@@ -962,7 +995,7 @@ jobs:
                   "final_status": final_status,
               }
 
-              (OUT / "R3K_HEADLESS_SPI511_EXECUTION_SUMMARY.json").write_text(
+              (OUT / "R3L_HEADLESS_SPI511_SAFE_EXECUTION_SUMMARY.json").write_text(
                   json.dumps(summary, indent=2, sort_keys=True),
                   encoding="utf-8",
               )
@@ -973,86 +1006,85 @@ jobs:
               main()
           except Exception:
               err = traceback.format_exc()
-              print("ACIRM_R3K_FATAL_EXCEPTION")
+              print("ACIRM_R3L_FATAL_EXCEPTION")
               print(err)
               fallback = {
                   "run_id": RUN_ID,
                   "created_utc": now_utc(),
-                  "claim_ceiling": "HEADLESS_SPI511_OSA_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF_UNTIL_AUDITED",
-                  "final_status": "R21AX_R7G_R3K_FATAL_PYTHON_EXCEPTION_CAPTURED_NO_511_NO_PHYSICAL_NULL",
+                  "claim_ceiling": "HEADLESS_SPI511_SAFE_PARAMETER_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF_UNTIL_AUDITED",
+                  "final_status": "R21AX_R7G_R3L_FATAL_PYTHON_EXCEPTION_CAPTURED_NO_511_NO_PHYSICAL_NULL",
                   "exception": err,
               }
-              (OUT / "R3K_FATAL_EXCEPTION.json").write_text(json.dumps(fallback, indent=2), encoding="utf-8")
-              (OUT / "R3K_HEADLESS_SPI511_EXECUTION_SUMMARY.json").write_text(json.dumps(fallback, indent=2), encoding="utf-8")
+              (OUT / "R3L_FATAL_EXCEPTION.json").write_text(json.dumps(fallback, indent=2), encoding="utf-8")
+              (OUT / "R3L_HEADLESS_SPI511_SAFE_EXECUTION_SUMMARY.json").write_text(json.dumps(fallback, indent=2), encoding="utf-8")
           PY
 
           PY_RC=${PIPESTATUS[0]}
-          echo "R3K_MAIN_PYTHON_EXIT_CODE=${PY_RC}" | tee -a ACIRM_R21AX_R7G_R3K_RESULTS/logs/main_execution.log
-          echo "${PY_RC}" > ACIRM_R21AX_R7G_R3K_RESULTS/logs/main_python_exit_code.txt
+          echo "R3L_MAIN_PYTHON_EXIT_CODE=${PY_RC}" | tee -a ACIRM_R21AX_R7G_R3L_RESULTS/logs/main_execution.log
+          echo "${PY_RC}" > ACIRM_R21AX_R7G_R3L_RESULTS/logs/main_python_exit_code.txt
 
-          if [ ! -f ACIRM_R21AX_R7G_R3K_RESULTS/R3K_HEADLESS_SPI511_EXECUTION_SUMMARY.json ]; then
-            echo "Summary missing after Python step; creating shell fallback summary" | tee -a ACIRM_R21AX_R7G_R3K_RESULTS/logs/main_execution.log
+          if [ ! -f ACIRM_R21AX_R7G_R3L_RESULTS/R3L_HEADLESS_SPI511_SAFE_EXECUTION_SUMMARY.json ]; then
+            echo "Summary missing after Python step; creating shell fallback summary" | tee -a ACIRM_R21AX_R7G_R3L_RESULTS/logs/main_execution.log
             python3 - <<'PY'
           import json
           import time
           from pathlib import Path
-          out = Path("ACIRM_R21AX_R7G_R3K_RESULTS")
+          out = Path("ACIRM_R21AX_R7G_R3L_RESULTS")
           logs = out / "logs"
           summary = {
-              "run_id": "ACIRM_R21AX_R7G_R3K_HEADLESS_SPI511_FINAL_TECHNICAL_EXECUTION",
+              "run_id": "ACIRM_R21AX_R7G_R3L_HEADLESS_SPI511_SAFE_PARAMETER_EXECUTION",
               "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "claim_ceiling": "HEADLESS_SPI511_OSA_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF_UNTIL_AUDITED",
-              "final_status": "R21AX_R7G_R3K_SHELL_FALLBACK_SUMMARY_PYTHON_OUTPUT_MISSING_NO_511_NO_PHYSICAL_NULL",
+              "claim_ceiling": "HEADLESS_SPI511_SAFE_PARAMETER_EXECUTION_ATTEMPT_NOT_DISCOVERY_NOT_FINAL_PROOF_UNTIL_AUDITED",
+              "final_status": "R21AX_R7G_R3L_SHELL_FALLBACK_SUMMARY_PYTHON_OUTPUT_MISSING_NO_511_NO_PHYSICAL_NULL",
               "main_execution_log_exists": (logs / "main_execution.log").exists(),
           }
-          (out / "R3K_HEADLESS_SPI511_EXECUTION_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+          (out / "R3L_HEADLESS_SPI511_SAFE_EXECUTION_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
           PY
           fi
 
       - name: Build LIGHT audit package only
         if: always()
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/logs
 
-          cp ACIRM_R21AX_R7G_R3K_RESULTS/logs/*.log ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/logs/ || true
-          cp ACIRM_R21AX_R7G_R3K_RESULTS/logs/*.txt ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/logs/ || true
-          cp ACIRM_R21AX_R7G_R3K_RESULTS/*.json ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/ || true
-          cp ACIRM_R21AX_R7G_R3K_RESULTS/*.csv ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R3L_RESULTS/logs/*.log ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/logs/ || true
+          cp ACIRM_R21AX_R7G_R3L_RESULTS/logs/*.txt ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/logs/ || true
+          cp ACIRM_R21AX_R7G_R3L_RESULTS/*.json ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R3L_RESULTS/*.csv ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/ || true
 
-          echo "R3K performs headless SPI511 OSA execution attempt after DAL is resolved." > ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
-          echo "FITS and heavy OSA products are excluded from phone artifact." >> ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
-          echo "This is not a final discovery/proof claim until audited." >> ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "R3L performs headless SPI511 safe-parameter OSA execution attempt after DAL is resolved." > ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "FITS and heavy OSA products are excluded from phone artifact." >> ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "This is not a final discovery/proof claim until audited." >> ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
 
-          du -h ACIRM_R21AX_R7G_R3K_RESULTS/data > ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/data_size_report.txt || true
-          du -h ACIRM_R21AX_R7G_R3K_RESULTS/work > ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/work_size_report.txt || true
+          du -h ACIRM_R21AX_R7G_R3L_RESULTS/data > ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/data_size_report.txt || true
+          du -h ACIRM_R21AX_R7G_R3L_RESULTS/work > ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/work_size_report.txt || true
 
-          find ACIRM_R21AX_R7G_R3K_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/data_file_list.csv || true
-          find ACIRM_R21AX_R7G_R3K_RESULTS/work -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/work_file_list.csv || true
+          find ACIRM_R21AX_R7G_R3L_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/data_file_list.csv || true
+          find ACIRM_R21AX_R7G_R3L_RESULTS/work -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/work_file_list.csv || true
 
-          cat > ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS/R3K_CLAIM_BOUNDARY.txt <<'EOF'
-          ACIRM R3K claim boundary:
-          - Headless SPI511 OSA execution attempt.
-          - Solves prior GUI/default prompting segmentation path by:
-            * unsetting DISPLAY,
-            * setting HEADASNOQUERY/PIL_NO_GUI/PIL_NOTTY,
-            * converting spi_science_analysis ql parameters to hl,
-            * passing mode=h,
-            * disabling background/SPIROS for first binning product generation.
+          cat > ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS/R3L_CLAIM_BOUNDARY.txt <<'EOF'
+          ACIRM R3L claim boundary:
+          - Headless SPI511 safe-parameter OSA execution attempt.
+          - Removes mode=h from og_create.
+          - Passes parameters to spi_science_analysis only if present in spi_science_analysis.par.
+          - Keeps DISPLAY unset, HEADASNOQUERY=1, PIL_NO_GUI=1, PIL_NOTTY=1.
+          - Converts spi_science_analysis ql parameters to hl.
+          - Disables background/SPIROS for first binning product generation.
           - Not final 511 keV proof until audited.
           - Not 511 keV discovery.
           - Runtime/parameter/OSA product failure is not a physical null.
           - LIGHT artifact excludes heavy FITS/OSA products.
           EOF
 
-          zip -r ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS
-          sha256sum ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS.zip.sha256.txt
-          cat ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS.zip.sha256.txt
+          zip -r ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS
+          sha256sum ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS.zip.sha256.txt
+          cat ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS.zip.sha256.txt
 
-      - name: Upload ACIRM R3K LIGHT artifact
+      - name: Upload ACIRM R3L LIGHT artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3K_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3L_LIGHT_RESULTS.zip.sha256.txt
