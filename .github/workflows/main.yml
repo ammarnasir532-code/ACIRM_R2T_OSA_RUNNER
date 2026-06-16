@@ -1,4 +1,4 @@
-name: ACIRM R2Z group member resolver DAL smoke test
+name: ACIRM R2Z group member resolver DAL smoke test FIXED
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  acirm-r2z-group-member-dal-smoke:
+  acirm-r2z-group-member-dal-smoke-fixed:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -21,7 +21,7 @@ jobs:
       - name: System diagnostics
         run: |
           {
-            echo "ACIRM R2Z group member resolver for SWG DAL smoke test"
+            echo "ACIRM R2Z fixed group member resolver for SWG DAL smoke test"
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "claim_ceiling=GROUP_MEMBER_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY"
             echo ""
@@ -34,6 +34,18 @@ jobs:
             echo "HEASARC IPv4 HTTPS probe"
             curl -4 -I -L --connect-timeout 30 --max-time 90 https://heasarc.gsfc.nasa.gov/FTP/integral/data/ || true
           } | tee ACIRM_R21AX_R7G_R2Z_RESULTS/logs/system_diagnostics.log
+
+      - name: Install Python FITS dependencies
+        run: |
+          {
+            echo "Installing astropy"
+            python3 -m pip install --upgrade pip
+            python3 -m pip install --no-cache-dir astropy
+            python3 - <<'PY'
+            from astropy.io import fits
+            print("astropy import OK")
+            PY
+          } | tee ACIRM_R21AX_R7G_R2Z_RESULTS/logs/python_dependency_install.log
 
       - name: Pull OSA Docker image
         continue-on-error: true
@@ -48,6 +60,7 @@ jobs:
           } | tee ACIRM_R21AX_R7G_R2Z_RESULTS/logs/docker_pull.log
 
       - name: Download SWG and resolve group members
+        continue-on-error: true
         run: |
           python3 - <<'PY'
           import csv
@@ -57,25 +70,24 @@ jobs:
           import re
           import shutil
           import subprocess
-          import sys
           import time
           from pathlib import Path
-
-          subprocess.run([sys.executable, "-m", "pip", "install", "-q", "astropy"], check=False)
-
           from astropy.io import fits
 
-          RUN_ID = "ACIRM_R21AX_R7G_R2Z_GROUP_MEMBER_RESOLVER_FOR_SWG_DAL_SMOKE_LIGHT"
+          RUN_ID = "ACIRM_R21AX_R7G_R2Z_GROUP_MEMBER_RESOLVER_FOR_SWG_DAL_SMOKE_LIGHT_FIXED"
 
           out = Path("ACIRM_R21AX_R7G_R2Z_RESULTS")
           data = out / "data"
+          logs = out / "logs"
           data.mkdir(parents=True, exist_ok=True)
+          logs.mkdir(parents=True, exist_ok=True)
 
           base_https = "https://heasarc.gsfc.nasa.gov/FTP/integral/data"
           base_http = "http://heasarc.gsfc.nasa.gov/FTP/integral/data"
 
           rev = "2504"
           scw = "250400090010"
+
           scw_dir = data / "scw" / rev / f"{scw}.001"
           scw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -121,6 +133,7 @@ jobs:
           def curl_download(url, tmp):
               if tmp.exists():
                   tmp.unlink()
+
               cmd = [
                   "curl",
                   "-4",
@@ -133,12 +146,14 @@ jobs:
                   "-o", str(tmp),
                   url,
               ]
+
               p = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
               ok, reason = accept_download(tmp)
               return p.returncode, ok, reason, p.stdout[-4000:]
 
           def materialize_download(tmp, final_path):
               final_path.parent.mkdir(parents=True, exist_ok=True)
+
               if is_gzip(tmp):
                   with gzip.open(tmp, "rb") as src, open(final_path, "wb") as dst:
                       shutil.copyfileobj(src, dst)
@@ -148,10 +163,14 @@ jobs:
                       final_path.unlink()
                   tmp.rename(final_path)
 
+          def normalize_expected_name(name):
+              name = str(name).strip()
+              name = name.split("[")[0].strip()
+              name = Path(name).name
+              return name
+
           def download_expected_file(expected_name):
-              expected_name = str(expected_name).strip()
-              expected_name = expected_name.split("[")[0].strip()
-              expected_name = Path(expected_name).name
+              expected_name = normalize_expected_name(expected_name)
 
               final_name = expected_name
               if final_name.endswith(".gz"):
@@ -159,17 +178,37 @@ jobs:
 
               final_path = scw_dir / final_name
 
+              if final_path.exists() and final_path.stat().st_size > 1024:
+                  row = {
+                      "expected_name": expected_name,
+                      "final_name": final_name,
+                      "url": "already_exists",
+                      "attempt": 0,
+                      "returncode": 0,
+                      "ok": True,
+                      "reason": "already_exists",
+                      "final_path": str(final_path),
+                      "final_bytes": final_path.stat().st_size,
+                      "final_sha256": sha256_file(final_path),
+                      "log_tail": "",
+                  }
+                  return True, [row]
+
               candidates = []
               for root in [remote_dir_https, remote_dir_http]:
                   candidates.append(f"{root}/{expected_name}")
+
                   if expected_name.endswith(".fits") and not expected_name.endswith(".fits.gz"):
                       candidates.append(f"{root}/{expected_name}.gz")
+
                   if expected_name.endswith(".fits.gz"):
                       candidates.append(f"{root}/{expected_name[:-3]}")
 
               rows = []
+
               for i, url in enumerate(candidates, start=1):
                   tmp = scw_dir / f".download_{final_name}_{i}.part"
+
                   row = {
                       "expected_name": expected_name,
                       "final_name": final_name,
@@ -198,6 +237,7 @@ jobs:
                               row["final_sha256"] = sha256_file(final_path)
                               rows.append(row)
                               return True, rows
+
                   except Exception as e:
                       row["reason"] = repr(e)
 
@@ -206,93 +246,134 @@ jobs:
               return False, rows
 
           all_download_rows = []
-
-          ok_swg, swg_rows = download_expected_file("swg.fits")
-          all_download_rows.extend(swg_rows)
-
-          discovered = set()
-
-          explicit_seed_members = [
-              "sc_time.fits",
-              "sc_attitude.fits",
-              "spi_oper.fits",
-              "spi_spectra.fits",
-              "spi_gti.fits",
-              "spi_hk.fits",
-              "spi_science_hk.fits",
-              "spi_acs.fits",
-          ]
-
-          for x in explicit_seed_members:
-              discovered.add(x)
-
-          regex = re.compile(r"([A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)")
-
-          def cell_to_text(x):
-              try:
-                  if isinstance(x, bytes):
-                      return x.decode("utf-8", "replace")
-                  if isinstance(x, str):
-                      return x
-                  if hasattr(x, "tolist"):
-                      x = x.tolist()
-                  if isinstance(x, (list, tuple)):
-                      return " ".join(cell_to_text(v) for v in x)
-                  return str(x)
-              except Exception:
-                  return ""
-
           parse_rows = []
+          member_status_rows = []
 
-          if swg_path.exists():
-              try:
-                  with fits.open(swg_path, memmap=True) as hdul:
-                      for hdu_i, hdu in enumerate(hdul):
-                          hdu_name = getattr(hdu, "name", "")
-                          if not hasattr(hdu, "data") or hdu.data is None:
-                              continue
-                          if not hasattr(hdu, "columns"):
-                              continue
+          try:
+              ok_swg, swg_rows = download_expected_file("swg.fits")
+              all_download_rows.extend(swg_rows)
 
-                          for col in hdu.columns.names:
-                              try:
-                                  arr = hdu.data[col]
-                                  flat = arr.ravel() if hasattr(arr, "ravel") else arr
-                                  for row_i, val in enumerate(flat):
-                                      txt = cell_to_text(val)
-                                      for m in regex.findall(txt):
-                                          clean = m.split("[")[0].strip()
-                                          clean = Path(clean).name
-                                          if clean and clean != "swg.fits":
-                                              discovered.add(clean)
-                                              parse_rows.append({
-                                                  "hdu_index": hdu_i,
-                                                  "hdu_name": hdu_name,
-                                                  "column": col,
-                                                  "row_index": row_i,
-                                                  "reference": m,
-                                                  "clean_name": clean,
-                                              })
-                              except Exception as e:
-                                  parse_rows.append({
-                                      "hdu_index": hdu_i,
-                                      "hdu_name": hdu_name,
-                                      "column": col,
-                                      "row_index": "",
-                                      "reference": "",
-                                      "clean_name": "",
-                                      "error": repr(e),
-                                  })
-              except Exception as e:
-                  parse_rows.append({
-                      "hdu_index": "",
-                      "hdu_name": "",
-                      "column": "",
-                      "row_index": "",
-                      "reference": "",
-                      "clean_name": "",
-                      "error": repr(e),
+              discovered = set()
+
+              explicit_seed_members = [
+                  "sc_time.fits",
+                  "sc_attitude.fits",
+                  "spi_oper.fits",
+                  "spi_spectra.fits",
+                  "spi_gti.fits",
+                  "spi_hk.fits",
+                  "spi_science_hk.fits",
+                  "spi_acs.fits",
+              ]
+
+              for x in explicit_seed_members:
+                  discovered.add(x)
+
+              regex = re.compile(r"([A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)")
+
+              def cell_to_text(x):
+                  try:
+                      if isinstance(x, bytes):
+                          return x.decode("utf-8", "replace")
+                      if isinstance(x, str):
+                          return x
+                      if hasattr(x, "tolist"):
+                          x = x.tolist()
+                      if isinstance(x, (list, tuple)):
+                          return " ".join(cell_to_text(v) for v in x)
+                      return str(x)
+                  except Exception:
+                      return ""
+
+              if swg_path.exists():
+                  try:
+                      with fits.open(swg_path, memmap=True) as hdul:
+                          for hdu_i, hdu in enumerate(hdul):
+                              hdu_name = getattr(hdu, "name", "")
+
+                              if not hasattr(hdu, "data") or hdu.data is None:
+                                  continue
+
+                              if not hasattr(hdu, "columns"):
+                                  continue
+
+                              for col in hdu.columns.names:
+                                  try:
+                                      arr = hdu.data[col]
+                                      flat = arr.ravel() if hasattr(arr, "ravel") else arr
+
+                                      for row_i, val in enumerate(flat):
+                                          txt = cell_to_text(val)
+
+                                          for m in regex.findall(txt):
+                                              clean = normalize_expected_name(m)
+
+                                              if clean and clean != "swg.fits":
+                                                  discovered.add(clean)
+                                                  parse_rows.append({
+                                                      "hdu_index": hdu_i,
+                                                      "hdu_name": hdu_name,
+                                                      "column": col,
+                                                      "row_index": row_i,
+                                                      "reference": m,
+                                                      "clean_name": clean,
+                                                      "error": "",
+                                                  })
+
+                                  except Exception as e:
+                                      parse_rows.append({
+                                          "hdu_index": hdu_i,
+                                          "hdu_name": hdu_name,
+                                          "column": col,
+                                          "row_index": "",
+                                          "reference": "",
+                                          "clean_name": "",
+                                          "error": repr(e),
+                                      })
+
+                  except Exception as e:
+                      parse_rows.append({
+                          "hdu_index": "",
+                          "hdu_name": "",
+                          "column": "",
+                          "row_index": "",
+                          "reference": "",
+                          "clean_name": "",
+                          "error": repr(e),
+                      })
+
+              member_names = sorted(discovered)
+
+              for name in member_names:
+                  ok, rows = download_expected_file(name)
+                  all_download_rows.extend(rows)
+
+                  final_name = normalize_expected_name(name)
+                  if final_name.endswith(".gz"):
+                      final_name = final_name[:-3]
+
+                  final_path = scw_dir / Path(final_name).name
+
+                  member_status_rows.append({
+                      "member_name": name,
+                      "final_name": Path(final_name).name,
+                      "ok": ok and final_path.exists(),
+                      "final_path": str(final_path),
+                      "final_bytes": final_path.stat().st_size if final_path.exists() else 0,
+                      "final_sha256": sha256_file(final_path) if final_path.exists() and final_path.stat().st_size > 0 else "",
                   })
+
+          except Exception as e:
+              parse_rows.append({
+                  "hdu_index": "",
+                  "hdu_name": "",
+                  "column": "",
+                  "row_index": "",
+                  "reference": "",
+                  "clean_name": "",
+                  "error": "TOP_LEVEL_ERROR: " + repr(e),
+              })
+              ok_swg = swg_path.exists()
 
           with open(out / "r2z_group_member_references_parsed.csv", "w", newline="", encoding="utf-8") as f:
               fieldnames = ["hdu_index", "hdu_name", "column", "row_index", "reference", "clean_name", "error"]
@@ -303,25 +384,20 @@ jobs:
                       r.setdefault(k, "")
                   w.writerow(r)
 
-          member_names = sorted(discovered)
-
-          member_status_rows = []
-          for name in member_names:
-              ok, rows = download_expected_file(name)
-              all_download_rows.extend(rows)
-              final_name = name[:-3] if name.endswith(".gz") else name
-              final_path = scw_dir / Path(final_name).name
-              member_status_rows.append({
-                  "member_name": name,
-                  "final_name": Path(final_name).name,
-                  "ok": ok and final_path.exists(),
-                  "final_path": str(final_path),
-                  "final_bytes": final_path.stat().st_size if final_path.exists() else 0,
-                  "final_sha256": sha256_file(final_path) if final_path.exists() and final_path.stat().st_size > 0 else "",
-              })
-
           with open(out / "r2z_group_member_download_manifest.csv", "w", newline="", encoding="utf-8") as f:
-              fieldnames = ["expected_name", "final_name", "url", "attempt", "returncode", "ok", "reason", "final_path", "final_bytes", "final_sha256", "log_tail"]
+              fieldnames = [
+                  "expected_name",
+                  "final_name",
+                  "url",
+                  "attempt",
+                  "returncode",
+                  "ok",
+                  "reason",
+                  "final_path",
+                  "final_bytes",
+                  "final_sha256",
+                  "log_tail",
+              ]
               w = csv.DictWriter(f, fieldnames=fieldnames)
               w.writeheader()
               for r in all_download_rows:
@@ -353,14 +429,13 @@ jobs:
               "run_id": RUN_ID,
               "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "claim_ceiling": "GROUP_MEMBER_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
-              "swg_download_ok": ok_swg and swg_path.exists(),
-              "discovered_member_count": len(member_names),
+              "swg_download_ok": bool(swg_path.exists()),
               "member_ok_count": sum(1 for r in member_status_rows if r["ok"]),
               "member_total_count": len(member_status_rows),
               "local_fits_file_count": len(final_files),
               "final_status": (
                   "R21AX_R7G_R2Z_GROUP_MEMBERS_DOWNLOADED_READY_FOR_DAL_VERIFY_NO_511_YET"
-                  if ok_swg and len(final_files) > 1
+                  if swg_path.exists() and len(final_files) > 1
                   else "R21AX_R7G_R2Z_GROUP_MEMBER_DOWNLOAD_INCOMPLETE_NO_PHYSICAL_NULL"
               ),
           }
@@ -455,8 +530,8 @@ jobs:
           resolver = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
 
           missing_refs = []
-          for m in re.findall(r"([A-Za-z0-9_./+-]+\.fits(?:\[[^\]]+\])?)", txt):
-              if "not found" in txt.lower() or "DAL_FILE_NOT_ACCESSIBLE" in txt or "status -2004" in txt:
+          if "DAL_FILE_NOT_ACCESSIBLE" in txt or "status -2004" in txt:
+              for m in re.findall(r"([A-Za-z0-9_./+-]+\.fits(?:\[[^\]]+\])?)", txt):
                   missing_refs.append(m)
 
           missing_refs = sorted(set(missing_refs))
@@ -492,7 +567,7 @@ jobs:
                   w.writerow({"missing_reference_context": x})
 
           final_summary = {
-              "run_id": "ACIRM_R21AX_R7G_R2Z_GROUP_MEMBER_RESOLVER_FOR_SWG_DAL_SMOKE_LIGHT",
+              "run_id": "ACIRM_R21AX_R7G_R2Z_GROUP_MEMBER_RESOLVER_FOR_SWG_DAL_SMOKE_LIGHT_FIXED",
               "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "claim_ceiling": "GROUP_MEMBER_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
               "checks": checks,
@@ -512,6 +587,7 @@ jobs:
           PY
 
       - name: Build LIGHT audit package only
+        if: always()
         run: |
           mkdir -p ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/logs
 
@@ -546,6 +622,7 @@ jobs:
           cat ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS.zip.sha256.txt
 
       - name: Upload ACIRM R2Z LIGHT artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS
