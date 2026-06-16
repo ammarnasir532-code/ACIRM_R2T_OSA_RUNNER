@@ -1,4 +1,4 @@
-name: ACIRM R2Z group member resolver DAL smoke test FIXED NO ASTROPY
+name: ACIRM R3A AUX ADP orbit resolver DAL smoke test
 
 on:
   workflow_dispatch:
@@ -7,23 +7,23 @@ on:
       - main
 
 jobs:
-  acirm-r2z-group-member-dal-smoke-fixed-no-astropy:
+  acirm-r3a-aux-adp-orbit-dal-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
       - name: Prepare folders
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R2Z_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R2Z_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS
+          mkdir -p ACIRM_R21AX_R7G_R3A_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3A_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS
 
       - name: System diagnostics
         run: |
           {
-            echo "ACIRM R2Z fixed group member resolver for SWG DAL smoke test - no astropy"
+            echo "ACIRM R3A AUX ADP orbit resolver and DAL smoke test"
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "claim_ceiling=GROUP_MEMBER_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY"
+            echo "claim_ceiling=AUX_ADP_ORBIT_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY"
             echo ""
             uname -a || true
             echo ""
@@ -33,7 +33,7 @@ jobs:
             echo ""
             echo "HEASARC IPv4 HTTPS probe"
             curl -4 -I -L --connect-timeout 30 --max-time 90 https://heasarc.gsfc.nasa.gov/FTP/integral/data/ || true
-          } | tee ACIRM_R21AX_R7G_R2Z_RESULTS/logs/system_diagnostics.log
+          } | tee ACIRM_R21AX_R7G_R3A_RESULTS/logs/system_diagnostics.log
 
       - name: Pull OSA Docker image
         continue-on-error: true
@@ -45,9 +45,9 @@ jobs:
             echo ""
             echo "Pull integralsw/osa:latest"
             docker pull integralsw/osa:latest || true
-          } | tee ACIRM_R21AX_R7G_R2Z_RESULTS/logs/docker_pull.log
+          } | tee ACIRM_R21AX_R7G_R3A_RESULTS/logs/docker_pull.log
 
-      - name: Download SWG and required group members without astropy
+      - name: Download SCW members and AUX ADP orbit products
         continue-on-error: true
         run: |
           python3 - <<'PY'
@@ -61,9 +61,9 @@ jobs:
           import time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R2Z_GROUP_MEMBER_RESOLVER_FOR_SWG_DAL_SMOKE_LIGHT_FIXED_NO_ASTROPY"
+          RUN_ID = "ACIRM_R21AX_R7G_R3A_AUX_ADP_ORBIT_RESOLVER_AND_DAL_SMOKE_LIGHT"
 
-          out = Path("ACIRM_R21AX_R7G_R2Z_RESULTS")
+          out = Path("ACIRM_R21AX_R7G_R3A_RESULTS")
           data = out / "data"
           data.mkdir(parents=True, exist_ok=True)
 
@@ -74,10 +74,16 @@ jobs:
           scw = "250400090010"
 
           scw_dir = data / "scw" / rev / f"{scw}.001"
-          scw_dir.mkdir(parents=True, exist_ok=True)
+          aux_adp_dir = data / "aux" / "adp" / f"{rev}.001"
 
-          remote_dir_https = f"{base_https}/scw/{rev}/{scw}.001"
-          remote_dir_http = f"{base_http}/scw/{rev}/{scw}.001"
+          scw_dir.mkdir(parents=True, exist_ok=True)
+          aux_adp_dir.mkdir(parents=True, exist_ok=True)
+
+          remote_scw_https = f"{base_https}/scw/{rev}/{scw}.001"
+          remote_scw_http = f"{base_http}/scw/{rev}/{scw}.001"
+
+          remote_aux_https = f"{base_https}/aux/adp/{rev}.001"
+          remote_aux_http = f"{base_http}/aux/adp/{rev}.001"
 
           def sha256_file(path):
               h = hashlib.sha256()
@@ -152,17 +158,18 @@ jobs:
               name = Path(name).name
               return name
 
-          def download_expected_file(expected_name):
+          def download_file(expected_name, final_dir, remote_roots, category):
               expected_name = normalize_name(expected_name)
 
               final_name = expected_name
               if final_name.endswith(".gz"):
                   final_name = final_name[:-3]
 
-              final_path = scw_dir / final_name
+              final_path = final_dir / final_name
 
               if final_path.exists() and final_path.stat().st_size > 1024:
                   row = {
+                      "category": category,
                       "expected_name": expected_name,
                       "final_name": final_name,
                       "url": "already_exists",
@@ -178,7 +185,7 @@ jobs:
                   return True, [row]
 
               candidates = []
-              for root in [remote_dir_https, remote_dir_http]:
+              for root in remote_roots:
                   candidates.append(f"{root}/{expected_name}")
 
                   if expected_name.endswith(".fits") and not expected_name.endswith(".fits.gz"):
@@ -190,9 +197,10 @@ jobs:
               rows = []
 
               for i, url in enumerate(candidates, start=1):
-                  tmp = scw_dir / f".download_{final_name}_{i}.part"
+                  tmp = final_dir / f".download_{final_name}_{i}.part"
 
                   row = {
+                      "category": category,
                       "expected_name": expected_name,
                       "final_name": final_name,
                       "url": url,
@@ -230,9 +238,8 @@ jobs:
 
           all_download_rows = []
           parse_rows = []
-          member_status_rows = []
 
-          explicit_seed_members = [
+          scw_seed_members = [
               "swg.fits",
               "sc_time.fits",
               "sc_attitude.fits",
@@ -244,27 +251,28 @@ jobs:
               "spi_acs.fits",
           ]
 
-          discovered = set(explicit_seed_members)
+          discovered_scw_members = set(scw_seed_members)
 
-          swg_ok = False
+          ok_swg, swg_rows = download_file(
+              "swg.fits",
+              scw_dir,
+              [remote_scw_https, remote_scw_http],
+              "scw"
+          )
+          all_download_rows.extend(swg_rows)
 
-          try:
-              ok_swg, swg_rows = download_expected_file("swg.fits")
-              all_download_rows.extend(swg_rows)
-              swg_ok = ok_swg
+          swg_path = scw_dir / "swg.fits"
 
-              swg_path = scw_dir / "swg.fits"
-
-              if swg_path.exists():
+          if swg_path.exists():
+              try:
                   raw = swg_path.read_bytes()
                   text = raw.decode("latin1", "ignore")
-
                   regex = re.compile(r"([A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)")
 
                   for idx, m in enumerate(regex.findall(text)):
                       clean = normalize_name(m)
                       if clean and clean != "swg.fits":
-                          discovered.add(clean)
+                          discovered_scw_members.add(clean)
                           parse_rows.append({
                               "index": idx,
                               "reference": m,
@@ -272,20 +280,24 @@ jobs:
                               "source": "raw_swg_regex",
                               "error": "",
                           })
+              except Exception as e:
+                  parse_rows.append({
+                      "index": "",
+                      "reference": "",
+                      "clean_name": "",
+                      "source": "raw_swg_regex",
+                      "error": repr(e),
+                  })
 
-          except Exception as e:
-              parse_rows.append({
-                  "index": "",
-                  "reference": "",
-                  "clean_name": "",
-                  "source": "top_level",
-                  "error": repr(e),
-              })
+          scw_status_rows = []
 
-          member_names = sorted(discovered)
-
-          for name in member_names:
-              ok, rows = download_expected_file(name)
+          for name in sorted(discovered_scw_members):
+              ok, rows = download_file(
+                  name,
+                  scw_dir,
+                  [remote_scw_https, remote_scw_http],
+                  "scw"
+              )
               all_download_rows.extend(rows)
 
               final_name = normalize_name(name)
@@ -294,7 +306,7 @@ jobs:
 
               final_path = scw_dir / final_name
 
-              member_status_rows.append({
+              scw_status_rows.append({
                   "member_name": name,
                   "final_name": final_name,
                   "ok": ok and final_path.exists(),
@@ -303,7 +315,40 @@ jobs:
                   "final_sha256": sha256_file(final_path) if final_path.exists() and final_path.stat().st_size > 0 else "",
               })
 
-          with open(out / "r2z_group_member_references_parsed.csv", "w", newline="", encoding="utf-8") as f:
+          aux_adp_seed_members = [
+              "orbit_historic.fits",
+              "attitude_historic.fits",
+              "time_correlation.fits",
+              "time_correlation.fits.gz",
+          ]
+
+          aux_status_rows = []
+
+          for name in aux_adp_seed_members:
+              ok, rows = download_file(
+                  name,
+                  aux_adp_dir,
+                  [remote_aux_https, remote_aux_http],
+                  "aux_adp"
+              )
+              all_download_rows.extend(rows)
+
+              final_name = normalize_name(name)
+              if final_name.endswith(".gz"):
+                  final_name = final_name[:-3]
+
+              final_path = aux_adp_dir / final_name
+
+              aux_status_rows.append({
+                  "member_name": name,
+                  "final_name": final_name,
+                  "ok": ok and final_path.exists(),
+                  "final_path": str(final_path),
+                  "final_bytes": final_path.stat().st_size if final_path.exists() else 0,
+                  "final_sha256": sha256_file(final_path) if final_path.exists() and final_path.stat().st_size > 0 else "",
+              })
+
+          with open(out / "r3a_swg_references_parsed.csv", "w", newline="", encoding="utf-8") as f:
               fieldnames = ["index", "reference", "clean_name", "source", "error"]
               w = csv.DictWriter(f, fieldnames=fieldnames)
               w.writeheader()
@@ -312,8 +357,9 @@ jobs:
                       r.setdefault(k, "")
                   w.writerow(r)
 
-          with open(out / "r2z_group_member_download_manifest.csv", "w", newline="", encoding="utf-8") as f:
+          with open(out / "r3a_download_manifest.csv", "w", newline="", encoding="utf-8") as f:
               fieldnames = [
+                  "category",
                   "expected_name",
                   "final_name",
                   "url",
@@ -333,21 +379,27 @@ jobs:
                       r.setdefault(k, "")
                   w.writerow(r)
 
-          with open(out / "r2z_group_member_status.csv", "w", newline="", encoding="utf-8") as f:
+          with open(out / "r3a_scw_group_member_status.csv", "w", newline="", encoding="utf-8") as f:
               fieldnames = ["member_name", "final_name", "ok", "final_path", "final_bytes", "final_sha256"]
               w = csv.DictWriter(f, fieldnames=fieldnames)
               w.writeheader()
-              w.writerows(member_status_rows)
+              w.writerows(scw_status_rows)
+
+          with open(out / "r3a_aux_adp_status.csv", "w", newline="", encoding="utf-8") as f:
+              fieldnames = ["member_name", "final_name", "ok", "final_path", "final_bytes", "final_sha256"]
+              w = csv.DictWriter(f, fieldnames=fieldnames)
+              w.writeheader()
+              w.writerows(aux_status_rows)
 
           final_files = []
-          for p in sorted(scw_dir.glob("*.fits")):
+          for p in sorted(data.rglob("*.fits")):
               final_files.append({
                   "path": str(p),
                   "bytes": p.stat().st_size,
                   "sha256": sha256_file(p),
               })
 
-          with open(out / "r2z_final_local_fits_files.csv", "w", newline="", encoding="utf-8") as f:
+          with open(out / "r3a_final_local_fits_files.csv", "w", newline="", encoding="utf-8") as f:
               fieldnames = ["path", "bytes", "sha256"]
               w = csv.DictWriter(f, fieldnames=fieldnames)
               w.writeheader()
@@ -356,32 +408,34 @@ jobs:
           summary = {
               "run_id": RUN_ID,
               "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "claim_ceiling": "GROUP_MEMBER_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
+              "claim_ceiling": "AUX_ADP_ORBIT_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
               "swg_download_ok": bool((scw_dir / "swg.fits").exists()),
-              "member_ok_count": sum(1 for r in member_status_rows if r["ok"]),
-              "member_total_count": len(member_status_rows),
+              "scw_member_ok_count": sum(1 for r in scw_status_rows if r["ok"]),
+              "scw_member_total_count": len(scw_status_rows),
+              "aux_adp_ok_count": sum(1 for r in aux_status_rows if r["ok"]),
+              "aux_adp_total_count": len(aux_status_rows),
               "local_fits_file_count": len(final_files),
               "final_status": (
-                  "R21AX_R7G_R2Z_GROUP_MEMBERS_DOWNLOADED_READY_FOR_DAL_VERIFY_NO_511_YET"
-                  if (scw_dir / "swg.fits").exists() and len(final_files) > 1
-                  else "R21AX_R7G_R2Z_GROUP_MEMBER_DOWNLOAD_INCOMPLETE_NO_PHYSICAL_NULL"
+                  "R21AX_R7G_R3A_AUX_ADP_ORBIT_AND_SOME_AUX_PRODUCTS_READY_FOR_DAL_VERIFY_NO_511_YET"
+                  if (aux_adp_dir / "orbit_historic.fits").exists()
+                  else "R21AX_R7G_R3A_AUX_ADP_ORBIT_DOWNLOAD_INCOMPLETE_NO_PHYSICAL_NULL"
               ),
           }
 
-          with open(out / "R2Z_GROUP_MEMBER_RESOLVER_SUMMARY.json", "w", encoding="utf-8") as f:
+          with open(out / "R3A_AUX_ADP_RESOLVER_SUMMARY.json", "w", encoding="utf-8") as f:
               json.dump(summary, f, indent=2, sort_keys=True)
 
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Run DAL verify after group member resolving
+      - name: Run DAL verify after AUX ADP resolving
         continue-on-error: true
         run: |
           {
-            echo "Run R2Z DAL verify after group member resolving"
+            echo "Run R3A DAL verify after AUX ADP resolving"
             docker run --rm \
-              -v "$PWD/ACIRM_R21AX_R7G_R2Z_RESULTS/data:/data" \
-              -v "$PWD/ACIRM_R21AX_R7G_R2Z_RESULTS/logs:/logs" \
+              -v "$PWD/ACIRM_R21AX_R7G_R3A_RESULTS/data:/data" \
+              -v "$PWD/ACIRM_R21AX_R7G_R3A_RESULTS/logs:/logs" \
               integralsw/osa:latest bash -lc '
                 set +e
 
@@ -420,8 +474,8 @@ jobs:
                 env | sort | grep -E "^(ISDC|OSA|REP|PFILES|PATH|LD_LIBRARY_PATH|COMMONLOGFILE|HEADAS|CFITSIO)" || true
                 echo ""
 
-                echo "local files"
-                find /data/scw/2504/250400090010.001 -maxdepth 1 -type f -printf "%f %s\n" | sort || true
+                echo "local data files"
+                find /data -maxdepth 6 -type f -printf "%p %s\n" | sort || true
                 echo ""
 
                 echo "fkeyprint swg.fits"
@@ -429,7 +483,7 @@ jobs:
                 echo ""
 
                 echo "dal_verify swg.fits"
-                timeout 240 dal_verify "$TARGET" 2>&1 | head -500 || true
+                timeout 300 dal_verify "$TARGET" 2>&1 | head -700 || true
                 echo ""
 
                 echo "og_create parameter probe"
@@ -437,11 +491,11 @@ jobs:
                 echo ""
 
                 echo "commonlog tail"
-                cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -300 || true
+                cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -360 || true
               '
-          } | tee ACIRM_R21AX_R7G_R2Z_RESULTS/logs/r2z_dal_verify_after_member_resolve.log
+          } | tee ACIRM_R21AX_R7G_R3A_RESULTS/logs/r3a_dal_verify_after_aux_adp_resolve.log
 
-      - name: Analyze R2Z logs
+      - name: Analyze R3A logs
         continue-on-error: true
         run: |
           python3 - <<'PY'
@@ -451,15 +505,17 @@ jobs:
           import time
           from pathlib import Path
 
-          out = Path("ACIRM_R21AX_R7G_R2Z_RESULTS")
-          log_path = out / "logs" / "r2z_dal_verify_after_member_resolve.log"
+          out = Path("ACIRM_R21AX_R7G_R3A_RESULTS")
+          log_path = out / "logs" / "r3a_dal_verify_after_aux_adp_resolve.log"
           txt = log_path.read_text(errors="replace") if log_path.exists() else ""
 
-          summary_path = out / "R2Z_GROUP_MEMBER_RESOLVER_SUMMARY.json"
+          summary_path = out / "R3A_AUX_ADP_RESOLVER_SUMMARY.json"
           resolver = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
 
           missing_refs = []
           if "DAL_FILE_NOT_ACCESSIBLE" in txt or "status -2004" in txt:
+              for m in re.findall(r"(/data/[A-Za-z0-9_./+-]+\.fits(?:\[[^\]]+\])?)", txt):
+                  missing_refs.append(m)
               for m in re.findall(r"([A-Za-z0-9_./+-]+\.fits(?:\[[^\]]+\])?)", txt):
                   missing_refs.append(m)
 
@@ -468,8 +524,10 @@ jobs:
           checks = {
               "log_exists": log_path.exists(),
               "swg_download_ok": bool(resolver.get("swg_download_ok", False)),
-              "member_ok_count": resolver.get("member_ok_count", 0),
-              "member_total_count": resolver.get("member_total_count", 0),
+              "scw_member_ok_count": resolver.get("scw_member_ok_count", 0),
+              "scw_member_total_count": resolver.get("scw_member_total_count", 0),
+              "aux_adp_ok_count": resolver.get("aux_adp_ok_count", 0),
+              "aux_adp_total_count": resolver.get("aux_adp_total_count", 0),
               "local_fits_file_count": resolver.get("local_fits_file_count", 0),
               "fkeyprint_invoked": "fkeyprint swg.fits" in txt,
               "dal_verify_invoked": "dal_verify swg.fits" in txt,
@@ -481,32 +539,32 @@ jobs:
           }
 
           if checks["dal_verify_invoked"] and not checks["dal_file_not_accessible_seen"] and not checks["isdc_env_missing_seen"]:
-              status = "R21AX_R7G_R2Z_DAL_VERIFY_REACHED_GROUP_FILE_LAYER_WITH_MEMBERS_NO_511_YET_REVIEW_REQUIRED"
+              status = "R21AX_R7G_R3A_DAL_VERIFY_REACHED_GROUP_AND_AUX_LAYER_NO_511_YET_REVIEW_REQUIRED"
           elif checks["dal_file_not_accessible_seen"]:
-              status = "R21AX_R7G_R2Z_DAL_STILL_REQUIRES_ADDITIONAL_GROUP_MEMBER_NO_511_NO_PHYSICAL_NULL"
+              status = "R21AX_R7G_R3A_DAL_STILL_REQUIRES_ADDITIONAL_AUX_OR_IC_MEMBER_NO_511_NO_PHYSICAL_NULL"
           elif checks["isdc_env_missing_seen"] or checks["parameter_init_error_seen"]:
-              status = "R21AX_R7G_R2Z_ENV_OR_PARAMETER_LAYER_REGRESSION_NO_511_NO_PHYSICAL_NULL"
+              status = "R21AX_R7G_R3A_ENV_OR_PARAMETER_LAYER_REGRESSION_NO_511_NO_PHYSICAL_NULL"
           else:
-              status = "R21AX_R7G_R2Z_LOGS_READY_FOR_AUDIT_NO_511_NO_PHYSICAL_NULL"
+              status = "R21AX_R7G_R3A_LOGS_READY_FOR_AUDIT_NO_511_NO_PHYSICAL_NULL"
 
-          with open(out / "r2z_dal_missing_reference_context.csv", "w", newline="", encoding="utf-8") as f:
+          with open(out / "r3a_dal_missing_reference_context.csv", "w", newline="", encoding="utf-8") as f:
               w = csv.DictWriter(f, fieldnames=["missing_reference_context"])
               w.writeheader()
               for x in missing_refs:
                   w.writerow({"missing_reference_context": x})
 
           final_summary = {
-              "run_id": "ACIRM_R21AX_R7G_R2Z_GROUP_MEMBER_RESOLVER_FOR_SWG_DAL_SMOKE_LIGHT_FIXED_NO_ASTROPY",
+              "run_id": "ACIRM_R21AX_R7G_R3A_AUX_ADP_ORBIT_RESOLVER_AND_DAL_SMOKE_LIGHT",
               "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "claim_ceiling": "GROUP_MEMBER_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
+              "claim_ceiling": "AUX_ADP_ORBIT_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
               "checks": checks,
               "final_status": status,
           }
 
-          with open(out / "R2Z_DAL_SMOKE_TEST_SUMMARY.json", "w", encoding="utf-8") as f:
+          with open(out / "R3A_DAL_SMOKE_TEST_SUMMARY.json", "w", encoding="utf-8") as f:
               json.dump(final_summary, f, indent=2, sort_keys=True)
 
-          with open(out / "r2z_checks_flat.csv", "w", newline="", encoding="utf-8") as f:
+          with open(out / "r3a_checks_flat.csv", "w", newline="", encoding="utf-8") as f:
               w = csv.DictWriter(f, fieldnames=["check", "value"])
               w.writeheader()
               for k, v in checks.items():
@@ -518,43 +576,43 @@ jobs:
       - name: Build LIGHT audit package only
         if: always()
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/logs
 
-          cp -r ACIRM_R21AX_R7G_R2Z_RESULTS/logs/* ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/logs/ || true
-          cp ACIRM_R21AX_R7G_R2Z_RESULTS/*.json ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/ || true
-          cp ACIRM_R21AX_R7G_R2Z_RESULTS/*.csv ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/ || true
+          cp -r ACIRM_R21AX_R7G_R3A_RESULTS/logs/* ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/logs/ || true
+          cp ACIRM_R21AX_R7G_R3A_RESULTS/*.json ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R3A_RESULTS/*.csv ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/ || true
 
-          echo "Group member FITS files were downloaded temporarily on the GitHub runner." > ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
-          echo "FITS files are excluded from this phone artifact." >> ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
-          echo "No 511 keV metric is computed here." >> ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "SCW and AUX FITS files were downloaded temporarily on the GitHub runner." > ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "FITS files are excluded from this phone artifact." >> ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "No 511 keV metric is computed here." >> ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
 
-          du -h ACIRM_R21AX_R7G_R2Z_RESULTS/data > ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/data_size_report.txt || true
-          find ACIRM_R21AX_R7G_R2Z_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/data_file_list.csv || true
+          du -h ACIRM_R21AX_R7G_R3A_RESULTS/data > ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/data_size_report.txt || true
+          find ACIRM_R21AX_R7G_R3A_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/data_file_list.csv || true
 
-          cat > ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/R2Z_CLAIM_BOUNDARY.txt <<'EOF'
-          ACIRM R2Z claim boundary:
-          - Group member resolver and DAL smoke test only.
+          cat > ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/R3A_CLAIM_BOUNDARY.txt <<'EOF'
+          ACIRM R3A claim boundary:
+          - AUX ADP orbit resolver and DAL smoke test only.
           - No 511 keV metric is computed.
           - Not full OSA proof.
           - Not 511 keV discovery.
-          - Any network/runtime/DAL group-member failure is not a physical null.
+          - Any network/runtime/DAL auxiliary-member failure is not a physical null.
           EOF
 
-          cat > ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS/R2Z_NEXT_STEP.txt <<'EOF'
-          Upload ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS.zip to ChatGPT.
+          cat > ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS/R3A_NEXT_STEP.txt <<'EOF'
+          Upload ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS.zip to ChatGPT.
           Do not upload heavy FITS data.
-          Next step depends on whether dal_verify reached the group file layer cleanly.
+          Next step depends on whether dal_verify still requests additional AUX/IC/IDX/CAT members.
           EOF
 
-          zip -r ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS
-          sha256sum ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS.zip.sha256.txt
-          cat ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS.zip.sha256.txt
+          zip -r ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS
+          sha256sum ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS.zip.sha256.txt
+          cat ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS.zip.sha256.txt
 
-      - name: Upload ACIRM R2Z LIGHT artifact
+      - name: Upload ACIRM R3A LIGHT artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R2Z_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3A_LIGHT_RESULTS.zip.sha256.txt
