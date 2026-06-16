@@ -1,4 +1,4 @@
-name: ACIRM R3G AUTO OSA DAL dependency resolver fixed
+name: ACIRM R3H actual OSA SPI511 execution after DAL ready
 
 on:
   workflow_dispatch:
@@ -7,23 +7,24 @@ on:
       - main
 
 jobs:
-  acirm-r3g-auto-osa-dal-dependency-resolver-fixed:
+  acirm-r3h-actual-osa-spi511-execution:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
       - name: Prepare folders
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R3G_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3G_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS
+          mkdir -p ACIRM_R21AX_R7G_R3H_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3H_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3H_RESULTS/work
+          mkdir -p ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS
 
       - name: System diagnostics
         run: |
           {
-            echo "ACIRM R3G AUTO OSA DAL dependency resolver FIXED"
+            echo "ACIRM R3H actual OSA SPI511 execution after DAL ready"
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "claim_ceiling=AUTO_DAL_DEPENDENCY_RESOLVER_ONLY_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY"
+            echo "claim_ceiling=ACTUAL_OSA_SPI511_EXECUTION_ATTEMPT_AFTER_DAL_READY_NOT_DISCOVERY_NOT_FINAL_PROOF"
             echo ""
             uname -a || true
             echo ""
@@ -33,7 +34,7 @@ jobs:
             echo ""
             echo "HEASARC IPv4 HTTPS probe"
             curl -4 -I -L --connect-timeout 30 --max-time 90 https://heasarc.gsfc.nasa.gov/FTP/integral/data/ || true
-          } | tee ACIRM_R21AX_R7G_R3G_RESULTS/logs/system_diagnostics.log
+          } | tee ACIRM_R21AX_R7G_R3H_RESULTS/logs/system_diagnostics.log
 
       - name: Pull OSA Docker image
         continue-on-error: true
@@ -45,9 +46,9 @@ jobs:
             echo ""
             echo "Pull integralsw/osa:latest"
             docker pull integralsw/osa:latest || true
-          } | tee ACIRM_R21AX_R7G_R3G_RESULTS/logs/docker_pull.log
+          } | tee ACIRM_R21AX_R7G_R3H_RESULTS/logs/docker_pull.log
 
-      - name: AUTO download SCW AUX IC IDX CAT dependencies and iterate DAL verify
+      - name: Assemble data and run actual OSA SPI511 attempt
         continue-on-error: true
         run: |
           python3 - <<'PY'
@@ -62,14 +63,17 @@ jobs:
           import time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3G_AUTO_OSA_DAL_DEPENDENCY_RESOLVER_FIXED_LIGHT"
+          RUN_ID = "ACIRM_R21AX_R7G_R3H_ACTUAL_OSA_SPI511_EXECUTION_ATTEMPT_AFTER_DAL_READY"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3G_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3H_RESULTS")
           DATA = OUT / "data"
           LOGS = OUT / "logs"
+          WORK = OUT / "work"
+
           OUT.mkdir(parents=True, exist_ok=True)
           DATA.mkdir(parents=True, exist_ok=True)
           LOGS.mkdir(parents=True, exist_ok=True)
+          WORK.mkdir(parents=True, exist_ok=True)
 
           BASES = [
               "https://heasarc.gsfc.nasa.gov/FTP/integral/data",
@@ -78,6 +82,7 @@ jobs:
 
           REV = "2504"
           SCW = "250400090010"
+
           SCW_DIR = DATA / "scw" / REV / f"{SCW}.001"
           AUX_ADP_DIR = DATA / "aux" / "adp" / f"{REV}.001"
 
@@ -87,6 +92,7 @@ jobs:
           download_rows = []
           dal_iteration_rows = []
           missing_rows = []
+          osa_attempt_rows = []
 
           def sha256_file(path):
               h = hashlib.sha256()
@@ -341,12 +347,37 @@ jobs:
 
               return refs
 
-          def run_dal_verify(iteration):
-              log_path = LOGS / f"dal_verify_iteration_{iteration:02d}.log"
+          def run_container_script(script, name, timeout_seconds):
+              log_path = LOGS / f"{name}.log"
 
-              bash_script = f'''
+              cmd = [
+                  "docker",
+                  "run",
+                  "--rm",
+                  "-v", f"{os.getcwd()}/ACIRM_R21AX_R7G_R3H_RESULTS/data:/data",
+                  "-v", f"{os.getcwd()}/ACIRM_R21AX_R7G_R3H_RESULTS/work:/work",
+                  "-v", f"{os.getcwd()}/ACIRM_R21AX_R7G_R3H_RESULTS/logs:/logs",
+                  "integralsw/osa:latest",
+                  "bash",
+                  "-lc",
+                  script,
+              ]
+
+              p = subprocess.run(
+                  cmd,
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT,
+                  timeout=timeout_seconds,
+              )
+
+              log_path.write_text(p.stdout, encoding="utf-8", errors="replace")
+              return p.returncode, p.stdout
+
+          def osa_env_prefix():
+              return f'''
                 set +e
-                mkdir -p /tmp/acirm_pfiles /tmp/acirm_work /tmp/acirm_rep
+                mkdir -p /tmp/acirm_pfiles /tmp/acirm_work /tmp/acirm_rep /work/osa_products /work/og
                 cp -f /opt/osa/pfiles/*.par /tmp/acirm_pfiles/ 2>/dev/null || true
 
                 export ISDC_ENV=/opt/osa
@@ -370,44 +401,28 @@ jobs:
                 export COMMONLOGFILE=/tmp/acirm_work/commonlog.txt
                 export PFILES="/tmp/acirm_pfiles;/opt/osa/pfiles"
                 export PATH=/opt/osa/bin:$PATH
+              '''
 
+          def run_dal_verify(iteration):
+              script = osa_env_prefix() + f'''
                 TARGET=/data/scw/{REV}/{SCW}.001/swg.fits
 
-                echo "ACIRM_R3G_DAL_ITERATION={iteration}"
+                echo "ACIRM_R3H_DAL_ITERATION={iteration}"
                 echo "environment"
                 env | sort | grep -E "^(ISDC|OSA|REP|PFILES|PATH|LD_LIBRARY_PATH|COMMONLOGFILE|HEADAS|CFITSIO)" || true
                 echo ""
                 echo "local files count"
                 find /data -type f | wc -l || true
                 echo ""
-                echo "local files sample"
-                find /data -maxdepth 6 -type f -printf "%p %s\\n" | sort | head -300 || true
-                echo ""
                 echo "dal_verify swg.fits"
                 timeout 600 dal_verify "$TARGET" 2>&1 || true
-                echo ""
-                echo "og_create parameter probe"
-                timeout 90 og_create 2>&1 | head -260 || true
                 echo ""
                 echo "commonlog tail"
                 cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -800 || true
               '''
 
-              cmd = [
-                  "docker",
-                  "run",
-                  "--rm",
-                  "-v", f"{os.getcwd()}/ACIRM_R21AX_R7G_R3G_RESULTS/data:/data",
-                  "-v", f"{os.getcwd()}/ACIRM_R21AX_R7G_R3G_RESULTS/logs:/logs",
-                  "integralsw/osa:latest",
-                  "bash",
-                  "-lc",
-                  bash_script,
-              ]
-
-              p = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=720)
-              log_path.write_text(p.stdout, encoding="utf-8", errors="replace")
-              return p.stdout
+              rc, txt = run_container_script(script, f"dal_verify_iteration_{iteration:02d}", 720)
+              return txt
 
           def parse_missing_from_dal_log(txt):
               missing = set()
@@ -457,10 +472,111 @@ jobs:
                           r.setdefault(k, "")
                       w.writerow(r)
 
-          print("R3G: seed initial files")
+          def run_osa_command_discovery():
+              script = osa_env_prefix() + '''
+                echo "OSA command discovery"
+                echo ""
+                echo "PATH=$PATH"
+                echo ""
+                echo "selected commands"
+                for c in dal_verify og_create spi_science_analysis spi_obs_create spi_obs_hist spi_obs_back spi_obs_fit spiselect spi_extract spi_spec; do
+                  echo "COMMAND $c"
+                  command -v "$c" || true
+                done
+                echo ""
+                echo "OSA bin spi/og command list"
+                ls -1 /opt/osa/bin 2>/dev/null | grep -E "^(spi|og|dal|idx|ii_|jemx|ibis)" | sort | head -300 || true
+                echo ""
+                echo "og_create par"
+                cat /opt/osa/pfiles/og_create.par 2>/dev/null || true
+                echo ""
+                echo "spi_science_analysis par"
+                cat /opt/osa/pfiles/spi_science_analysis.par 2>/dev/null || true
+                echo ""
+                echo "fhelp og_create"
+                timeout 30 fhelp og_create 2>&1 | head -200 || true
+                echo ""
+                echo "fhelp spi_science_analysis"
+                timeout 30 fhelp spi_science_analysis 2>&1 | head -260 || true
+              '''
+              rc, txt = run_container_script(script, "osa_command_discovery", 180)
+              return rc, txt
+
+          def run_actual_osa_attempts():
+              script = osa_env_prefix() + f'''
+                set +e
+
+                TARGET=/data/scw/{REV}/{SCW}.001/swg.fits
+                mkdir -p /work/og /work/products /work/logs
+                echo "$TARGET" > /work/scwlist.txt
+
+                echo "ACIRM R3H actual OSA attempts"
+                echo "TARGET=$TARGET"
+                echo ""
+
+                echo "Attempt 1: og_create help/probe"
+                timeout 120 og_create 2>&1 | tee /work/logs/og_create_probe.log || true
+
+                echo ""
+                echo "Attempt 2: og_create idxSwg target"
+                timeout 900 og_create idxSwg="$TARGET" ogid=ACIRM_R3H baseDir=/work/og instrument=SPI 2>&1 | tee /work/logs/og_create_attempt_01.log || true
+
+                echo ""
+                echo "Attempt 3: og_create scwlist"
+                timeout 900 og_create scwlist=/work/scwlist.txt ogid=ACIRM_R3H_LIST baseDir=/work/og instrument=SPI 2>&1 | tee /work/logs/og_create_attempt_02.log || true
+
+                echo ""
+                echo "Observation group files after og_create"
+                find /work/og -maxdepth 6 -type f -printf "%p %s\\n" | sort | tee /work/logs/og_files_after_create.txt || true
+
+                OG_DOL=""
+                for f in $(find /work/og -type f -name "*.fits" | sort); do
+                  if echo "$f" | grep -qi "og"; then
+                    OG_DOL="$f"
+                    break
+                  fi
+                done
+
+                if [ -z "$OG_DOL" ]; then
+                  OG_DOL=$(find /work/og -type f -name "*.fits" | sort | head -1)
+                fi
+
+                echo ""
+                echo "OG_DOL=$OG_DOL"
+
+                echo ""
+                echo "Attempt 4: spi_science_analysis parameter probe"
+                timeout 120 spi_science_analysis 2>&1 | tee /work/logs/spi_science_analysis_probe.log || true
+
+                if [ -n "$OG_DOL" ]; then
+                  echo ""
+                  echo "Attempt 5: spi_science_analysis with ogDOL"
+                  timeout 1800 spi_science_analysis ogDOL="$OG_DOL" outDir=/work/products 2>&1 | tee /work/logs/spi_science_analysis_attempt_01.log || true
+
+                  echo ""
+                  echo "Attempt 6: spi_science_analysis with ogDOL plus energy band context"
+                  timeout 1800 spi_science_analysis ogDOL="$OG_DOL" outDir=/work/products e_min=508 e_max=514 2>&1 | tee /work/logs/spi_science_analysis_attempt_02.log || true
+                fi
+
+                echo ""
+                echo "Products after actual OSA attempts"
+                find /work -maxdepth 8 -type f -printf "%p %s\\n" | sort | tee /work/logs/work_files_after_osa_attempts.txt || true
+
+                echo ""
+                echo "Copy work logs to /logs"
+                cp -r /work/logs/* /logs/ 2>/dev/null || true
+
+                echo ""
+                echo "commonlog tail"
+                cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -1000 || true
+              '''
+              rc, txt = run_container_script(script, "actual_osa_spi511_attempts", 2400)
+              return rc, txt
+
+          print("R3H: seed initial files")
           seed_initial_files()
 
-          print("R3G: discover members from swg")
+          print("R3H: discover members from swg")
           for ref in discover_members_from_swg():
               if ref.startswith("ERROR_"):
                   missing_rows.append({
@@ -479,11 +595,11 @@ jobs:
                   })
 
           max_iterations = 20
-          final_status = "R21AX_R7G_R3G_NOT_STARTED"
+          dependency_status = "NOT_STARTED"
           repeated_guard = set()
 
           for iteration in range(1, max_iterations + 1):
-              print(f"R3G: DAL iteration {iteration}")
+              print(f"R3H: DAL iteration {iteration}")
               txt = run_dal_verify(iteration)
 
               dal_file_not_accessible = ("DAL_FILE_NOT_ACCESSIBLE" in txt) or ("status -2004" in txt)
@@ -501,20 +617,20 @@ jobs:
               })
 
               if isdc_env_missing or parameter_init_error:
-                  final_status = "R21AX_R7G_R3G_OSA_ENV_OR_PARAMETER_REGRESSION_NO_511_NO_PHYSICAL_NULL"
+                  dependency_status = "OSA_ENV_OR_PARAMETER_REGRESSION_NO_511_NO_PHYSICAL_NULL"
                   break
 
               if not dal_file_not_accessible:
-                  final_status = "R21AX_R7G_R3G_DAL_VERIFY_NO_MISSING_FILE_REMAINING_READY_FOR_NEXT_OSA_STAGE_NO_511_YET"
+                  dependency_status = "DAL_DEPENDENCIES_RESOLVED_READY_FOR_OSA"
                   break
 
               if not missing:
-                  final_status = "R21AX_R7G_R3G_DAL_FILE_NOT_ACCESSIBLE_BUT_NO_PARSEABLE_MISSING_REFERENCE_NO_511_NO_PHYSICAL_NULL"
+                  dependency_status = "DAL_FILE_NOT_ACCESSIBLE_BUT_NO_PARSEABLE_MISSING_REFERENCE"
                   break
 
               key = tuple(missing)
               if key in repeated_guard:
-                  final_status = "R21AX_R7G_R3G_REPEATED_MISSING_REFERENCE_AFTER_DOWNLOAD_ATTEMPTS_NO_511_NO_PHYSICAL_NULL"
+                  dependency_status = "REPEATED_MISSING_REFERENCE_AFTER_DOWNLOAD_ATTEMPTS"
                   break
 
               repeated_guard.add(key)
@@ -532,14 +648,27 @@ jobs:
                   })
 
               if not any_new_ok:
-                  final_status = "R21AX_R7G_R3G_UNABLE_TO_DOWNLOAD_NEXT_MISSING_REFERENCES_NO_511_NO_PHYSICAL_NULL"
+                  dependency_status = "UNABLE_TO_DOWNLOAD_NEXT_MISSING_REFERENCES"
                   break
 
           else:
-              final_status = "R21AX_R7G_R3G_MAX_ITERATIONS_REACHED_NO_511_NO_PHYSICAL_NULL"
+              dependency_status = "MAX_ITERATIONS_REACHED"
+
+          print("R3H: command discovery")
+          discovery_rc, discovery_txt = run_osa_command_discovery()
+
+          actual_osa_rc = ""
+          actual_osa_txt = ""
+          actual_osa_started = False
+
+          if dependency_status == "DAL_DEPENDENCIES_RESOLVED_READY_FOR_OSA":
+              print("R3H: actual OSA attempt")
+              actual_osa_started = True
+              actual_osa_rc, actual_osa_txt = run_actual_osa_attempts()
+          else:
+              print("R3H: actual OSA skipped because dependency status is not ready")
 
           final_files = []
-
           for p in sorted(DATA.rglob("*.fits")):
               final_files.append({
                   "path": str(p),
@@ -547,8 +676,41 @@ jobs:
                   "sha256": sha256_file(p),
               })
 
+          work_files = []
+          for p in sorted(WORK.rglob("*")):
+              if p.is_file():
+                  work_files.append({
+                      "path": str(p),
+                      "bytes": p.stat().st_size,
+                      "sha256": sha256_file(p) if p.stat().st_size <= 50 * 1024 * 1024 else "SKIPPED_LARGE_FILE",
+                  })
+
+          actual_txt_joined = discovery_txt + "\n" + actual_osa_txt
+
+          product_hints = []
+          for p in work_files:
+              low = p["path"].lower()
+              if any(k in low for k in ["spi", "spec", "spectrum", "pha", "rmf", "arf", "og", "energy", "511"]):
+                  product_hints.append(p)
+
+          if actual_osa_started and product_hints:
+              final_status = "R21AX_R7G_R3H_ACTUAL_OSA_ATTEMPT_PRODUCED_SPI_OR_OG_PRODUCTS_REVIEW_REQUIRED_NOT_FINAL_511_PROOF"
+          elif actual_osa_started:
+              final_status = "R21AX_R7G_R3H_ACTUAL_OSA_ATTEMPT_RAN_BUT_NO_CLEAR_SPI511_PRODUCT_DETECTED_REVIEW_LOGS"
+          else:
+              final_status = "R21AX_R7G_R3H_OSA_EXECUTION_NOT_STARTED_DEPENDENCY_STAGE_NOT_READY_NO_PHYSICAL_NULL"
+
+          def write_csv(path, rows, fieldnames):
+              with open(path, "w", newline="", encoding="utf-8") as f:
+                  w = csv.DictWriter(f, fieldnames=fieldnames)
+                  w.writeheader()
+                  for r in rows:
+                      for k in fieldnames:
+                          r.setdefault(k, "")
+                      w.writerow(r)
+
           write_csv(
-              OUT / "r3g_download_manifest.csv",
+              OUT / "r3h_download_manifest.csv",
               download_rows,
               [
                   "source_iteration",
@@ -567,7 +729,7 @@ jobs:
           )
 
           write_csv(
-              OUT / "r3g_dal_iterations.csv",
+              OUT / "r3h_dal_iterations.csv",
               dal_iteration_rows,
               [
                   "iteration",
@@ -580,7 +742,7 @@ jobs:
           )
 
           write_csv(
-              OUT / "r3g_missing_reference_resolution.csv",
+              OUT / "r3h_missing_reference_resolution.csv",
               missing_rows,
               [
                   "iteration",
@@ -591,8 +753,28 @@ jobs:
           )
 
           write_csv(
-              OUT / "r3g_final_local_fits_files.csv",
+              OUT / "r3h_final_local_fits_files.csv",
               final_files,
+              [
+                  "path",
+                  "bytes",
+                  "sha256",
+              ],
+          )
+
+          write_csv(
+              OUT / "r3h_work_files_after_osa_attempt.csv",
+              work_files,
+              [
+                  "path",
+                  "bytes",
+                  "sha256",
+              ],
+          )
+
+          write_csv(
+              OUT / "r3h_product_hints.csv",
+              product_hints,
               [
                   "path",
                   "bytes",
@@ -603,18 +785,20 @@ jobs:
           summary = {
               "run_id": RUN_ID,
               "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "claim_ceiling": "AUTO_DAL_DEPENDENCY_RESOLVER_ONLY_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
+              "claim_ceiling": "ACTUAL_OSA_SPI511_EXECUTION_ATTEMPT_AFTER_DAL_READY_NOT_DISCOVERY_NOT_FINAL_PROOF",
               "scw": SCW,
               "rev": REV,
+              "dependency_status": dependency_status,
               "dal_iteration_count": len(dal_iteration_rows),
-              "download_row_count": len(download_rows),
-              "resolved_missing_reference_count": sum(1 for r in missing_rows if bool(r.get("download_ok"))),
-              "unresolved_missing_reference_count": sum(1 for r in missing_rows if not bool(r.get("download_ok"))),
               "local_fits_file_count": len(final_files),
+              "actual_osa_started": actual_osa_started,
+              "actual_osa_returncode": actual_osa_rc,
+              "work_file_count": len(work_files),
+              "product_hint_count": len(product_hints),
               "final_status": final_status,
           }
 
-          (OUT / "R3G_AUTO_DAL_RESOLVER_SUMMARY.json").write_text(
+          (OUT / "R3H_ACTUAL_OSA_SPI511_EXECUTION_SUMMARY.json").write_text(
               json.dumps(summary, indent=2, sort_keys=True),
               encoding="utf-8",
           )
@@ -625,43 +809,40 @@ jobs:
       - name: Build LIGHT audit package only
         if: always()
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/logs
 
-          cp ACIRM_R21AX_R7G_R3G_RESULTS/logs/*.log ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/logs/ || true
-          cp ACIRM_R21AX_R7G_R3G_RESULTS/*.json ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/ || true
-          cp ACIRM_R21AX_R7G_R3G_RESULTS/*.csv ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R3H_RESULTS/logs/*.log ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/logs/ || true
+          cp ACIRM_R21AX_R7G_R3H_RESULTS/*.json ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R3H_RESULTS/*.csv ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/ || true
 
-          echo "R3G auto-resolver downloaded FITS dependencies temporarily on GitHub runner." > ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
-          echo "FITS files are excluded from this phone artifact." >> ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
-          echo "No 511 keV metric is computed here." >> ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "R3H performs actual OSA/SPI execution attempts after resolving DAL dependencies." > ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "FITS and heavy OSA products are excluded from phone artifact." >> ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          echo "This is not a final 511 keV proof/discovery claim." >> ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
 
-          du -h ACIRM_R21AX_R7G_R3G_RESULTS/data > ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/data_size_report.txt || true
-          find ACIRM_R21AX_R7G_R3G_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/data_file_list.csv || true
+          du -h ACIRM_R21AX_R7G_R3H_RESULTS/data > ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/data_size_report.txt || true
+          du -h ACIRM_R21AX_R7G_R3H_RESULTS/work > ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/work_size_report.txt || true
 
-          cat > ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/R3G_CLAIM_BOUNDARY.txt <<'EOF'
-          ACIRM R3G claim boundary:
-          - Auto DAL dependency resolver and DAL smoke test only.
-          - No 511 keV metric is computed.
-          - Not full OSA proof.
+          find ACIRM_R21AX_R7G_R3H_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/data_file_list.csv || true
+          find ACIRM_R21AX_R7G_R3H_RESULTS/work -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/work_file_list.csv || true
+
+          cat > ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS/R3H_CLAIM_BOUNDARY.txt <<'EOF'
+          ACIRM R3H claim boundary:
+          - Actual OSA/SPI execution attempt after DAL dependencies are resolved.
+          - Not final 511 keV proof.
           - Not 511 keV discovery.
-          - Any network/runtime/DAL dependency failure is not a physical null.
+          - Runtime/parameter/OSA product failure is not a physical null.
+          - The artifact is LIGHT only and excludes heavy FITS/OSA products.
           EOF
 
-          cat > ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS/R3G_NEXT_STEP.txt <<'EOF'
-          Upload ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS.zip to ChatGPT.
-          Do not upload heavy FITS data.
-          The audit will decide whether missing dependencies are exhausted or whether actual OSA execution can begin.
-          EOF
+          zip -r ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS
+          sha256sum ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS.zip.sha256.txt
+          cat ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS.zip.sha256.txt
 
-          zip -r ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS
-          sha256sum ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS.zip.sha256.txt
-          cat ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS.zip.sha256.txt
-
-      - name: Upload ACIRM R3G LIGHT artifact
+      - name: Upload ACIRM R3H LIGHT artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3G_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3H_LIGHT_RESULTS.zip.sha256.txt
