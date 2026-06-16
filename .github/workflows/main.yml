@@ -1,4 +1,4 @@
-name: ACIRM R3G AUTO OSA DAL dependency resolver
+name: ACIRM R3G AUTO OSA DAL dependency resolver fixed
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  acirm-r3g-auto-osa-dal-dependency-resolver:
+  acirm-r3g-auto-osa-dal-dependency-resolver-fixed:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -21,7 +21,7 @@ jobs:
       - name: System diagnostics
         run: |
           {
-            echo "ACIRM R3G AUTO OSA DAL dependency resolver"
+            echo "ACIRM R3G AUTO OSA DAL dependency resolver FIXED"
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "claim_ceiling=AUTO_DAL_DEPENDENCY_RESOLVER_ONLY_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY"
             echo ""
@@ -62,7 +62,7 @@ jobs:
           import time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3G_AUTO_OSA_DAL_DEPENDENCY_RESOLVER_LIGHT"
+          RUN_ID = "ACIRM_R21AX_R7G_R3G_AUTO_OSA_DAL_DEPENDENCY_RESOLVER_FIXED_LIGHT"
 
           OUT = Path("ACIRM_R21AX_R7G_R3G_RESULTS")
           DATA = OUT / "data"
@@ -175,7 +175,6 @@ jobs:
 
           def candidate_urls_for_logical_path(logical_path):
               logical_path = str(logical_path).split("[")[0].strip()
-
               candidates = []
 
               if logical_path.startswith("/data/"):
@@ -190,14 +189,15 @@ jobs:
 
               name = norm_name(logical_path)
 
-              roots = []
-              roots.append(f"scw/{REV}/{SCW}.001")
-              roots.append(f"aux/adp/{REV}.001")
-              roots.append("aux/adp")
-              roots.append("aux")
-              roots.append("idx")
-              roots.append("cat")
-              roots.append("ic")
+              roots = [
+                  f"scw/{REV}/{SCW}.001",
+                  f"aux/adp/{REV}.001",
+                  "aux/adp",
+                  "aux",
+                  "idx",
+                  "cat",
+                  "ic",
+              ]
 
               for base in BASES:
                   for root in roots:
@@ -214,7 +214,7 @@ jobs:
               final_name = final_path.name
 
               if final_path.exists() and final_path.stat().st_size > 1024:
-                  row = {
+                  download_rows.append({
                       "source_iteration": source_iteration,
                       "category": category,
                       "logical_path": str(logical_path),
@@ -227,8 +227,7 @@ jobs:
                       "bytes": final_path.stat().st_size,
                       "sha256": sha256_file(final_path),
                       "log_tail": "",
-                  }
-                  download_rows.append(row)
+                  })
                   return True
 
               urls = candidate_urls_for_logical_path(logical_path)
@@ -273,8 +272,6 @@ jobs:
               return False
 
           def seed_initial_files():
-              seeds = []
-
               scw_seed = [
                   "swg.fits",
                   "sc_time.fits",
@@ -320,13 +317,10 @@ jobs:
               ]
 
               for x in scw_seed:
-                  seeds.append((f"/data/scw/{REV}/{SCW}.001/{x}", "initial_scw_seed"))
+                  download_logical(f"/data/scw/{REV}/{SCW}.001/{x}", "initial_scw_seed", 0)
 
               for x in aux_adp_seed:
-                  seeds.append((f"/data/aux/adp/{REV}.001/{x}", "initial_aux_adp_seed"))
-
-              for logical, category in seeds:
-                  download_logical(logical, category, 0)
+                  download_logical(f"/data/aux/adp/{REV}.001/{x}", "initial_aux_adp_seed", 0)
 
           def discover_members_from_swg():
               swg_path = SCW_DIR / "swg.fits"
@@ -341,8 +335,7 @@ jobs:
                   for ref in sorted(set(found)):
                       name = norm_name(ref)
                       if name and name != "swg.fits":
-                          logical = f"/data/scw/{REV}/{SCW}.001/{name}"
-                          refs.append(logical)
+                          refs.append(f"/data/scw/{REV}/{SCW}.001/{name}")
               except Exception as e:
                   refs.append(f"ERROR_READING_SWG:{repr(e)}")
 
@@ -362,8 +355,13 @@ jobs:
                 export PFILES="/tmp/acirm_pfiles;/opt/osa/pfiles"
                 export PATH=/opt/osa/bin:$PATH
 
-                [ -d /opt/osa/lib ] && export LD_LIBRARY_PATH=/opt/osa/lib:${{LD_LIBRARY_PATH:-}}
-                [ -d /opt/osa/lib64 ] && export LD_LIBRARY_PATH=/opt/osa/lib64:${{LD_LIBRARY_PATH:-}}
+                if [ -d /opt/osa/lib ]; then
+                  export LD_LIBRARY_PATH="/opt/osa/lib:$LD_LIBRARY_PATH"
+                fi
+
+                if [ -d /opt/osa/lib64 ]; then
+                  export LD_LIBRARY_PATH="/opt/osa/lib64:$LD_LIBRARY_PATH"
+                fi
 
                 source /opt/osa/bin/isdc_init_env.sh || true
 
@@ -414,12 +412,12 @@ jobs:
           def parse_missing_from_dal_log(txt):
               missing = set()
 
-              patterns = [
-                  r"(/data/[A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)",
-                  r"([A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)",
-              ]
-
               if "DAL_FILE_NOT_ACCESSIBLE" in txt or "status -2004" in txt or "not accessible" in txt.lower():
+                  patterns = [
+                      r"(/data/[A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)",
+                      r"([A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)",
+                  ]
+
                   for pat in patterns:
                       for m in re.findall(pat, txt):
                           clean = str(m).split("[")[0].strip()
@@ -427,21 +425,26 @@ jobs:
                               missing.add(clean)
 
               filtered = []
+
               for m in sorted(missing):
                   if m.startswith("/data/"):
                       filtered.append(m)
                   else:
                       name = norm_name(m)
-                      if name:
-                          if name.startswith("orbit") or "attitude" in name or "pointing" in name or name in [
-                              "observation_log.fits",
-                              "moc_out_of_limits.fits",
-                              "time_correlation.fits",
-                              "slew_definition.fits",
-                          ]:
-                              filtered.append(f"/data/aux/adp/{REV}.001/{name}")
-                          else:
-                              filtered.append(f"/data/scw/{REV}/{SCW}.001/{name}")
+                      if not name:
+                          continue
+
+                      aux_names = [
+                          "observation_log.fits",
+                          "moc_out_of_limits.fits",
+                          "time_correlation.fits",
+                          "slew_definition.fits",
+                      ]
+
+                      if name.startswith("orbit") or "attitude" in name or "pointing" in name or name in aux_names:
+                          filtered.append(f"/data/aux/adp/{REV}.001/{name}")
+                      else:
+                          filtered.append(f"/data/scw/{REV}/{SCW}.001/{name}")
 
               return sorted(set(filtered))
 
@@ -513,9 +516,11 @@ jobs:
               if key in repeated_guard:
                   final_status = "R21AX_R7G_R3G_REPEATED_MISSING_REFERENCE_AFTER_DOWNLOAD_ATTEMPTS_NO_511_NO_PHYSICAL_NULL"
                   break
+
               repeated_guard.add(key)
 
               any_new_ok = False
+
               for ref in missing:
                   ok = download_logical(ref, "dal_missing_auto_resolve", iteration)
                   any_new_ok = any_new_ok or ok
@@ -534,6 +539,7 @@ jobs:
               final_status = "R21AX_R7G_R3G_MAX_ITERATIONS_REACHED_NO_511_NO_PHYSICAL_NULL"
 
           final_files = []
+
           for p in sorted(DATA.rglob("*.fits")):
               final_files.append({
                   "path": str(p),
@@ -541,39 +547,57 @@ jobs:
                   "sha256": sha256_file(p),
               })
 
-          download_fields = [
-              "source_iteration",
-              "category",
-              "logical_path",
-              "final_path",
-              "url",
-              "attempt",
-              "returncode",
-              "ok",
-              "reason",
-              "bytes",
-              "sha256",
-              "log_tail",
-          ]
-
-          write_csv(OUT / "r3g_download_manifest.csv", download_rows, download_fields)
+          write_csv(
+              OUT / "r3g_download_manifest.csv",
+              download_rows,
+              [
+                  "source_iteration",
+                  "category",
+                  "logical_path",
+                  "final_path",
+                  "url",
+                  "attempt",
+                  "returncode",
+                  "ok",
+                  "reason",
+                  "bytes",
+                  "sha256",
+                  "log_tail",
+              ],
+          )
 
           write_csv(
               OUT / "r3g_dal_iterations.csv",
               dal_iteration_rows,
-              ["iteration", "dal_file_not_accessible", "isdc_env_missing", "parameter_init_error", "missing_count", "missing_refs_joined"],
+              [
+                  "iteration",
+                  "dal_file_not_accessible",
+                  "isdc_env_missing",
+                  "parameter_init_error",
+                  "missing_count",
+                  "missing_refs_joined",
+              ],
           )
 
           write_csv(
               OUT / "r3g_missing_reference_resolution.csv",
               missing_rows,
-              ["iteration", "missing_ref", "download_ok", "category"],
+              [
+                  "iteration",
+                  "missing_ref",
+                  "download_ok",
+                  "category",
+              ],
           )
 
           write_csv(
               OUT / "r3g_final_local_fits_files.csv",
               final_files,
-              ["path", "bytes", "sha256"],
+              [
+                  "path",
+                  "bytes",
+                  "sha256",
+              ],
           )
 
           summary = {
