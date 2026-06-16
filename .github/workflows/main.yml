@@ -1,4 +1,4 @@
-name: ACIRM R3B AUX ADP PDEF resolver DAL smoke test
+name: ACIRM R3C AUX ADP observation log resolver DAL smoke test
 
 on:
   workflow_dispatch:
@@ -7,57 +7,68 @@ on:
       - main
 
 jobs:
-  acirm-r3b-aux-adp-pdef-dal-smoke:
+  acirm-r3c-aux-adp-observation-log-dal-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
       - name: Prepare folders
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R3B_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3B_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS
+          mkdir -p ACIRM_R21AX_R7G_R3C_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3C_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS
 
       - name: System diagnostics
         run: |
           {
-            echo "ACIRM R3B AUX ADP PDEF resolver and DAL smoke test"
+            echo "ACIRM R3C AUX ADP observation_log resolver and DAL smoke test"
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "claim_ceiling=AUX_ADP_PDEF_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY"
+            echo "claim_ceiling=AUX_ADP_OBSERVATION_LOG_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY"
+            echo ""
             uname -a || true
+            echo ""
             df -h || true
+            echo ""
             free -h || true
+            echo ""
+            echo "HEASARC IPv4 HTTPS probe"
             curl -4 -I -L --connect-timeout 30 --max-time 90 https://heasarc.gsfc.nasa.gov/FTP/integral/data/ || true
-          } | tee ACIRM_R21AX_R7G_R3B_RESULTS/logs/system_diagnostics.log
+          } | tee ACIRM_R21AX_R7G_R3C_RESULTS/logs/system_diagnostics.log
 
       - name: Pull OSA Docker image
         continue-on-error: true
         run: |
           {
+            echo "Docker version"
             docker --version || true
             docker info || true
+            echo ""
+            echo "Pull integralsw/osa:latest"
             docker pull integralsw/osa:latest || true
-          } | tee ACIRM_R21AX_R7G_R3B_RESULTS/logs/docker_pull.log
+          } | tee ACIRM_R21AX_R7G_R3C_RESULTS/logs/docker_pull.log
 
-      - name: Download SCW members and AUX ADP PDEF products
+      - name: Download SCW members and AUX ADP observation log products
         continue-on-error: true
         run: |
           python3 - <<'PY'
           import csv, gzip, hashlib, json, re, shutil, subprocess, time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3B_AUX_ADP_PDEF_RESOLVER_AND_DAL_SMOKE_LIGHT"
-          out = Path("ACIRM_R21AX_R7G_R3B_RESULTS")
+          RUN_ID = "ACIRM_R21AX_R7G_R3C_AUX_ADP_OBSERVATION_LOG_RESOLVER_AND_DAL_SMOKE_LIGHT"
+
+          out = Path("ACIRM_R21AX_R7G_R3C_RESULTS")
           data = out / "data"
           data.mkdir(parents=True, exist_ok=True)
 
           base_https = "https://heasarc.gsfc.nasa.gov/FTP/integral/data"
           base_http = "http://heasarc.gsfc.nasa.gov/FTP/integral/data"
+
           rev = "2504"
           scw = "250400090010"
 
           scw_dir = data / "scw" / rev / f"{scw}.001"
           aux_adp_dir = data / "aux" / "adp" / f"{rev}.001"
+
           scw_dir.mkdir(parents=True, exist_ok=True)
           aux_adp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -65,6 +76,7 @@ jobs:
               f"{base_https}/scw/{rev}/{scw}.001",
               f"{base_http}/scw/{rev}/{scw}.001",
           ]
+
           remote_aux = [
               f"{base_https}/aux/adp/{rev}.001",
               f"{base_http}/aux/adp/{rev}.001",
@@ -95,8 +107,9 @@ jobs:
           def accept(path):
               if not path.exists():
                   return False, "missing"
-              if path.stat().st_size <= 1024:
-                  return False, f"too_small_{path.stat().st_size}"
+              size = path.stat().st_size
+              if size <= 1024:
+                  return False, f"too_small_{size}"
               if is_gzip(path):
                   return True, "gzip"
               if is_fits(path):
@@ -171,6 +184,7 @@ jobs:
 
               for i, url in enumerate(candidates, 1):
                   tmp = final_dir / f".download_{final_name}_{i}.part"
+
                   row = {
                       "category": category,
                       "expected_name": expected,
@@ -284,6 +298,8 @@ jobs:
               "pointing_definition_historic.fits",
               "pointing_definition_predicted_0000.fits",
               "pointing_definition_predicted_0002.fits",
+              "observation_log.fits",
+              "observation_log.fits.gz",
           ]
 
           aux_status = []
@@ -304,10 +320,10 @@ jobs:
               })
 
           tables = [
-              ("r3b_swg_references_parsed.csv", parse_rows, ["index", "reference", "clean_name", "source", "error"]),
-              ("r3b_download_manifest.csv", all_rows, ["category", "expected_name", "final_name", "url", "attempt", "returncode", "ok", "reason", "final_path", "final_bytes", "final_sha256", "log_tail"]),
-              ("r3b_scw_group_member_status.csv", scw_status, ["member_name", "final_name", "ok", "final_path", "final_bytes", "final_sha256"]),
-              ("r3b_aux_adp_status.csv", aux_status, ["member_name", "final_name", "ok", "final_path", "final_bytes", "final_sha256"]),
+              ("r3c_swg_references_parsed.csv", parse_rows, ["index", "reference", "clean_name", "source", "error"]),
+              ("r3c_download_manifest.csv", all_rows, ["category", "expected_name", "final_name", "url", "attempt", "returncode", "ok", "reason", "final_path", "final_bytes", "final_sha256", "log_tail"]),
+              ("r3c_scw_group_member_status.csv", scw_status, ["member_name", "final_name", "ok", "final_path", "final_bytes", "final_sha256"]),
+              ("r3c_aux_adp_status.csv", aux_status, ["member_name", "final_name", "ok", "final_path", "final_bytes", "final_sha256"]),
           ]
 
           for filename, rows, fields in tables:
@@ -324,7 +340,7 @@ jobs:
               for p in sorted(data.rglob("*.fits"))
           ]
 
-          with open(out / "r3b_final_local_fits_files.csv", "w", newline="", encoding="utf-8") as f:
+          with open(out / "r3c_final_local_fits_files.csv", "w", newline="", encoding="utf-8") as f:
               w = csv.DictWriter(f, fieldnames=["path", "bytes", "sha256"])
               w.writeheader()
               w.writerows(final_files)
@@ -332,22 +348,22 @@ jobs:
           summary = {
               "run_id": RUN_ID,
               "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "claim_ceiling": "AUX_ADP_PDEF_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
+              "claim_ceiling": "AUX_ADP_OBSERVATION_LOG_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
               "swg_download_ok": (scw_dir / "swg.fits").exists(),
               "scw_member_ok_count": sum(1 for r in scw_status if r["ok"]),
               "scw_member_total_count": len(scw_status),
               "aux_adp_ok_count": sum(1 for r in aux_status if r["ok"]),
               "aux_adp_total_count": len(aux_status),
-              "pdef_predicted_0001_ok": (aux_adp_dir / "pointing_definition_predicted_0001.fits").exists(),
+              "observation_log_ok": (aux_adp_dir / "observation_log.fits").exists(),
               "local_fits_file_count": len(final_files),
               "final_status": (
-                  "R21AX_R7G_R3B_AUX_ADP_PDEF_READY_FOR_DAL_VERIFY_NO_511_YET"
-                  if (aux_adp_dir / "pointing_definition_predicted_0001.fits").exists()
-                  else "R21AX_R7G_R3B_AUX_ADP_PDEF_DOWNLOAD_INCOMPLETE_NO_PHYSICAL_NULL"
+                  "R21AX_R7G_R3C_AUX_ADP_OBSERVATION_LOG_READY_FOR_DAL_VERIFY_NO_511_YET"
+                  if (aux_adp_dir / "observation_log.fits").exists()
+                  else "R21AX_R7G_R3C_AUX_ADP_OBSERVATION_LOG_DOWNLOAD_INCOMPLETE_NO_PHYSICAL_NULL"
               ),
           }
 
-          (out / "R3B_AUX_ADP_PDEF_RESOLVER_SUMMARY.json").write_text(
+          (out / "R3C_AUX_ADP_OBSERVATION_LOG_RESOLVER_SUMMARY.json").write_text(
               json.dumps(summary, indent=2, sort_keys=True),
               encoding="utf-8",
           )
@@ -355,16 +371,17 @@ jobs:
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Run DAL verify after AUX ADP PDEF resolving
+      - name: Run DAL verify after AUX ADP observation log resolving
         continue-on-error: true
         run: |
           {
-            echo "Run R3B DAL verify after AUX ADP PDEF resolving"
+            echo "Run R3C DAL verify after AUX ADP observation_log resolving"
             docker run --rm \
-              -v "$PWD/ACIRM_R21AX_R7G_R3B_RESULTS/data:/data" \
-              -v "$PWD/ACIRM_R21AX_R7G_R3B_RESULTS/logs:/logs" \
+              -v "$PWD/ACIRM_R21AX_R7G_R3C_RESULTS/data:/data" \
+              -v "$PWD/ACIRM_R21AX_R7G_R3C_RESULTS/logs:/logs" \
               integralsw/osa:latest bash -lc '
                 set +e
+
                 mkdir -p /tmp/acirm_pfiles /tmp/acirm_work /tmp/acirm_rep
                 cp -f /opt/osa/pfiles/*.par /tmp/acirm_pfiles/ 2>/dev/null || true
 
@@ -394,28 +411,28 @@ jobs:
                 find /data -maxdepth 6 -type f -printf "%p %s\n" | sort || true
 
                 echo "dal_verify swg.fits"
-                timeout 300 dal_verify "$TARGET" 2>&1 | head -800 || true
+                timeout 360 dal_verify "$TARGET" 2>&1 | head -1000 || true
 
                 echo "og_create parameter probe"
                 timeout 90 og_create 2>&1 | head -260 || true
 
                 echo "commonlog tail"
-                cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -420 || true
+                cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -500 || true
               '
-          } | tee ACIRM_R21AX_R7G_R3B_RESULTS/logs/r3b_dal_verify_after_aux_adp_pdef_resolve.log
+          } | tee ACIRM_R21AX_R7G_R3C_RESULTS/logs/r3c_dal_verify_after_observation_log_resolve.log
 
-      - name: Analyze R3B logs
+      - name: Analyze R3C logs
         continue-on-error: true
         run: |
           python3 - <<'PY'
           import csv, json, re, time
           from pathlib import Path
 
-          out = Path("ACIRM_R21AX_R7G_R3B_RESULTS")
-          log = out / "logs/r3b_dal_verify_after_aux_adp_pdef_resolve.log"
+          out = Path("ACIRM_R21AX_R7G_R3C_RESULTS")
+          log = out / "logs/r3c_dal_verify_after_observation_log_resolve.log"
           txt = log.read_text(errors="replace") if log.exists() else ""
 
-          summary_path = out / "R3B_AUX_ADP_PDEF_RESOLVER_SUMMARY.json"
+          summary_path = out / "R3C_AUX_ADP_OBSERVATION_LOG_RESOLVER_SUMMARY.json"
           res = json.loads(summary_path.read_text()) if summary_path.exists() else {}
 
           missing = []
@@ -432,7 +449,7 @@ jobs:
               "scw_member_total_count": res.get("scw_member_total_count", 0),
               "aux_adp_ok_count": res.get("aux_adp_ok_count", 0),
               "aux_adp_total_count": res.get("aux_adp_total_count", 0),
-              "pdef_predicted_0001_ok": bool(res.get("pdef_predicted_0001_ok", False)),
+              "observation_log_ok": bool(res.get("observation_log_ok", False)),
               "local_fits_file_count": res.get("local_fits_file_count", 0),
               "dal_verify_invoked": "dal_verify swg.fits" in txt,
               "dal_file_not_accessible_seen": "DAL_FILE_NOT_ACCESSIBLE" in txt or "status -2004" in txt,
@@ -443,34 +460,34 @@ jobs:
           }
 
           if checks["dal_verify_invoked"] and not checks["dal_file_not_accessible_seen"] and not checks["isdc_env_missing_seen"]:
-              status = "R21AX_R7G_R3B_DAL_VERIFY_REACHED_GROUP_AUX_PDEF_LAYER_NO_511_YET_REVIEW_REQUIRED"
+              status = "R21AX_R7G_R3C_DAL_VERIFY_REACHED_GROUP_AUX_OBSERVATION_LOG_LAYER_NO_511_YET_REVIEW_REQUIRED"
           elif checks["dal_file_not_accessible_seen"]:
-              status = "R21AX_R7G_R3B_DAL_STILL_REQUIRES_ADDITIONAL_MEMBER_NO_511_NO_PHYSICAL_NULL"
+              status = "R21AX_R7G_R3C_DAL_STILL_REQUIRES_ADDITIONAL_MEMBER_NO_511_NO_PHYSICAL_NULL"
           elif checks["isdc_env_missing_seen"] or checks["parameter_init_error_seen"]:
-              status = "R21AX_R7G_R3B_ENV_OR_PARAMETER_LAYER_REGRESSION_NO_511_NO_PHYSICAL_NULL"
+              status = "R21AX_R7G_R3C_ENV_OR_PARAMETER_LAYER_REGRESSION_NO_511_NO_PHYSICAL_NULL"
           else:
-              status = "R21AX_R7G_R3B_LOGS_READY_FOR_AUDIT_NO_511_NO_PHYSICAL_NULL"
+              status = "R21AX_R7G_R3C_LOGS_READY_FOR_AUDIT_NO_511_NO_PHYSICAL_NULL"
 
-          with open(out / "r3b_dal_missing_reference_context.csv", "w", newline="", encoding="utf-8") as f:
+          with open(out / "r3c_dal_missing_reference_context.csv", "w", newline="", encoding="utf-8") as f:
               w = csv.DictWriter(f, fieldnames=["missing_reference_context"])
               w.writeheader()
               for x in missing:
                   w.writerow({"missing_reference_context": x})
 
           final = {
-              "run_id": "ACIRM_R21AX_R7G_R3B_AUX_ADP_PDEF_RESOLVER_AND_DAL_SMOKE_LIGHT",
+              "run_id": "ACIRM_R21AX_R7G_R3C_AUX_ADP_OBSERVATION_LOG_RESOLVER_AND_DAL_SMOKE_LIGHT",
               "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "claim_ceiling": "AUX_ADP_PDEF_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
+              "claim_ceiling": "AUX_ADP_OBSERVATION_LOG_RESOLVER_DAL_SMOKE_TEST_NOT_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY",
               "checks": checks,
               "final_status": status,
           }
 
-          (out / "R3B_DAL_SMOKE_TEST_SUMMARY.json").write_text(
+          (out / "R3C_DAL_SMOKE_TEST_SUMMARY.json").write_text(
               json.dumps(final, indent=2, sort_keys=True),
               encoding="utf-8",
           )
 
-          with open(out / "r3b_checks_flat.csv", "w", newline="", encoding="utf-8") as f:
+          with open(out / "r3c_checks_flat.csv", "w", newline="", encoding="utf-8") as f:
               w = csv.DictWriter(f, fieldnames=["check", "value"])
               w.writeheader()
               for k, v in checks.items():
@@ -482,34 +499,35 @@ jobs:
       - name: Build LIGHT audit package only
         if: always()
         run: |
-          mkdir -p ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS/logs
-          cp -r ACIRM_R21AX_R7G_R3B_RESULTS/logs/* ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS/logs/ || true
-          cp ACIRM_R21AX_R7G_R3B_RESULTS/*.json ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS/ || true
-          cp ACIRM_R21AX_R7G_R3B_RESULTS/*.csv ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS/ || true
+          mkdir -p ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS/logs
 
-          echo "SCW and AUX/PDEF FITS files were downloaded temporarily on the GitHub runner; FITS files are excluded from phone artifact. No 511 metric." > ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
+          cp -r ACIRM_R21AX_R7G_R3C_RESULTS/logs/* ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS/logs/ || true
+          cp ACIRM_R21AX_R7G_R3C_RESULTS/*.json ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS/ || true
+          cp ACIRM_R21AX_R7G_R3C_RESULTS/*.csv ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS/ || true
 
-          du -h ACIRM_R21AX_R7G_R3B_RESULTS/data > ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS/data_size_report.txt || true
-          find ACIRM_R21AX_R7G_R3B_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS/data_file_list.csv || true
+          echo "SCW and AUX/ADP FITS files were downloaded temporarily on the GitHub runner; FITS files are excluded from phone artifact. No 511 metric." > ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS/HEAVY_DATA_EXCLUDED_NOTICE.txt
 
-          cat > ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS/R3B_CLAIM_BOUNDARY.txt <<'EOF'
-          ACIRM R3B claim boundary:
-          - AUX ADP PDEF resolver and DAL smoke test only.
+          du -h ACIRM_R21AX_R7G_R3C_RESULTS/data > ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS/data_size_report.txt || true
+          find ACIRM_R21AX_R7G_R3C_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS/data_file_list.csv || true
+
+          cat > ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS/R3C_CLAIM_BOUNDARY.txt <<'EOF'
+          ACIRM R3C claim boundary:
+          - AUX ADP observation_log resolver and DAL smoke test only.
           - No 511 keV metric is computed.
           - Not full OSA proof.
           - Not 511 keV discovery.
           - Any network/runtime/DAL auxiliary-member failure is not a physical null.
           EOF
 
-          zip -r ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS
-          sha256sum ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS.zip.sha256.txt
-          cat ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS.zip.sha256.txt
+          zip -r ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS
+          sha256sum ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS.zip.sha256.txt
+          cat ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS.zip.sha256.txt
 
-      - name: Upload ACIRM R3B LIGHT artifact
+      - name: Upload ACIRM R3C LIGHT artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3B_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3C_LIGHT_RESULTS.zip.sha256.txt
