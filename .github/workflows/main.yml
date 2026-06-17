@@ -1,4 +1,4 @@
-name: ACIRM R3P R2Q direct SPI OPER unique SCW 511 audit no full OSA
+name: ACIRM R3P R2R direct SPI OPER local window specificity audit
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  acirm-r3p-r2q-direct-spi-oper-unique-scw-audit:
+  acirm-r3p-r2r-direct-spi-oper-local-window-specificity:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -15,11 +15,10 @@ jobs:
       - name: Prepare folders
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_LIGHT_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_LIGHT_RESULTS/logs
           mkdir -p ACIRM_CACHE_R3P_R1
-          echo "R2Q_DIRECT_OPER_AUDIT_PREPARED"
+          echo "R2R_SPECIFICITY_PREPARED"
 
       - name: Restore R3P R1 cache
         uses: actions/cache/restore@v4
@@ -29,23 +28,23 @@ jobs:
           restore-keys: |
             acirm-r21ax-r7g-r3p-r1-cache-
 
-      - name: Run R2Q direct unique SCW OPER audit
+      - name: Run R2R direct local window specificity audit
         continue-on-error: true
         run: |
           set +e
 
-          OUT="ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_RESULTS"
-          LIGHT="ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_LIGHT_RESULTS"
+          OUT="ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS"
+          LIGHT="ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_LIGHT_RESULTS"
           MAIN_LOG="$OUT/logs/main_execution.log"
 
-          echo "R2Q_DIRECT_OPER_AUDIT_STARTED" | tee "$MAIN_LOG"
+          echo "R2R_SPECIFICITY_STARTED" | tee "$MAIN_LOG"
           echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$MAIN_LOG"
 
           sudo apt-get update -y 2>&1 | tee "$OUT/logs/apt_update.log" || true
           sudo apt-get install -y zip python3-pip 2>&1 | tee "$OUT/logs/apt_install.log" || true
           python3 -m pip install --user astropy numpy 2>&1 | tee "$OUT/logs/pip_astropy_numpy.log" || true
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS/logs/main_execution.log
           import csv
           import hashlib
           import json
@@ -58,13 +57,13 @@ jobs:
           import numpy as np
           from astropy.io import fits
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_SPI_OPER_UNIQUE_SCW_511_AUDIT_NO_FULL_OSA"
+          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_AUDIT"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_RESULTS")
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_LIGHT_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_LIGHT_RESULTS")
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
-          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_SPI_OPER_UNIQUE_SCW_AUDIT_LIGHT_RESULTS.zip"
+          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_LIGHT_RESULTS.zip"
 
           for p in [OUT, OUT / "logs", LIGHT, LIGHT / "logs"]:
               p.mkdir(parents=True, exist_ok=True)
@@ -79,15 +78,15 @@ jobs:
                       h.update(chunk)
               return h.hexdigest()
 
+          def safe_text(path, text):
+              Path(path).write_text(str(text), encoding="utf-8", errors="replace")
+
           def write_csv(path, rows, fields):
               with open(path, "w", newline="", encoding="utf-8") as f:
                   w = csv.DictWriter(f, fieldnames=fields)
                   w.writeheader()
                   for r in rows:
                       w.writerow({k: r.get(k, "") for k in fields})
-
-          def safe_text(path, text):
-              Path(path).write_text(str(text), encoding="utf-8", errors="replace")
 
           def extract_scw(path):
               s = str(path)
@@ -106,244 +105,367 @@ jobs:
                   return None
               return float(np.sum(arr))
 
-          def ratio_metric(path):
-              out = {
-                  "path": str(path),
-                  "scw_id": extract_scw(path),
-                  "read_ok": False,
-                  "hdu_name": "",
-                  "value_col": "",
-                  "energy_col": "",
-                  "line_508_514_sum": "",
-                  "sideband_490_500_sum": "",
-                  "sideband_522_532_sum": "",
-                  "sideband_mean_sum": "",
-                  "line_to_sideband_mean_ratio": "",
-                  "line_bin_count": 0,
-                  "sb1_bin_count": 0,
-                  "sb2_bin_count": 0,
-                  "error": ""
-              }
+          def mad_sigma(values):
+              arr = np.asarray(values, dtype=float)
+              arr = arr[np.isfinite(arr)]
+              if arr.size < 3:
+                  return None
+              med = float(np.median(arr))
+              mad = float(np.median(np.abs(arr - med)))
+              if mad == 0:
+                  std = float(np.std(arr))
+                  if std == 0:
+                      return None
+                  return std
+              return 1.4826 * mad
 
-              try:
-                  with fits.open(path, memmap=False) as hdul:
-                      selected = None
+          def load_spi_oper_energy_values(path):
+              with fits.open(path, memmap=False) as hdul:
+                  selected = None
+                  for hdu in hdul:
+                      if str(getattr(hdu, "name", "")).strip() == "SPI.-OPSD-ALL":
+                          selected = hdu
+                          break
+
+                  if selected is None:
                       for hdu in hdul:
-                          if str(getattr(hdu, "name", "")).strip() == "SPI.-OPSD-ALL":
-                              selected = hdu
-                              break
-
-                      if selected is None:
-                          for hdu in hdul:
-                              if hdu.data is not None and hasattr(hdu, "columns"):
-                                  cols = list(hdu.columns.names)
-                                  if "PSD_DATA" in cols:
-                                      selected = hdu
-                                      break
-
-                      if selected is None:
-                          out["error"] = "NO_SPI_OPSD_ALL_OR_PSD_DATA"
-                          return out
-
-                      cols = list(selected.columns.names)
-                      data = selected.data
-                      out["read_ok"] = True
-                      out["hdu_name"] = str(getattr(selected, "name", ""))
-
-                      value_col = "PSD_DATA" if "PSD_DATA" in cols else ""
-                      if not value_col:
-                          for c in cols:
-                              if "DATA" in c.upper() or "COUNT" in c.upper() or "RATE" in c.upper():
-                                  value_col = c
+                          if hdu.data is not None and hasattr(hdu, "columns"):
+                              cols = list(hdu.columns.names)
+                              if "PSD_DATA" in cols:
+                                  selected = hdu
                                   break
 
-                      energy_col = ""
+                  if selected is None:
+                      raise RuntimeError("NO_SPI_OPSD_ALL_OR_PSD_DATA")
+
+                  cols = list(selected.columns.names)
+                  data = selected.data
+
+                  value_col = "PSD_DATA" if "PSD_DATA" in cols else ""
+                  if not value_col:
                       for c in cols:
                           cu = c.upper()
-                          if cu in ["ENERGY", "E_MEAN", "E_CEN", "E_CENTER", "PI"]:
-                              energy_col = c
+                          if "DATA" in cu or "COUNT" in cu or "RATE" in cu:
+                              value_col = c
                               break
 
-                      elo_col = ""
-                      ehi_col = ""
-                      for c in cols:
-                          cu = c.upper().replace("-", "_")
-                          if cu in ["E_MIN", "E_LO", "ENERG_LO", "ENERGY_LO", "E_LOW"]:
-                              elo_col = c
-                          if cu in ["E_MAX", "E_HI", "ENERG_HI", "ENERGY_HI", "E_HIGH"]:
-                              ehi_col = c
+                  if not value_col:
+                      raise RuntimeError("NO_VALUE_COL")
 
-                      out["value_col"] = value_col
-                      out["energy_col"] = energy_col if energy_col else (elo_col + "," + ehi_col)
+                  energy_col = ""
+                  for c in cols:
+                      cu = c.upper()
+                      if cu in ["ENERGY", "E_MEAN", "E_CEN", "E_CENTER", "PI"]:
+                          energy_col = c
+                          break
 
-                      if not value_col:
-                          out["error"] = "NO_VALUE_COL"
-                          return out
+                  elo_col = ""
+                  ehi_col = ""
+                  for c in cols:
+                      cu = c.upper().replace("-", "_")
+                      if cu in ["E_MIN", "E_LO", "ENERG_LO", "ENERGY_LO", "E_LOW"]:
+                          elo_col = c
+                      if cu in ["E_MAX", "E_HI", "ENERG_HI", "ENERGY_HI", "E_HIGH"]:
+                          ehi_col = c
 
-                      if elo_col and ehi_col:
-                          elo = np.asarray(data[elo_col], dtype=float).reshape(-1)
-                          ehi = np.asarray(data[ehi_col], dtype=float).reshape(-1)
-                          energy_mode = "bounds"
-                      elif energy_col:
-                          elo = np.asarray(data[energy_col], dtype=float).reshape(-1)
-                          ehi = np.asarray(data[energy_col], dtype=float).reshape(-1)
-                          energy_mode = "center"
-                      else:
-                          out["error"] = "NO_ENERGY_COL"
-                          return out
+                  if elo_col and ehi_col:
+                      elo = np.asarray(data[elo_col], dtype=float).reshape(-1)
+                      ehi = np.asarray(data[ehi_col], dtype=float).reshape(-1)
+                      energy_mode = "bounds"
+                      energy_label = elo_col + "," + ehi_col
+                  elif energy_col:
+                      elo = np.asarray(data[energy_col], dtype=float).reshape(-1)
+                      ehi = np.asarray(data[energy_col], dtype=float).reshape(-1)
+                      energy_mode = "center"
+                      energy_label = energy_col
+                  else:
+                      raise RuntimeError("NO_ENERGY_COL")
 
-                      val = np.asarray(data[value_col], dtype=float)
+                  val = np.asarray(data[value_col], dtype=float)
 
-                      if val.ndim == 1 and val.shape[0] == elo.shape[0]:
-                          val_by_energy = val
-                      elif val.ndim >= 2 and val.shape[0] == elo.shape[0]:
-                          val_by_energy = np.nansum(val.reshape(val.shape[0], -1), axis=1)
-                      elif val.ndim >= 2 and val.shape[-1] == elo.shape[0]:
-                          tmp = np.moveaxis(val, -1, 0)
-                          val_by_energy = np.nansum(tmp.reshape(tmp.shape[0], -1), axis=1)
-                      else:
-                          out["error"] = "VALUE_ENERGY_SHAPE_MISMATCH"
-                          return out
+                  if val.ndim == 1 and val.shape[0] == elo.shape[0]:
+                      val_by_energy = val
+                  elif val.ndim >= 2 and val.shape[0] == elo.shape[0]:
+                      val_by_energy = np.nansum(val.reshape(val.shape[0], -1), axis=1)
+                  elif val.ndim >= 2 and val.shape[-1] == elo.shape[0]:
+                      tmp = np.moveaxis(val, -1, 0)
+                      val_by_energy = np.nansum(tmp.reshape(tmp.shape[0], -1), axis=1)
+                  else:
+                      raise RuntimeError("VALUE_ENERGY_SHAPE_MISMATCH")
 
-                      if val_by_energy.shape[0] != elo.shape[0]:
-                          out["error"] = "VALUE_ENERGY_LENGTH_MISMATCH"
-                          return out
+                  finite = np.isfinite(elo) & np.isfinite(ehi) & np.isfinite(val_by_energy)
+                  elo = elo[finite]
+                  ehi = ehi[finite]
+                  val_by_energy = np.asarray(val_by_energy[finite], dtype=float)
 
-                      finite = np.isfinite(elo) & np.isfinite(ehi) & np.isfinite(val_by_energy)
-                      elo = elo[finite]
-                      ehi = ehi[finite]
-                      val_by_energy = val_by_energy[finite]
+                  return {
+                      "elo": elo,
+                      "ehi": ehi,
+                      "values": val_by_energy,
+                      "energy_mode": energy_mode,
+                      "energy_label": energy_label,
+                      "value_col": value_col,
+                      "hdu_name": str(getattr(selected, "name", ""))
+                  }
 
-                      if energy_mode == "bounds":
-                          line_mask = (elo < 514.0) & (ehi > 508.0)
-                          sb1_mask = (elo < 500.0) & (ehi > 490.0)
-                          sb2_mask = (elo < 532.0) & (ehi > 522.0)
-                      else:
-                          line_mask = (elo >= 508.0) & (elo <= 514.0)
-                          sb1_mask = (elo >= 490.0) & (elo <= 500.0)
-                          sb2_mask = (elo >= 522.0) & (elo <= 532.0)
+          def interval_mask(elo, ehi, energy_mode, lo, hi):
+              if energy_mode == "bounds":
+                  return (elo < hi) & (ehi > lo)
+              return (elo >= lo) & (elo <= hi)
 
-                      line_sum = finite_sum(val_by_energy[line_mask])
-                      sb1_sum = finite_sum(val_by_energy[sb1_mask])
-                      sb2_sum = finite_sum(val_by_energy[sb2_mask])
+          def window_sum(obj, lo, hi):
+              mask = interval_mask(obj["elo"], obj["ehi"], obj["energy_mode"], lo, hi)
+              s = finite_sum(obj["values"][mask])
+              return s, int(np.sum(mask))
 
-                      out["line_bin_count"] = int(np.sum(line_mask))
-                      out["sb1_bin_count"] = int(np.sum(sb1_mask))
-                      out["sb2_bin_count"] = int(np.sum(sb2_mask))
+          ready_flag_exists = READY_FLAG.exists()
 
-                      if line_sum is not None:
-                          out["line_508_514_sum"] = line_sum
-                      if sb1_sum is not None:
-                          out["sideband_490_500_sum"] = sb1_sum
-                      if sb2_sum is not None:
-                          out["sideband_522_532_sum"] = sb2_sum
-
-                      if sb1_sum is not None and sb2_sum is not None:
-                          side_mean = (sb1_sum + sb2_sum) / 2.0
-                          out["sideband_mean_sum"] = side_mean
-                          if line_sum is not None and side_mean != 0:
-                              out["line_to_sideband_mean_ratio"] = line_sum / side_mean
-
-              except Exception as e:
-                  out["error"] = repr(e)[:500]
-
-              return out
-
-          ready = READY_FLAG.exists()
           spi_oper_paths = []
           if CACHE.exists():
               spi_oper_paths = sorted(CACHE.rglob("spi_oper.fits"))
 
-          # Deduplicate by SCW id, not by copied path.
           unique_by_scw = {}
           for p in spi_oper_paths:
               scw = extract_scw(p)
               if scw and scw not in unique_by_scw:
                   unique_by_scw[scw] = p
 
-          rows = []
-          for scw, p in sorted(unique_by_scw.items()):
-              rows.append(ratio_metric(p))
+          window_rows = []
+          target_rows = []
+          all_ratios = []
 
-          metric_rows = []
-          for r in rows:
-              if str(r.get("line_to_sideband_mean_ratio", "")) != "":
-                  metric_rows.append(r)
+          target_lo = 508.0
+          target_hi = 514.0
+          width = 6.0
+          local_min = 450.0
+          local_max = 570.0
+          step = 1.0
 
-          metric_rows_sorted = sorted(
-              metric_rows,
-              key=lambda r: float(r["line_to_sideband_mean_ratio"]),
-              reverse=True
-          )
-
-          ratios = []
-          for r in metric_rows:
+          for scw, path in sorted(unique_by_scw.items()):
               try:
-                  ratios.append(float(r["line_to_sideband_mean_ratio"]))
-              except Exception:
-                  pass
+                  obj = load_spi_oper_energy_values(path)
 
-          stats = {}
-          if ratios:
-              arr = np.asarray(ratios, dtype=float)
-              stats = {
-                  "ratio_count": int(arr.size),
-                  "ratio_min": float(np.min(arr)),
-                  "ratio_max": float(np.max(arr)),
-                  "ratio_mean": float(np.mean(arr)),
-                  "ratio_median": float(np.median(arr)),
-                  "ratio_std_population": float(np.std(arr)),
-                  "ratio_std_sample": float(np.std(arr, ddof=1)) if arr.size > 1 else "",
-                  "count_ratio_ge_1_2": int(np.sum(arr >= 1.2)),
-                  "count_ratio_ge_1_5": int(np.sum(arr >= 1.5)),
-                  "count_ratio_ge_1_8": int(np.sum(arr >= 1.8))
-              }
+                  target_sum, target_bins = window_sum(obj, target_lo, target_hi)
 
-          best_ratio = ""
-          best_scw = ""
-          best_path = ""
-          if metric_rows_sorted:
-              best_ratio = metric_rows_sorted[0]["line_to_sideband_mean_ratio"]
-              best_scw = metric_rows_sorted[0]["scw_id"]
-              best_path = metric_rows_sorted[0]["path"]
+                  original_sb1_sum, original_sb1_bins = window_sum(obj, 490.0, 500.0)
+                  original_sb2_sum, original_sb2_bins = window_sum(obj, 522.0, 532.0)
+
+                  immediate_low_sum, immediate_low_bins = window_sum(obj, 502.0, 508.0)
+                  immediate_high_sum, immediate_high_bins = window_sum(obj, 514.0, 520.0)
+
+                  original_side_mean = None
+                  original_ratio = None
+                  if original_sb1_sum is not None and original_sb2_sum is not None:
+                      original_side_mean = (original_sb1_sum + original_sb2_sum) / 2.0
+                      if original_side_mean != 0 and target_sum is not None:
+                          original_ratio = target_sum / original_side_mean
+
+                  immediate_side_mean = None
+                  immediate_ratio = None
+                  if immediate_low_sum is not None and immediate_high_sum is not None:
+                      immediate_side_mean = (immediate_low_sum + immediate_high_sum) / 2.0
+                      if immediate_side_mean != 0 and target_sum is not None:
+                          immediate_ratio = target_sum / immediate_side_mean
+
+                  starts = []
+                  x = local_min
+                  while x <= local_max - width + 1e-9:
+                      starts.append(round(x, 6))
+                      x += step
+
+                  scw_window_rows = []
+                  for lo in starts:
+                      hi = lo + width
+                      s, bins = window_sum(obj, lo, hi)
+                      if s is None:
+                          continue
+                      row = {
+                          "scw_id": scw,
+                          "path": str(path),
+                          "window_lo_keV": lo,
+                          "window_hi_keV": hi,
+                          "window_width_keV": width,
+                          "window_sum": s,
+                          "bin_count": bins,
+                          "is_target_508_514": abs(lo - target_lo) < 1e-9 and abs(hi - target_hi) < 1e-9
+                      }
+                      scw_window_rows.append(row)
+
+                  sums = [float(r["window_sum"]) for r in scw_window_rows]
+                  med = float(np.median(sums)) if sums else None
+                  mean = float(np.mean(sums)) if sums else None
+                  sd = float(np.std(sums, ddof=1)) if len(sums) > 1 else None
+                  robust = mad_sigma(sums)
+
+                  for r in scw_window_rows:
+                      s = float(r["window_sum"])
+                      r["local_median_sum"] = "" if med is None else med
+                      r["local_mean_sum"] = "" if mean is None else mean
+                      r["local_sample_std_sum"] = "" if sd is None else sd
+                      r["local_robust_sigma_mad"] = "" if robust is None else robust
+                      r["sum_to_local_median_ratio"] = "" if med in [None, 0] else s / med
+                      r["z_vs_local_mean"] = "" if sd in [None, 0] else (s - mean) / sd
+                      r["robust_z_vs_local_median"] = "" if robust in [None, 0] else (s - med) / robust
+                      window_rows.append(r)
+
+                  ranked = sorted(scw_window_rows, key=lambda r: float(r["window_sum"]), reverse=True)
+                  rank = ""
+                  higher_count = ""
+                  equal_or_higher_count = ""
+                  target_percentile = ""
+                  target_to_local_median_ratio = ""
+                  target_z = ""
+                  target_robust_z = ""
+
+                  if target_sum is not None and ranked:
+                      higher_count = sum(1 for r in ranked if float(r["window_sum"]) > float(target_sum))
+                      equal_or_higher_count = sum(1 for r in ranked if float(r["window_sum"]) >= float(target_sum))
+                      rank = higher_count + 1
+                      target_percentile = 1.0 - (higher_count / float(len(ranked)))
+                      if med not in [None, 0]:
+                          target_to_local_median_ratio = float(target_sum) / med
+                      if sd not in [None, 0]:
+                          target_z = (float(target_sum) - mean) / sd
+                      if robust not in [None, 0]:
+                          target_robust_z = (float(target_sum) - med) / robust
+
+                  target_row = {
+                      "scw_id": scw,
+                      "path": str(path),
+                      "hdu_name": obj["hdu_name"],
+                      "value_col": obj["value_col"],
+                      "energy_label": obj["energy_label"],
+                      "energy_mode": obj["energy_mode"],
+                      "target_508_514_sum": "" if target_sum is None else target_sum,
+                      "target_bin_count": target_bins,
+                      "original_sideband_490_500_sum": "" if original_sb1_sum is None else original_sb1_sum,
+                      "original_sideband_522_532_sum": "" if original_sb2_sum is None else original_sb2_sum,
+                      "original_sideband_mean_sum": "" if original_side_mean is None else original_side_mean,
+                      "original_line_to_sideband_ratio": "" if original_ratio is None else original_ratio,
+                      "immediate_sideband_502_508_sum": "" if immediate_low_sum is None else immediate_low_sum,
+                      "immediate_sideband_514_520_sum": "" if immediate_high_sum is None else immediate_high_sum,
+                      "immediate_sideband_mean_sum": "" if immediate_side_mean is None else immediate_side_mean,
+                      "immediate_line_to_sideband_ratio": "" if immediate_ratio is None else immediate_ratio,
+                      "local_window_count": len(ranked),
+                      "target_rank_by_6keV_sum_desc": rank,
+                      "target_higher_window_count": higher_count,
+                      "target_equal_or_higher_window_count": equal_or_higher_count,
+                      "target_specificity_percentile": target_percentile,
+                      "local_median_6keV_sum": "" if med is None else med,
+                      "local_mean_6keV_sum": "" if mean is None else mean,
+                      "local_sample_std_6keV_sum": "" if sd is None else sd,
+                      "local_robust_sigma_mad": "" if robust is None else robust,
+                      "target_to_local_median_ratio": target_to_local_median_ratio,
+                      "target_z_vs_local_mean": target_z,
+                      "target_robust_z_vs_local_median": target_robust_z,
+                      "error": ""
+                  }
+
+                  target_rows.append(target_row)
+
+                  if original_ratio not in [None, ""]:
+                      all_ratios.append(float(original_ratio))
+
+              except Exception as e:
+                  target_rows.append({
+                      "scw_id": scw,
+                      "path": str(path),
+                      "hdu_name": "",
+                      "value_col": "",
+                      "energy_label": "",
+                      "energy_mode": "",
+                      "target_508_514_sum": "",
+                      "target_bin_count": "",
+                      "original_sideband_490_500_sum": "",
+                      "original_sideband_522_532_sum": "",
+                      "original_sideband_mean_sum": "",
+                      "original_line_to_sideband_ratio": "",
+                      "immediate_sideband_502_508_sum": "",
+                      "immediate_sideband_514_520_sum": "",
+                      "immediate_sideband_mean_sum": "",
+                      "immediate_line_to_sideband_ratio": "",
+                      "local_window_count": "",
+                      "target_rank_by_6keV_sum_desc": "",
+                      "target_higher_window_count": "",
+                      "target_equal_or_higher_window_count": "",
+                      "target_specificity_percentile": "",
+                      "local_median_6keV_sum": "",
+                      "local_mean_6keV_sum": "",
+                      "local_sample_std_6keV_sum": "",
+                      "local_robust_sigma_mad": "",
+                      "target_to_local_median_ratio": "",
+                      "target_z_vs_local_mean": "",
+                      "target_robust_z_vs_local_median": "",
+                      "error": repr(e)[:500]
+                  })
 
           write_csv(
-              LIGHT / "unique_scw_spi_oper_511_ratios.csv",
-              rows,
+              LIGHT / "target_508_514_specificity_summary.csv",
+              target_rows,
               [
-                  "scw_id", "path", "read_ok", "hdu_name", "value_col", "energy_col",
-                  "line_508_514_sum", "sideband_490_500_sum", "sideband_522_532_sum",
-                  "sideband_mean_sum", "line_to_sideband_mean_ratio",
-                  "line_bin_count", "sb1_bin_count", "sb2_bin_count", "error"
+                  "scw_id", "path", "hdu_name", "value_col", "energy_label", "energy_mode",
+                  "target_508_514_sum", "target_bin_count",
+                  "original_sideband_490_500_sum", "original_sideband_522_532_sum",
+                  "original_sideband_mean_sum", "original_line_to_sideband_ratio",
+                  "immediate_sideband_502_508_sum", "immediate_sideband_514_520_sum",
+                  "immediate_sideband_mean_sum", "immediate_line_to_sideband_ratio",
+                  "local_window_count", "target_rank_by_6keV_sum_desc",
+                  "target_higher_window_count", "target_equal_or_higher_window_count",
+                  "target_specificity_percentile", "local_median_6keV_sum",
+                  "local_mean_6keV_sum", "local_sample_std_6keV_sum",
+                  "local_robust_sigma_mad", "target_to_local_median_ratio",
+                  "target_z_vs_local_mean", "target_robust_z_vs_local_median", "error"
               ]
           )
 
           write_csv(
-              LIGHT / "ranked_unique_scw_spi_oper_511_ratios.csv",
-              metric_rows_sorted,
+              LIGHT / "all_local_6keV_windows_450_570.csv",
+              window_rows,
               [
-                  "scw_id", "path", "line_508_514_sum", "sideband_490_500_sum",
-                  "sideband_522_532_sum", "sideband_mean_sum",
-                  "line_to_sideband_mean_ratio", "line_bin_count", "sb1_bin_count", "sb2_bin_count"
+                  "scw_id", "path", "window_lo_keV", "window_hi_keV",
+                  "window_width_keV", "window_sum", "bin_count", "is_target_508_514",
+                  "local_median_sum", "local_mean_sum", "local_sample_std_sum",
+                  "local_robust_sigma_mad", "sum_to_local_median_ratio",
+                  "z_vs_local_mean", "robust_z_vs_local_median"
               ]
           )
+
+          ranked_all = sorted(window_rows, key=lambda r: float(r["window_sum"]), reverse=True)
+          write_csv(
+              LIGHT / "ranked_all_local_6keV_windows_by_sum.csv",
+              ranked_all,
+              [
+                  "scw_id", "window_lo_keV", "window_hi_keV",
+                  "window_sum", "bin_count", "is_target_508_514",
+                  "sum_to_local_median_ratio", "z_vs_local_mean", "robust_z_vs_local_median", "path"
+              ]
+          )
+
+          best_target = target_rows[0] if target_rows else {}
+          target_rank = best_target.get("target_rank_by_6keV_sum_desc", "")
+          target_percentile = best_target.get("target_specificity_percentile", "")
+          target_robust_z = best_target.get("target_robust_z_vs_local_median", "")
+          immediate_ratio = best_target.get("immediate_line_to_sideband_ratio", "")
+          original_ratio = best_target.get("original_line_to_sideband_ratio", "")
 
           checks = {
-              "ready_flag_exists": ready,
+              "ready_flag_exists": ready_flag_exists,
               "spi_oper_file_count_total": len(spi_oper_paths),
               "unique_scw_count": len(unique_by_scw),
-              "unique_metric_row_count": len(metric_rows),
-              "line_508_514_seen_any_unique_scw": any(int(r.get("line_bin_count", 0) or 0) > 0 for r in rows),
-              "sideband_490_500_seen_any_unique_scw": any(int(r.get("sb1_bin_count", 0) or 0) > 0 for r in rows),
-              "sideband_522_532_seen_any_unique_scw": any(int(r.get("sb2_bin_count", 0) or 0) > 0 for r in rows),
-              "best_unique_scw": best_scw,
-              "best_unique_ratio": best_ratio,
-              "best_unique_path": best_path,
+              "target_rows_count": len(target_rows),
+              "local_window_rows_count": len(window_rows),
+              "target_508_514_seen": bool(best_target.get("target_508_514_sum", "") != ""),
+              "original_line_to_sideband_ratio": original_ratio,
+              "immediate_line_to_sideband_ratio": immediate_ratio,
+              "target_rank_by_6keV_sum_desc": target_rank,
+              "target_specificity_percentile": target_percentile,
+              "target_robust_z_vs_local_median": target_robust_z,
+              "target_to_local_median_ratio": best_target.get("target_to_local_median_ratio", ""),
+              "target_higher_window_count": best_target.get("target_higher_window_count", ""),
+              "local_window_count": best_target.get("local_window_count", ""),
               "full_osa_executed": False,
               "spi_science_analysis_executed": False
           }
-
-          checks.update(stats)
 
           with open(LIGHT / "checks_flat.csv", "w", newline="", encoding="utf-8") as f:
               w = csv.DictWriter(f, fieldnames=["check", "value"])
@@ -351,18 +473,35 @@ jobs:
               for k, v in checks.items():
                   w.writerow({"check": k, "value": v})
 
-          if metric_rows:
-              if len(metric_rows) == 1:
-                  final_status = "R21AX_R7G_R3P_R2Q_DIRECT_SPI_OPER_SINGLE_UNIQUE_SCW_511_RATIO_CANDIDATE_NOT_FULL_OSA_NOT_PROOF"
-              else:
-                  final_status = "R21AX_R7G_R3P_R2Q_DIRECT_SPI_OPER_MULTI_UNIQUE_SCW_511_RATIO_AUDIT_NOT_FULL_OSA_NOT_PROOF"
-              scientific_status = "DIRECT_SPI_OPER_RAW_OPERATIONAL_AUDIT_NOT_OSA_PROOF_NOT_DISCOVERY"
-          elif rows:
-              final_status = "R21AX_R7G_R3P_R2Q_DIRECT_SPI_OPER_FILES_FOUND_BUT_NO_COMPLETE_UNIQUE_511_RATIO"
-              scientific_status = "NO_COMPLETE_DIRECT_511_RATIO_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
-          else:
-              final_status = "R21AX_R7G_R3P_R2Q_NO_SPI_OPER_FILES_FOUND_IN_CACHE"
+          def as_float(x):
+              try:
+                  v = float(x)
+                  if math.isfinite(v):
+                      return v
+              except Exception:
+                  pass
+              return None
+
+          percentile_v = as_float(target_percentile)
+          robust_z_v = as_float(target_robust_z)
+          immediate_ratio_v = as_float(immediate_ratio)
+          original_ratio_v = as_float(original_ratio)
+
+          if not target_rows:
+              final_status = "R21AX_R7G_R3P_R2R_NO_SPI_OPER_TARGET_ROW_NO_511_METRIC"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
+          elif best_target.get("error", ""):
+              final_status = "R21AX_R7G_R3P_R2R_SPI_OPER_READ_ERROR_NO_511_SPECIFICITY"
+              scientific_status = "NO_COMPLETE_511_SPECIFICITY_NOT_OSA_PROOF_NO_PHYSICAL_NULL"
+          elif percentile_v is not None and percentile_v >= 0.95 and robust_z_v is not None and robust_z_v >= 2.0:
+              final_status = "R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_508_514_LOCALLY_SPECIFIC_RAW_CANDIDATE_NOT_OSA_PROOF"
+              scientific_status = "DIRECT_RAW_LOCAL_SPECIFICITY_SUPPORT_NOT_DISCOVERY_NOT_FULL_OSA"
+          elif percentile_v is not None and percentile_v >= 0.80:
+              final_status = "R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_508_514_MODERATELY_HIGH_LOCAL_WINDOW_NOT_OSA_PROOF"
+              scientific_status = "DIRECT_RAW_MODERATE_SPECIFICITY_NOT_DISCOVERY_NOT_FULL_OSA"
+          else:
+              final_status = "R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_508_514_NOT_LOCALLY_SPECIFIC_RAW_RATIO_WEAKENED"
+              scientific_status = "RAW_RATIO_NOT_LOCAL_SPECIFIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
 
           summary = {
               "run_id": RUN_ID,
@@ -370,25 +509,28 @@ jobs:
               "final_status": final_status,
               "scientific_status": scientific_status,
               "checks": checks,
-              "method": "UNIQUE_SCW_DIRECT_SPI_OPER_FITS_AUDIT_ONLY_NO_FULL_OSA",
-              "energy_windows_keV": {
-                  "line": [508.0, 514.0],
-                  "sideband_low": [490.0, 500.0],
-                  "sideband_high": [522.0, 532.0]
+              "method": "DIRECT_SPI_OPER_RAW_LOCAL_6KEV_WINDOW_SPECIFICITY_AUDIT_NO_FULL_OSA",
+              "local_scan": {
+                  "min_keV": local_min,
+                  "max_keV": local_max,
+                  "window_width_keV": width,
+                  "step_keV": step
               },
-              "claim_ceiling": "DIRECT_RAW_OPERATIONAL_SUPPORT_ONLY_NOT_FULL_OSA_PROOF_NOT_DISCOVERY"
+              "target_window_keV": [508.0, 514.0],
+              "claim_ceiling": "DIRECT_RAW_OPERATIONAL_SPECIFICITY_ONLY_NOT_FULL_OSA_PROOF_NOT_DISCOVERY"
           }
 
           safe_text(LIGHT / "SUMMARY.json", json.dumps(summary, indent=2))
           safe_text(
               LIGHT / "CLAIM_BOUNDARY.txt",
-              "R2Q deduplicates R2P by unique SCW and reads spi_oper.fits directly.\n"
+              "R2R tests whether the raw 508-514 keV window is locally specific inside spi_oper.fits.\n"
               "It does not execute spi_science_analysis and is not OSA proof.\n"
-              "A raw SPI.-OPSD-ALL ratio is operational support only, not a discovery claim.\n"
+              "If 508-514 is not locally high versus other 6 keV windows, the R2Q raw ratio is weakened.\n"
+              "No physical null is implied by this direct raw audit.\n"
           )
 
           phone = []
-          phone.append("ACIRM R2Q DIRECT UNIQUE SCW SPI OPER AUDIT")
+          phone.append("ACIRM R2R DIRECT SPI OPER LOCAL WINDOW SPECIFICITY AUDIT")
           phone.append("final_status=" + final_status)
           phone.append("scientific_status=" + scientific_status)
           for k, v in checks.items():
@@ -410,19 +552,19 @@ jobs:
           if Path(ZIP_NAME).exists():
               sha = sha256_file(ZIP_NAME)
               safe_text(ZIP_NAME + ".sha256.txt", sha + "  " + ZIP_NAME + "\n")
-              print("R2Q_DIRECT_OPER_AUDIT_ZIP_SHA256", sha)
+              print("R2R_SPECIFICITY_ZIP_SHA256", sha)
 
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Upload R2Q direct unique SCW audit artifact always
+      - name: Upload R2R specificity artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_SPI_OPER_UNIQUE_SCW_AUDIT_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_SPI_OPER_UNIQUE_SCW_AUDIT_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_SPI_OPER_UNIQUE_SCW_AUDIT_LIGHT_RESULTS.zip.sha256.txt
-            ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_RESULTS/logs/main_execution.log
-            ACIRM_R21AX_R7G_R3P_R2Q_DIRECT_OPER_AUDIT_RESULTS/logs/pip_astropy_numpy.log
+            ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS/logs/main_execution.log
+            ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS/logs/pip_astropy_numpy.log
           if-no-files-found: warn
