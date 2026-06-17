@@ -1,4 +1,4 @@
-name: ACIRM R3P R2N fast IC master locator optional line retry
+name: ACIRM R3P R2O fast IC IDX CAT line only SPI511
 
 on:
   workflow_dispatch:
@@ -7,20 +7,21 @@ on:
       - main
 
 jobs:
-  acirm-r3p-r2n-fast-ic-master-locator:
+  acirm-r3p-r2o-fast-ic-idx-cat-line-only:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 75
 
     steps:
       - name: Prepare folders
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/work
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/work
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY_LIGHT_RESULTS/logs
           mkdir -p ACIRM_CACHE_R3P_R1
-          echo "R2N_FAST_PREPARED"
+          mkdir -p ACIRM_CACHE_IC_IDX_CAT_R2O
+          echo "R2O_FAST_PREPARED"
 
       - name: Restore R3P R1 cache
         uses: actions/cache/restore@v4
@@ -30,33 +31,43 @@ jobs:
           restore-keys: |
             acirm-r21ax-r7g-r3p-r1-cache-
 
-      - name: Run R2N IC master locator and optional line retry
+      - name: Restore IC IDX CAT cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ACIRM_CACHE_IC_IDX_CAT_R2O
+          key: acirm-r21ax-r7g-r3p-r2o-ic-idx-cat-v1
+          restore-keys: |
+            acirm-r21ax-r7g-r3p-r2o-ic-idx-cat-
+
+      - name: Run R2O IC IDX CAT download then line only
         continue-on-error: true
         run: |
           set +e
 
-          OUT="ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS"
-          LIGHT="ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS"
+          OUT="ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS"
+          LIGHT="ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY_LIGHT_RESULTS"
           MAIN_LOG="$OUT/logs/main_execution.log"
 
-          echo "R2N_FAST_STARTED" | tee "$MAIN_LOG"
+          echo "R2O_FAST_STARTED" | tee "$MAIN_LOG"
           echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$MAIN_LOG"
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/logs/main_execution.log
           import json
           import shutil
           import time
           from pathlib import Path
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY_LIGHT_RESULTS")
 
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           CACHE_DATA = CACHE / "data"
           CACHE_WORK = CACHE / "work"
           READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
+
+          IC_CACHE = Path("ACIRM_CACHE_IC_IDX_CAT_R2O")
 
           for p in [OUT, DATA, WORK, LIGHT]:
               p.mkdir(parents=True, exist_ok=True)
@@ -74,13 +85,14 @@ jobs:
               (OUT / "cache_ok.flag").write_text("CACHE_OK\n", encoding="utf-8")
           else:
               summary = {
-                  "run_id": "ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR",
+                  "run_id": "ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY",
                   "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                  "final_status": "R2N_FAST_CACHE_MISS_IC_LOCATOR_ONLY_NO_SPI_NO_511_NO_PHYSICAL_NULL",
+                  "final_status": "R2O_FAST_R3P_CACHE_MISS_NO_SPI_NO_511_NO_PHYSICAL_NULL",
                   "scientific_status": "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL",
                   "checks": {
                       "ready_flag_exists": READY_FLAG.exists(),
                       "ic_master_found": False,
+                      "ic_download_attempted": False,
                       "line_retry_attempted": False,
                       "line_metric_exists": False
                   },
@@ -89,14 +101,14 @@ jobs:
               (LIGHT / "SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
           PY
 
-          sudo chown -R "$(id -u):$(id -g)" "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 2>/dev/null || true
-          chmod -R u+rwX,go+rX "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 2>/dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 ACIRM_CACHE_IC_IDX_CAT_R2O 2>/dev/null || true
+          chmod -R u+rwX,go+rX "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 ACIRM_CACHE_IC_IDX_CAT_R2O 2>/dev/null || true
 
           if [ -f "$OUT/cache_ok.flag" ]; then
             {
               echo "HOST_PREP_START"
               sudo apt-get update -y || true
-              sudo apt-get install -y xvfb x11-xserver-utils zip || true
+              sudo apt-get install -y xvfb x11-xserver-utils zip wget ca-certificates || true
               pkill Xvfb 2>/dev/null || true
               Xvfb :99 -screen 0 1280x1024x24 -ac +extension GLX +render -noreset > "$OUT/logs/xvfb.log" 2>&1 &
               sleep 4
@@ -107,10 +119,54 @@ jobs:
               echo "HOST_PREP_END"
             } 2>&1 | tee "$OUT/logs/host_prepare.log"
 
-            cat > "$OUT/work/run_spi_r2n_fast.sh" <<'BASH'
+            {
+              echo "IC_IDX_CAT_STAGE_START"
+              echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "checking IC cache"
+              if [ -f ACIRM_CACHE_IC_IDX_CAT_R2O/idx/ic/ic_master_file.fits ]; then
+                echo "IC_CACHE_HIT"
+                cp -a ACIRM_CACHE_IC_IDX_CAT_R2O/ic "$OUT/data/" 2>/dev/null || true
+                cp -a ACIRM_CACHE_IC_IDX_CAT_R2O/idx "$OUT/data/" 2>/dev/null || true
+                cp -a ACIRM_CACHE_IC_IDX_CAT_R2O/cat "$OUT/data/" 2>/dev/null || true
+              else
+                echo "IC_CACHE_MISS_DOWNLOAD_MINIMAL"
+                cd "$OUT/data" || exit 0
+
+                echo "DOWNLOAD idx/ic"
+                timeout 900 wget -q -nH --no-check-certificate --cut-dirs=3 -r -l0 -c -N -np -R 'index*' -erobots=off --retr-symlinks https://heasarc.gsfc.nasa.gov/FTP/integral/data/idx/ic/ || true
+
+                echo "DOWNLOAD ic/spi"
+                timeout 1200 wget -q -nH --no-check-certificate --cut-dirs=3 -r -l0 -c -N -np -R 'index*' -erobots=off --retr-symlinks https://heasarc.gsfc.nasa.gov/FTP/integral/data/ic/spi/ || true
+
+                echo "DOWNLOAD ic/sc"
+                timeout 900 wget -q -nH --no-check-certificate --cut-dirs=3 -r -l0 -c -N -np -R 'index*' -erobots=off --retr-symlinks https://heasarc.gsfc.nasa.gov/FTP/integral/data/ic/sc/ || true
+
+                echo "DOWNLOAD cat/hec"
+                timeout 900 wget -q -nH --no-check-certificate --cut-dirs=3 -r -l0 -c -N -np -R 'index*' -erobots=off --retr-symlinks https://heasarc.gsfc.nasa.gov/FTP/integral/data/cat/hec/ || true
+
+                cd - >/dev/null 2>&1 || true
+              fi
+
+              echo "POST_DOWNLOAD_CHECKS"
+              find "$OUT/data/idx/ic" -maxdepth 2 -type f -name "ic_master_file.fits" -printf "%p %s\n" 2>/dev/null || true
+              find "$OUT/data/ic/spi" -maxdepth 6 -type f -printf "%p %s\n" 2>/dev/null | head -200 || true
+              find "$OUT/data/cat/hec" -maxdepth 5 -type f -printf "%p %s\n" 2>/dev/null | head -100 || true
+
+              mkdir -p ACIRM_CACHE_IC_IDX_CAT_R2O
+              if [ -d "$OUT/data/ic" ]; then cp -a "$OUT/data/ic" ACIRM_CACHE_IC_IDX_CAT_R2O/ 2>/dev/null || true; fi
+              if [ -d "$OUT/data/idx" ]; then cp -a "$OUT/data/idx" ACIRM_CACHE_IC_IDX_CAT_R2O/ 2>/dev/null || true; fi
+              if [ -d "$OUT/data/cat" ]; then cp -a "$OUT/data/cat" ACIRM_CACHE_IC_IDX_CAT_R2O/ 2>/dev/null || true; fi
+
+              echo "IC_IDX_CAT_STAGE_END"
+            } 2>&1 | tee "$OUT/logs/ic_idx_cat_download.log"
+
+            sudo chown -R "$(id -u):$(id -g)" "$OUT" "$LIGHT" ACIRM_CACHE_IC_IDX_CAT_R2O 2>/dev/null || true
+            chmod -R u+rwX,go+rX "$OUT" "$LIGHT" ACIRM_CACHE_IC_IDX_CAT_R2O 2>/dev/null || true
+
+            cat > "$OUT/work/run_spi_r2o_fast.sh" <<'BASH'
           set +e
 
-          echo "R2N_FAST_CONTAINER_START"
+          echo "R2O_FAST_CONTAINER_START"
 
           mkdir -p /tmp/acirm_pfiles
           mkdir -p /tmp/acirm_work
@@ -123,7 +179,7 @@ jobs:
           export PIL_NO_GUI=1
           export PIL_NOTTY=1
           export ISDC_ENV=/opt/osa
-          export REP_BASE_PROD=/tmp/acirm_rep
+          export REP_BASE_PROD=/data
           export COMMONLOGFILE=/tmp/acirm_work/commonlog.txt
           export PFILES="/tmp/acirm_pfiles;/opt/osa/pfiles"
           export PATH=/opt/osa/bin:$PATH
@@ -145,6 +201,7 @@ jobs:
           export PIL_NO_GUI=1
           export PIL_NOTTY=1
           export ISDC_ENV=/opt/osa
+          export REP_BASE_PROD=/data
           export COMMONLOGFILE=/tmp/acirm_work/commonlog.txt
           export PFILES="/tmp/acirm_pfiles;/opt/osa/pfiles"
           export PATH=/opt/osa/bin:$PATH
@@ -177,99 +234,31 @@ jobs:
             echo ""
             echo "DISPLAY_CHECK"
             xdpyinfo -display "$DISPLAY" 2>&1 | head -60 || true
-          } > /work/container_logs/environment_and_display.txt 2>&1
-
-          echo "IC_MASTER_SEARCH_START"
-
-          {
-            echo "SEARCH_ROOTS"
-            for root in /opt/osa /isdc /data /work /usr/local /tmp; do
-              if [ -e "$root" ]; then
-                echo "ROOT_EXISTS $root"
-              else
-                echo "ROOT_MISSING $root"
-              fi
-            done
 
             echo ""
-            echo "FIND_IC_MASTER_LIMITED"
-            for root in /opt/osa /isdc /data /work /usr/local /tmp; do
-              if [ -e "$root" ]; then
-                timeout 35 find "$root" -type f -name "ic_master_file.fits" -print 2>/dev/null || true
-              fi
-            done
+            echo "IC_MASTER_CHECK"
+            ls -l /data/idx/ic/ic_master_file.fits 2>&1 || true
+            fstruct /data/idx/ic/ic_master_file.fits 2>&1 | head -80 || true
 
             echo ""
-            echo "FIND_IDX_IC_DIRS"
-            for root in /opt/osa /isdc /data /work /usr/local /tmp; do
-              if [ -e "$root" ]; then
-                timeout 20 find "$root" -type d -path "*/idx/ic" -print 2>/dev/null || true
-              fi
-            done
-          } > /work/container_logs/ic_master_search.txt 2>&1
-
-          grep -E "/ic_master_file\.fits$" /work/container_logs/ic_master_search.txt | sort -u > /work/container_logs/ic_master_candidates.txt || true
-
-          {
-            echo "SPI_CALIBRATION_HINT_SEARCH"
-            for root in /opt/osa /isdc /data /work /usr/local /tmp; do
-              if [ -e "$root" ]; then
-                echo "### ROOT $root"
-                timeout 35 find "$root" -type f \( \
-                  -iname "*spi*coef*cal*" -o \
-                  -iname "*SPI*COEF*CAL*" -o \
-                  -iname "*gain*coef*" -o \
-                  -iname "*spi*gain*" -o \
-                  -iname "*ic_master_file.fits" \
-                \) -printf "%p %s\n" 2>/dev/null | head -300 || true
-              fi
-            done
-          } > /work/container_logs/spi_calibration_hint_search.txt 2>&1
-
-          BEST_ROOT=""
-          BEST_IC=""
-
-          while IFS= read -r p; do
-            case "$p" in
-              */idx/ic/ic_master_file.fits)
-                root="${p%/idx/ic/ic_master_file.fits}"
-                if [ -f "$root/idx/ic/ic_master_file.fits" ]; then
-                  BEST_ROOT="$root"
-                  BEST_IC="$p"
-                  break
-                fi
-                ;;
-            esac
-          done < /work/container_logs/ic_master_candidates.txt
-
-          {
-            echo "BEST_ROOT=$BEST_ROOT"
-            echo "BEST_IC=$BEST_IC"
-            if [ -n "$BEST_ROOT" ]; then
-              echo "IC_MASTER_FOUND=True"
-              ls -l "$BEST_ROOT/idx/ic/ic_master_file.fits" 2>/dev/null || true
-            else
-              echo "IC_MASTER_FOUND=False"
-            fi
-          } > /work/container_logs/ic_selection.env
+            echo "SPI_IC_HINTS"
+            find /data/ic/spi -maxdepth 6 -type f -printf "%p %s\n" 2>/dev/null | head -200 || true
+          } > /work/container_logs/environment_ic_display.txt 2>&1
 
           OG_FILE=$(find /work/og -type f -name "og_spi.fits" | head -1)
           echo "OG_FILE=$OG_FILE" > /work/container_logs/og_locator.txt
 
           if [ -z "$OG_FILE" ]; then
-            echo "R2N_NO_REAL_OG_SPI_FITS" >> /work/container_logs/og_locator.txt
-            echo "R2N_FAST_CONTAINER_END_NO_OG"
+            echo "R2O_NO_REAL_OG_SPI_FITS" >> /work/container_logs/og_locator.txt
+            echo "R2O_FAST_CONTAINER_END_NO_OG"
             exit 0
           fi
 
-          if [ -z "$BEST_ROOT" ]; then
-            echo "R2N_NO_IC_MASTER_FOUND_SKIP_LINE_RETRY" > /work/container_logs/line_retry_skipped.txt
-            echo "R2N_FAST_CONTAINER_END_NO_IC"
+          if [ ! -f /data/idx/ic/ic_master_file.fits ]; then
+            echo "R2O_NO_IC_MASTER_AFTER_DOWNLOAD_SKIP_LINE" > /work/container_logs/line_retry_skipped.txt
+            echo "R2O_FAST_CONTAINER_END_NO_IC"
             exit 0
           fi
-
-          export REP_BASE_PROD="$BEST_ROOT"
-          echo "REP_BASE_PROD=$REP_BASE_PROD" > /work/container_logs/selected_rep_base_prod.txt
 
           cp -f /tmp/acirm_pfiles/spi_science_analysis.par /work/container_logs/spi_science_analysis.par.used 2>/dev/null || true
           timeout 20 spi_science_analysis -h > /work/container_logs/spi_science_analysis_help.txt 2>&1 || true
@@ -447,7 +436,7 @@ jobs:
             return 0
           }
 
-          CASE="R2N_FAST_IC_LINE_508_514"
+          CASE="R2O_FAST_ICIDXCAT_LINE_508_514"
           PARAMS="/work/container_logs/${CASE}.params.txt"
           ANSWERS="/work/container_logs/${CASE}.answers.txt"
           LOG="/work/container_logs/${CASE}.log"
@@ -456,6 +445,7 @@ jobs:
           rm -f "$PARAMS" "$ANSWERS" "$LOG" "$STATUS"
 
           add_param "obs_group" "$OG_FILE" "$PARAMS"
+          add_param "IC_Group" "/data/idx/ic/ic_master_file.fits" "$PARAMS"
 
           add_param "run_cat_extract" "no" "$PARAMS"
           add_param "run_pointing" "yes" "$PARAMS"
@@ -522,7 +512,7 @@ jobs:
 
           echo "SPI_CASE_BEGIN ${CASE}"
           echo "REP_BASE_PROD=$REP_BASE_PROD"
-          echo "IC_MASTER=$BEST_IC"
+          echo "IC_MASTER=/data/idx/ic/ic_master_file.fits"
           echo "DISPLAY=$DISPLAY"
           echo "BATCH_FLAG_USED=-b"
           echo "SIDE_BANDS_SKIPPED=True"
@@ -531,7 +521,7 @@ jobs:
           echo "case=${CASE}" > "$STATUS"
           echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATUS"
           echo "rep_base_prod=${REP_BASE_PROD}" >> "$STATUS"
-          echo "ic_master=${BEST_IC}" >> "$STATUS"
+          echo "ic_master=/data/idx/ic/ic_master_file.fits" >> "$STATUS"
           echo "display=${DISPLAY}" >> "$STATUS"
           echo "xvfb_used=True" >> "$STATUS"
           echo "batch_flag_used=True" >> "$STATUS"
@@ -570,7 +560,7 @@ jobs:
 
           find /work -maxdepth 10 -type f -printf "%p %s\n" | sort > /work/container_logs/work_files_after_spi.txt
 
-          echo "R2N_FAST_CONTAINER_END"
+          echo "R2O_FAST_CONTAINER_END"
           BASH
 
             docker run --rm \
@@ -579,14 +569,14 @@ jobs:
               -v "$PWD/$OUT/data:/data" \
               -v "$PWD/$OUT/work:/work" \
               integralsw/osa:latest \
-              bash /work/run_spi_r2n_fast.sh \
-              > "$OUT/logs/host_container_r2n_fast.log" 2>&1 || true
+              bash /work/run_spi_r2o_fast.sh \
+              > "$OUT/logs/host_container_r2o_fast.log" 2>&1 || true
 
-            sudo chown -R "$(id -u):$(id -g)" "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 2>/dev/null || true
-            chmod -R u+rwX,go+rX "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 2>/dev/null || true
+            sudo chown -R "$(id -u):$(id -g)" "$OUT" "$LIGHT" ACIRM_CACHE_IC_IDX_CAT_R2O 2>/dev/null || true
+            chmod -R u+rwX,go+rX "$OUT" "$LIGHT" ACIRM_CACHE_IC_IDX_CAT_R2O 2>/dev/null || true
           fi
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/logs/main_execution.log
           import csv
           import hashlib
           import json
@@ -594,17 +584,18 @@ jobs:
           import time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR"
+          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
           LOGS = OUT / "logs"
           CL = WORK / "container_logs"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY_LIGHT_RESULTS")
           CACHE = Path("ACIRM_CACHE_R3P_R1")
+          IC_CACHE = Path("ACIRM_CACHE_IC_IDX_CAT_R2O")
           READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
-          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS.zip"
+          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY_LIGHT_RESULTS.zip"
 
           LIGHT.mkdir(parents=True, exist_ok=True)
           (LIGHT / "logs").mkdir(parents=True, exist_ok=True)
@@ -671,22 +662,22 @@ jobs:
           data_rows = rows(DATA)
           work_rows = rows(WORK)
           cache_rows = rows(CACHE)
+          ic_cache_rows = rows(IC_CACHE)
           line_rows = rows(WORK / "products_line")
 
           write_csv(LIGHT / "data_files.csv", data_rows, ["path", "bytes"])
           write_csv(LIGHT / "work_files.csv", work_rows, ["path", "bytes"])
           write_csv(LIGHT / "cache_files.csv", cache_rows, ["path", "bytes"])
+          write_csv(LIGHT / "ic_idx_cat_cache_files.csv", ic_cache_rows, ["path", "bytes"])
 
-          status = parse_status(CL / "R2N_FAST_IC_LINE_508_514.status.txt")
+          status = parse_status(CL / "R2O_FAST_ICIDXCAT_LINE_508_514.status.txt")
 
-          host_log = safe_text(LOGS / "host_container_r2n_fast.log", limit=800000)
-          case_log = safe_text(CL / "R2N_FAST_IC_LINE_508_514.log", limit=800000)
-          common_log = safe_text(CL / "R2N_FAST_IC_LINE_508_514.commonlog.txt", limit=800000)
-          ic_search = safe_text(CL / "ic_master_search.txt", limit=400000)
-          ic_candidates = safe_text(CL / "ic_master_candidates.txt", limit=200000)
-          ic_selection = safe_text(CL / "ic_selection.env", limit=100000)
-          selected_rep = safe_text(CL / "selected_rep_base_prod.txt", limit=100000)
-          joined = host_log + "\n" + case_log + "\n" + common_log + "\n" + ic_search + "\n" + ic_candidates + "\n" + ic_selection + "\n" + selected_rep
+          host_log = safe_text(LOGS / "host_container_r2o_fast.log", limit=800000)
+          case_log = safe_text(CL / "R2O_FAST_ICIDXCAT_LINE_508_514.log", limit=800000)
+          common_log = safe_text(CL / "R2O_FAST_ICIDXCAT_LINE_508_514.commonlog.txt", limit=800000)
+          ic_download = safe_text(LOGS / "ic_idx_cat_download.log", limit=800000)
+          env_ic = safe_text(CL / "environment_ic_display.txt", limit=800000)
+          joined = host_log + "\n" + case_log + "\n" + common_log + "\n" + ic_download + "\n" + env_ic
 
           def intval(x):
               try:
@@ -698,31 +689,25 @@ jobs:
           og_created = len(og_candidates) > 0
           og_path = og_candidates[0]["path"] if og_candidates else ""
 
+          ic_master_path = DATA / "idx" / "ic" / "ic_master_file.fits"
+          ic_master_found = ic_master_path.exists() and ic_master_path.stat().st_size > 1024
+
           line_metric = any((str(r["path"]).endswith(".fits") or str(r["path"]).endswith(".fits.gz")) and int(r.get("bytes") or 0) > 1024 for r in line_rows)
-
-          ic_master_found = "IC_MASTER_FOUND=True" in ic_selection
-          line_retry_attempted = status.get("line_retry_attempted", "") == "True"
-
-          best_root = ""
-          best_ic = ""
-          for line in ic_selection.splitlines():
-              if line.startswith("BEST_ROOT="):
-                  best_root = line.split("=", 1)[1].strip()
-              if line.startswith("BEST_IC="):
-                  best_ic = line.split("=", 1)[1].strip()
 
           checks = {
               "ready_flag_exists": READY_FLAG.exists(),
               "cache_file_count": len(cache_rows),
+              "ic_idx_cat_cache_file_count": len(ic_cache_rows),
               "data_file_count": len(data_rows),
               "work_file_count": len(work_rows),
               "og_created": og_created,
               "og_spi_path": og_path,
+              "ic_download_attempted": "IC_CACHE_MISS_DOWNLOAD_MINIMAL" in ic_download,
+              "ic_cache_hit": "IC_CACHE_HIT" in ic_download,
               "ic_master_found": ic_master_found,
-              "best_rep_base_prod": best_root,
-              "best_ic_master": best_ic,
-              "line_retry_attempted": line_retry_attempted,
-              "actual_spi_started": bool(status.get("started_utc")) or "ACIRM_SPI_PROCESS_STARTED R2N_FAST_IC_LINE_508_514" in joined,
+              "ic_master_path": str(ic_master_path),
+              "line_retry_attempted": status.get("line_retry_attempted", "") == "True",
+              "actual_spi_started": bool(status.get("started_utc")) or "ACIRM_SPI_PROCESS_STARTED R2O_FAST_ICIDXCAT_LINE_508_514" in joined,
               "batch_flag_used": status.get("batch_flag_used", "") == "True",
               "xvfb_used": status.get("xvfb_used", "") == "True",
               "line_508_514_seen": "spibounds_regions=508,514" in joined,
@@ -760,31 +745,31 @@ jobs:
           write_csv(LIGHT / "product_hints.csv", product_hints, ["path", "bytes", "category"])
 
           if line_metric:
-              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_LINE_PRODUCTS_PRESENT_REVIEW_NOT_FINAL_PROOF"
+              final_status = "R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_PRODUCTS_PRESENT_REVIEW_NOT_FINAL_PROOF"
               scientific_status = "PRODUCTS_PRESENT_REVIEW_REQUIRED_NOT_DISCOVERY"
           elif not checks["ready_flag_exists"]:
-              final_status = "R21AX_R7G_R3P_R2N_FAST_CACHE_MISS_NO_SPI_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2O_FAST_R3P_CACHE_MISS_NO_SPI_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif not og_created:
-              final_status = "R21AX_R7G_R3P_R2N_FAST_NO_REAL_OG_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2O_FAST_NO_REAL_OG_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif not ic_master_found:
-              final_status = "R21AX_R7G_R3P_R2N_FAST_NO_IC_MASTER_FOUND_LINE_RETRY_SKIPPED_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2O_FAST_IC_MASTER_STILL_MISSING_AFTER_DOWNLOAD_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif checks["cal_not_found_count"] > 0 or checks["status250002_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_MASTER_FOUND_BUT_CALIBRATION_STILL_NOT_RESOLVED_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2O_FAST_IC_MASTER_PRESENT_BUT_CALIBRATION_STILL_NOT_RESOLVED_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif checks["segfault_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_LINE_SEGFAULT_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2O_FAST_ICIDXCAT_LINE_SEGFAULT_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif str(checks["returncode"]) == "124":
-              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_LINE_TIMEOUT_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2O_FAST_ICIDXCAT_LINE_TIMEOUT_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif checks["status35603_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2N_FAST_STATUS35603_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2O_FAST_STATUS35603_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           else:
-              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_LOCATOR_COMPLETED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2O_FAST_ICIDXCAT_LINE_EXECUTED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
 
           summary = {
@@ -793,13 +778,13 @@ jobs:
               "final_status": final_status,
               "scientific_status": scientific_status,
               "checks": checks,
-              "runtime_design": "FAST_IC_MASTER_LOCATOR_OPTIONAL_LINE_ONLY_RETRY_MINUS_B_XVFB_TIMEOUT_900_NO_SIDEBANDS",
+              "runtime_design": "DOWNLOAD_OR_RESTORE_MINIMAL_IC_IDX_CAT_THEN_FAST_LINE_ONLY_MINUS_B_XVFB_TIMEOUT_900_NO_SIDEBANDS",
               "claim_ceiling": "NOT_DISCOVERY_NOT_FINAL_PROOF_NOT_OSA_PROOF_UNLESS_ACTUAL_511_LINE_METRIC_IS_READ_FROM_OSA_PRODUCTS"
           }
 
           (LIGHT / "SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
           (LIGHT / "CLAIM_BOUNDARY.txt").write_text(
-              "This fast run locates IC master calibration context and only retries 508-514 keV line if IC master is found.\n"
+              "This fast run restores/downloads minimal IC/IDX/CAT and retries only 508-514 keV line with -b + Xvfb.\n"
               "Sidebands are intentionally skipped.\n"
               "Do not claim 511 detection/proof/discovery unless a valid OSA product metric is read.\n",
               encoding="utf-8"
@@ -813,21 +798,30 @@ jobs:
           if Path(ZIP_NAME).exists():
               sha = sha256_file(ZIP_NAME)
               Path(ZIP_NAME + ".sha256.txt").write_text(sha + "  " + ZIP_NAME + "\n", encoding="utf-8")
-              print("R2N_FAST_ZIP_SHA256", sha)
+              print("R2O_FAST_ZIP_SHA256", sha)
 
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Upload R2N fast artifact always
+      - name: Save IC IDX CAT cache best effort
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ACIRM_CACHE_IC_IDX_CAT_R2O
+          key: acirm-r21ax-r7g-r3p-r2o-ic-idx-cat-v1
+
+      - name: Upload R2O fast artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS.zip.sha256.txt
-            ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/main_execution.log
-            ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/host_prepare.log
-            ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/xvfb.log
-            ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/host_container_r2n_fast.log
+            ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3P_R2O_FAST_IC_IDX_CAT_LINE_ONLY_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/logs/main_execution.log
+            ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/logs/host_prepare.log
+            ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/logs/ic_idx_cat_download.log
+            ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/logs/xvfb.log
+            ACIRM_R21AX_R7G_R3P_R2O_FAST_RESULTS/logs/host_container_r2o_fast.log
           if-no-files-found: warn
