@@ -1,4 +1,4 @@
-name: ACIRM R3P R2L fast batch line only SPI511
+name: ACIRM R3P R2M fast xvfb batch line only SPI511
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  acirm-r3p-r2l-fast-batch-line-only:
+  acirm-r3p-r2m-fast-xvfb-batch-line-only:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -15,12 +15,12 @@ jobs:
       - name: Prepare folders
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS/work
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_LIGHT_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/work
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS/logs
           mkdir -p ACIRM_CACHE_R3P_R1
-          echo "R2L_FAST_PREPARED"
+          echo "R2M_FAST_PREPARED"
 
       - name: Restore R3P R1 cache
         uses: actions/cache/restore@v4
@@ -30,28 +30,28 @@ jobs:
           restore-keys: |
             acirm-r21ax-r7g-r3p-r1-cache-
 
-      - name: Run R2L fast batch line only
+      - name: Run R2M fast xvfb batch line only
         continue-on-error: true
         run: |
           set +e
 
-          OUT="ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS"
-          LIGHT="ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_LIGHT_RESULTS"
+          OUT="ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS"
+          LIGHT="ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS"
           MAIN_LOG="$OUT/logs/main_execution.log"
 
-          echo "R2L_FAST_STARTED" | tee "$MAIN_LOG"
+          echo "R2M_FAST_STARTED" | tee "$MAIN_LOG"
           echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$MAIN_LOG"
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/main_execution.log
           import json
           import shutil
           import time
           from pathlib import Path
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_LIGHT_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS")
 
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           CACHE_DATA = CACHE / "data"
@@ -74,9 +74,9 @@ jobs:
               (OUT / "cache_ok.flag").write_text("CACHE_OK\n", encoding="utf-8")
           else:
               summary = {
-                  "run_id": "ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY",
+                  "run_id": "ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY",
                   "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                  "final_status": "R2L_FAST_CACHE_MISS_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL",
+                  "final_status": "R2M_FAST_CACHE_MISS_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL",
                   "scientific_status": "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL",
                   "checks": {
                       "ready_flag_exists": READY_FLAG.exists(),
@@ -87,6 +87,7 @@ jobs:
                       "actual_spi_started": False,
                       "line_508_514_seen": False,
                       "batch_flag_used": False,
+                      "xvfb_used": False,
                       "line_metric_exists": False
                   },
                   "claim_ceiling": "NOT_DISCOVERY_NOT_FINAL_PROOF_NOT_OSA_PROOF"
@@ -101,16 +102,21 @@ jobs:
             {
               echo "HOST_PREP_START"
               sudo apt-get update -y || true
-              sudo apt-get install -y zip || true
+              sudo apt-get install -y xvfb x11-xserver-utils zip || true
+              pkill Xvfb 2>/dev/null || true
+              Xvfb :99 -screen 0 1280x1024x24 -ac +extension GLX +render -noreset > "$OUT/logs/xvfb.log" 2>&1 &
+              sleep 4
+              export DISPLAY=:99
+              xhost +local: 2>/dev/null || true
               docker --version || true
               docker pull integralsw/osa:latest || true
               echo "HOST_PREP_END"
             } 2>&1 | tee "$OUT/logs/host_prepare.log"
 
-            cat > "$OUT/work/run_spi_r2l_fast.sh" <<'BASH'
+            cat > "$OUT/work/run_spi_r2m_fast.sh" <<'BASH'
           set +e
 
-          echo "R2L_FAST_CONTAINER_START"
+          echo "R2M_FAST_CONTAINER_START"
 
           mkdir -p /tmp/acirm_pfiles
           mkdir -p /tmp/acirm_work
@@ -118,14 +124,15 @@ jobs:
           mkdir -p /work/container_logs
           mkdir -p /work/products_line
 
+          export DISPLAY=:99
+          export HEADASNOQUERY=1
+          export PIL_NO_GUI=1
+          export PIL_NOTTY=1
           export ISDC_ENV=/opt/osa
           export REP_BASE_PROD=/tmp/acirm_rep
           export COMMONLOGFILE=/tmp/acirm_work/commonlog.txt
           export PFILES="/tmp/acirm_pfiles;/opt/osa/pfiles"
           export PATH=/opt/osa/bin:$PATH
-          export HEADASNOQUERY=1
-          export PIL_NO_GUI=1
-          export PIL_NOTTY=1
 
           if [ -d /opt/osa/lib ]; then
             export LD_LIBRARY_PATH="/opt/osa/lib:$LD_LIBRARY_PATH"
@@ -139,14 +146,15 @@ jobs:
 
           source /opt/osa/bin/isdc_init_env.sh > /work/container_logs/isdc_init_env.log 2>&1 || true
 
+          export DISPLAY=:99
+          export HEADASNOQUERY=1
+          export PIL_NO_GUI=1
+          export PIL_NOTTY=1
           export ISDC_ENV=/opt/osa
           export REP_BASE_PROD=/tmp/acirm_rep
           export COMMONLOGFILE=/tmp/acirm_work/commonlog.txt
           export PFILES="/tmp/acirm_pfiles;/opt/osa/pfiles"
           export PATH=/opt/osa/bin:$PATH
-          export HEADASNOQUERY=1
-          export PIL_NO_GUI=1
-          export PIL_NOTTY=1
 
           if [ -d /opt/osa/lib ]; then
             export LD_LIBRARY_PATH="/opt/osa/lib:$LD_LIBRARY_PATH"
@@ -164,21 +172,25 @@ jobs:
           done
 
           echo "COMMAND_DISCOVERY"
-          for c in spi_science_analysis pset punlearn plist timeout stdbuf fstruct fdump ftlist strings; do
+          for c in spi_science_analysis pset punlearn plist timeout stdbuf fstruct fdump ftlist strings xdpyinfo; do
             echo "$c=$(command -v "$c" || true)"
           done
+
+          {
+            echo "DISPLAY=$DISPLAY"
+            xdpyinfo -display "$DISPLAY" 2>&1 | head -60 || true
+          } > /work/container_logs/xvfb_display_check.txt 2>&1
 
           OG_FILE=$(find /work/og -type f -name "og_spi.fits" | head -1)
           echo "OG_FILE=$OG_FILE"
 
           if [ -z "$OG_FILE" ]; then
-            echo "R2L_FAST_NO_REAL_OG_SPI_FITS"
+            echo "R2M_FAST_NO_REAL_OG_SPI_FITS"
             exit 0
           fi
 
           cp -f /tmp/acirm_pfiles/spi_science_analysis.par /work/container_logs/spi_science_analysis.par.used 2>/dev/null || true
 
-          echo "SPI_HELP_SHORT"
           timeout 20 spi_science_analysis -h > /work/container_logs/spi_science_analysis_help.txt 2>&1 || true
 
           has_param() {
@@ -272,6 +284,7 @@ jobs:
             flat=0
             gedsat=0
             gui=0
+            displayerr=0
             normalprompt=0
             status3004=0
             status3023=0
@@ -286,7 +299,8 @@ jobs:
               case "$line" in *"Orbit asini parameter"*) orbit=$((orbit + 1));; esac
               case "$line" in *"Use archival flatfield observations"*) flat=$((flat + 1));; esac
               case "$line" in *"GEDSAT-ME2"*"VETOGATE"*) gedsat=$((gedsat + 1));; esac
-              case "$line" in *"Attempting to launch GUI"*|*"TGClient"*|*"can't open display"*) gui=$((gui + 1));; esac
+              case "$line" in *"Attempting to launch GUI"*|*"TGClient"*) gui=$((gui + 1));; esac
+              case "$line" in *"can't open display"*) displayerr=$((displayerr + 1));; esac
               case "$line" in *"Running in normal mode"*) normalprompt=$((normalprompt + 1));; esac
               case "$line" in *"default parameter prompting"*) normalprompt=$((normalprompt + 1));; esac
               case "$line" in *"status -3004"*) status3004=$((status3004 + 1));; esac
@@ -325,6 +339,7 @@ jobs:
               echo "flatfield_prompt_count=$flat"
               echo "gedsat_prompt_count=$gedsat"
               echo "gui_attempt_count=$gui"
+              echo "display_error_count=$displayerr"
               echo "normal_prompt_count=$normalprompt"
               echo "status3004_count=$status3004"
               echo "status3023_count=$status3023"
@@ -342,7 +357,7 @@ jobs:
             return 0
           }
 
-          CASE="R2L_FAST_BATCH_LINE_508_514"
+          CASE="R2M_FAST_XVFB_BATCH_LINE_508_514"
           PARAMS="/work/container_logs/${CASE}.params.txt"
           ANSWERS="/work/container_logs/${CASE}.answers.txt"
           LOG="/work/container_logs/${CASE}.log"
@@ -416,12 +431,17 @@ jobs:
           make_answers "$ANSWERS"
 
           echo "SPI_CASE_BEGIN ${CASE}"
+          echo "DISPLAY=$DISPLAY"
           echo "BATCH_FLAG_USED=-b"
+          echo "SIDE_BANDS_SKIPPED=True"
           cat "$PARAMS"
 
           echo "case=${CASE}" > "$STATUS"
           echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATUS"
+          echo "display=${DISPLAY}" >> "$STATUS"
+          echo "xvfb_used=True" >> "$STATUS"
           echo "batch_flag_used=True" >> "$STATUS"
+          echo "sidebands_skipped=True" >> "$STATUS"
           echo "ACIRM_SPI_PROCESS_STARTED ${CASE}"
 
           mapfile -t ARGS < "$PARAMS"
@@ -455,21 +475,23 @@ jobs:
 
           find /work -maxdepth 10 -type f -printf "%p %s\n" | sort > /work/container_logs/work_files_after_spi.txt
 
-          echo "R2L_FAST_CONTAINER_END"
+          echo "R2M_FAST_CONTAINER_END"
           BASH
 
             docker run --rm \
+              -e DISPLAY=:99 \
+              -v /tmp/.X11-unix:/tmp/.X11-unix \
               -v "$PWD/$OUT/data:/data" \
               -v "$PWD/$OUT/work:/work" \
               integralsw/osa:latest \
-              bash /work/run_spi_r2l_fast.sh \
-              > "$OUT/logs/host_container_r2l_fast.log" 2>&1 || true
+              bash /work/run_spi_r2m_fast.sh \
+              > "$OUT/logs/host_container_r2m_fast.log" 2>&1 || true
 
             sudo chown -R "$(id -u):$(id -g)" "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 2>/dev/null || true
             chmod -R u+rwX,go+rX "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 2>/dev/null || true
           fi
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/main_execution.log
           import csv
           import hashlib
           import json
@@ -477,17 +499,17 @@ jobs:
           import time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY"
+          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
           LOGS = OUT / "logs"
           CL = WORK / "container_logs"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_LIGHT_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS")
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
-          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_LIGHT_RESULTS.zip"
+          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS.zip"
 
           LIGHT.mkdir(parents=True, exist_ok=True)
           (LIGHT / "logs").mkdir(parents=True, exist_ok=True)
@@ -560,12 +582,13 @@ jobs:
           write_csv(LIGHT / "work_files.csv", work_rows, ["path", "bytes"])
           write_csv(LIGHT / "cache_files.csv", cache_rows, ["path", "bytes"])
 
-          status = parse_status(CL / "R2L_FAST_BATCH_LINE_508_514.status.txt")
+          status = parse_status(CL / "R2M_FAST_XVFB_BATCH_LINE_508_514.status.txt")
 
-          host_log = safe_text(LOGS / "host_container_r2l_fast.log", limit=800000)
-          case_log = safe_text(CL / "R2L_FAST_BATCH_LINE_508_514.log", limit=800000)
-          common_log = safe_text(CL / "R2L_FAST_BATCH_LINE_508_514.commonlog.txt", limit=800000)
-          joined = host_log + "\n" + case_log + "\n" + common_log
+          host_log = safe_text(LOGS / "host_container_r2m_fast.log", limit=800000)
+          case_log = safe_text(CL / "R2M_FAST_XVFB_BATCH_LINE_508_514.log", limit=800000)
+          common_log = safe_text(CL / "R2M_FAST_XVFB_BATCH_LINE_508_514.commonlog.txt", limit=800000)
+          display_check = safe_text(CL / "xvfb_display_check.txt", limit=120000)
+          joined = host_log + "\n" + case_log + "\n" + common_log + "\n" + display_check
 
           def intval(x):
               try:
@@ -586,8 +609,9 @@ jobs:
               "work_file_count": len(work_rows),
               "og_created": og_created,
               "og_spi_path": og_path,
-              "actual_spi_started": bool(status.get("started_utc")) or "ACIRM_SPI_PROCESS_STARTED R2L_FAST_BATCH_LINE_508_514" in joined,
+              "actual_spi_started": bool(status.get("started_utc")) or "ACIRM_SPI_PROCESS_STARTED R2M_FAST_XVFB_BATCH_LINE_508_514" in joined,
               "batch_flag_used": status.get("batch_flag_used", "") == "True" or "BATCH_FLAG_USED=-b" in joined,
+              "xvfb_used": status.get("xvfb_used", "") == "True" or "name of display" in display_check.lower(),
               "line_508_514_seen": "spibounds_regions=508,514" in joined,
               "sidebands_skipped": True,
               "line_product_count": len(line_rows),
@@ -596,12 +620,13 @@ jobs:
               "flatfield_prompt_count": intval(status.get("flatfield_prompt_count", 0)),
               "gedsat_prompt_count": intval(status.get("gedsat_prompt_count", 0)),
               "gui_attempt_count": intval(status.get("gui_attempt_count", 0)) + joined.count("Attempting to launch GUI"),
+              "display_error_count": intval(status.get("display_error_count", 0)) + joined.count("can't open display"),
               "normal_prompt_count": intval(status.get("normal_prompt_count", 0)),
               "status3004_count": intval(status.get("status3004_count", 0)),
               "status3023_count": intval(status.get("status3023_count", 0)),
               "status35603_count": intval(status.get("status35603_count", 0)),
               "koverflow_count": intval(status.get("koverflow_count", 0)),
-              "segfault_count": intval(status.get("segfault_count", 0)),
+              "segfault_count": intval(status.get("segfault_count", 0)) + joined.count("segmentation violation"),
               "returncode": status.get("returncode", "")
           }
 
@@ -619,31 +644,34 @@ jobs:
           write_csv(LIGHT / "product_hints.csv", product_hints, ["path", "bytes", "category"])
 
           if line_metric:
-              final_status = "R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_PRODUCTS_PRESENT_REVIEW_NOT_FINAL_PROOF"
+              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_PRODUCTS_PRESENT_REVIEW_NOT_FINAL_PROOF"
               scientific_status = "PRODUCTS_PRESENT_REVIEW_REQUIRED_NOT_DISCOVERY"
           elif not checks["ready_flag_exists"]:
-              final_status = "R21AX_R7G_R3P_R2L_FAST_CACHE_MISS_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2M_FAST_CACHE_MISS_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif not og_created:
-              final_status = "R21AX_R7G_R3P_R2L_FAST_NO_REAL_OG_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2M_FAST_NO_REAL_OG_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif checks["status3023_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2L_FAST_BATCH_FLAG_OR_PARAMS_REJECTED_STATUS3023_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2M_FAST_BATCH_FLAG_OR_PARAMS_REJECTED_STATUS3023_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
-          elif checks["gui_attempt_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2L_FAST_BATCH_FLAG_DID_NOT_BLOCK_GUI_NO_511_NO_PHYSICAL_NULL"
+          elif checks["segfault_count"] > 0:
+              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_SEGFAULT_NO_511_NO_PHYSICAL_NULL"
+              scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
+          elif checks["gui_attempt_count"] > 0 and str(checks["returncode"]) == "124":
+              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_GUI_ENTRY_TIMEOUT_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif str(checks["returncode"]) == "124":
-              final_status = "R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_TIMEOUT_NO_GUI_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_TIMEOUT_NO_GUI_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif checks["status35603_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2L_FAST_STATUS35603_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2M_FAST_STATUS35603_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif checks["koverflow_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2L_FAST_KOVERFLOW_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2M_FAST_KOVERFLOW_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           else:
-              final_status = "R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_EXECUTED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_EXECUTED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
 
           summary = {
@@ -652,13 +680,13 @@ jobs:
               "final_status": final_status,
               "scientific_status": scientific_status,
               "checks": checks,
-              "runtime_design": "FAST_LINE_ONLY_BATCH_FLAG_MINUS_B_TIMEOUT_900_SECONDS_NO_SIDEBANDS",
+              "runtime_design": "FAST_LINE_ONLY_XVFB_BATCH_FLAG_MINUS_B_TIMEOUT_900_SECONDS_NO_SIDEBANDS",
               "claim_ceiling": "NOT_DISCOVERY_NOT_FINAL_PROOF_NOT_OSA_PROOF_UNLESS_ACTUAL_511_LINE_METRIC_IS_READ_FROM_OSA_PRODUCTS"
           }
 
           (LIGHT / "SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
           (LIGHT / "CLAIM_BOUNDARY.txt").write_text(
-              "This fast run tests spi_science_analysis -b on the 508-514 keV line only.\n"
+              "This fast run tests spi_science_analysis -b with Xvfb DISPLAY=:99 on the 508-514 keV line only.\n"
               "Sidebands are intentionally skipped.\n"
               "Do not claim 511 detection/proof/discovery unless a valid OSA product metric is read.\n",
               encoding="utf-8"
@@ -672,20 +700,21 @@ jobs:
           if Path(ZIP_NAME).exists():
               sha = sha256_file(ZIP_NAME)
               Path(ZIP_NAME + ".sha256.txt").write_text(sha + "  " + ZIP_NAME + "\n", encoding="utf-8")
-              print("R2L_FAST_ZIP_SHA256", sha)
+              print("R2M_FAST_ZIP_SHA256", sha)
 
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Upload R2L fast artifact always
+      - name: Upload R2M fast artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3P_R2L_FAST_BATCH_LINE_ONLY_LIGHT_RESULTS.zip.sha256.txt
-            ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS/logs/main_execution.log
-            ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS/logs/host_prepare.log
-            ACIRM_R21AX_R7G_R3P_R2L_FAST_RESULTS/logs/host_container_r2l_fast.log
+            ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/main_execution.log
+            ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/host_prepare.log
+            ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/xvfb.log
+            ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/host_container_r2m_fast.log
           if-no-files-found: warn
