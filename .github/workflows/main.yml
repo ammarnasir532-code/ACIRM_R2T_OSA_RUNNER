@@ -1,4 +1,4 @@
-name: ACIRM R21AX R7G R3P R2 SPI511 cache og guarded
+name: ACIRM R21AX R7G R3P R2 SPI511 guarded
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  acirm-r21ax-r7g-r3p-r2-spi511-cache-og-guarded:
+  acirm-r3p-r2-spi511-guarded:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -22,8 +22,8 @@ jobs:
           mkdir -p ACIRM_CACHE_R3P_R1
           echo "R3P_R2_PREPARED"
 
-      - name: Restore R3P R1 cache
-        id: cache
+      - name: Restore existing cache
+        id: cache_restore
         uses: actions/cache/restore@v4
         with:
           path: ACIRM_CACHE_R3P_R1
@@ -31,7 +31,7 @@ jobs:
           restore-keys: |
             acirm-r21ax-r7g-r3p-r1-cache-
 
-      - name: Run R3P R2 cache og guarded SPI511
+      - name: Run guarded SPI511 workflow
         continue-on-error: true
         run: |
           set +e
@@ -39,7 +39,6 @@ jobs:
           MAIN_LOG="ACIRM_R21AX_R7G_R3P_R2_RESULTS/logs/main_execution.log"
           echo "R3P_R2_STARTED" | tee "$MAIN_LOG"
           echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$MAIN_LOG"
-          echo "cache_hit=${{ steps.cache.outputs.cache-hit }}" | tee -a "$MAIN_LOG"
 
           {
             echo "HOST_PREP_START"
@@ -68,7 +67,7 @@ jobs:
           import traceback
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2_CACHE_OG_GUARDED_SPI511"
+          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2_SPI511_GUARDED_NO_DOCKER_USER"
           REV = "2504"
           SCW = "250400090010"
 
@@ -425,7 +424,7 @@ jobs:
 
               return sorted(set(out))
 
-          def docker_cmd(script, name, timeout_seconds):
+          def docker_run(script, name, timeout_seconds):
               log_path = LOGS / ("host_container_" + name + ".log")
               cmd = [
                   "docker", "run", "--rm",
@@ -476,7 +475,7 @@ jobs:
           def env_prefix():
               return r'''
                 set +e
-                export DISPLAY=${DISPLAY:-:99}
+                export DISPLAY=:99
                 export HEADASNOQUERY=1
                 export PIL_NO_GUI=1
                 export PIL_NOTTY=1
@@ -504,7 +503,7 @@ jobs:
 
                 source /opt/osa/bin/isdc_init_env.sh || true
 
-                export DISPLAY=${DISPLAY:-:99}
+                export DISPLAY=:99
                 export HEADASNOQUERY=1
                 export PIL_NO_GUI=1
                 export PIL_NOTTY=1
@@ -516,40 +515,46 @@ jobs:
               '''
 
           def run_dal_verify(iteration):
-              script = env_prefix() + f'''
-                TARGET=/data/scw/{REV}/{SCW}.001/swg.fits
-                echo "R3P_R2_DAL_ITERATION={iteration}"
+              script = env_prefix() + r'''
+                TARGET=/data/scw/__REV__/__SCW__.001/swg.fits
+                echo "R3P_R2_DAL_ITERATION=__ITER__"
                 echo "local_file_count=$(find /data -type f | wc -l)"
                 timeout 600 dal_verify "$TARGET" 2>&1 || true
                 echo "commonlog_tail"
                 cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -500 || true
               '''
-              rc, txt = docker_cmd(script, "dal_verify_iteration_" + str(iteration).zfill(2), 720)
+              script = script.replace("__REV__", REV).replace("__SCW__", SCW).replace("__ITER__", str(iteration))
+              rc, txt = docker_run(script, "dal_verify_iteration_" + str(iteration).zfill(2), 720)
               return txt
 
           def create_og():
-              script = env_prefix() + f'''
-                TARGET=/data/scw/{REV}/{SCW}.001/swg.fits
+              script = env_prefix() + r'''
+                TARGET=/data/scw/__REV__/__SCW__.001/swg.fits
                 echo "R3P_R2_CREATE_OG_NO_MODE_PARAMETER"
                 echo "TARGET=$TARGET"
                 timeout 900 og_create idxSwg="$TARGET" ogid=ACIRM_R3X baseDir=/work/og instrument=SPI 2>&1 | tee /work/container_logs/container_og_create_r3x.log || true
                 echo "OG_FILES_AFTER_CREATE"
-                find /work/og -maxdepth 10 -type f -printf "%p %s\\n" | sort | tee /work/container_logs/container_og_files_after_create.txt || true
+                find /work/og -maxdepth 10 -type f -printf "%p %s\n" | sort | tee /work/container_logs/container_og_files_after_create.txt || true
               '''
-              rc, txt = docker_cmd(script, "og_create", 1000)
+              script = script.replace("__REV__", REV).replace("__SCW__", SCW)
+              rc, txt = docker_run(script, "og_create", 1000)
               return txt
 
-          def find_og_spi():
-              candidates = []
-              for root in [WORK / "og", CACHE_WORK / "og"]:
-                  if root.exists():
-                      candidates.extend(root.rglob("og_spi.fits"))
-              candidates = [p for p in candidates if p.exists() and p.is_file() and p.stat().st_size > 1024]
+          def find_og_spi_in(root):
+              root = Path(root)
+              if not root.exists():
+                  return None
+              candidates = [p for p in root.rglob("og_spi.fits") if p.exists() and p.is_file() and p.stat().st_size > 1024]
               return candidates[0] if candidates else None
 
+          def find_og_spi():
+              p = find_og_spi_in(WORK / "og")
+              if p is not None:
+                  return p
+              return find_og_spi_in(CACHE_WORK / "og")
+
           def cache_has_real_og():
-              p = find_og_spi()
-              return p is not None
+              return find_og_spi_in(CACHE_WORK / "og") is not None
 
           def restore_or_build_cache():
               cache_ready = READY_FLAG.exists() and CACHE_DATA.exists() and CACHE_WORK.exists() and cache_has_real_og()
@@ -582,7 +587,7 @@ jobs:
               create_og()
               fix_permissions()
 
-              og_path = find_og_spi()
+              og_path = find_og_spi_in(WORK / "og")
               if og_path is not None:
                   print("R3P_R2_REAL_OG_CREATED", og_path)
                   if CACHE_DATA.exists():
@@ -904,12 +909,12 @@ jobs:
               '''
 
           def run_spi_if_og_exists():
-              og_path = find_og_spi()
+              og_path = find_og_spi_in(WORK / "og")
               if og_path is None:
                   print("R3P_R2_SKIP_SPI_NO_REAL_OG")
                   return "SKIPPED_NO_REAL_OG"
               print("R3P_R2_REAL_OG_FOR_SPI", og_path)
-              rc, txt = docker_cmd(spi_script(), "spi511_line_sidebands", 8600)
+              rc, txt = docker_run(spi_script(), "spi511_line_sidebands", 8600)
               return "SPI_DOCKER_RC_" + str(rc)
 
           def parse_status(path):
@@ -990,7 +995,7 @@ jobs:
                   except Exception:
                       return 0
 
-              og_path = find_og_spi()
+              og_path = find_og_spi_in(WORK / "og")
               og_created = og_path is not None
 
               actual_spi_started = (
@@ -1002,13 +1007,11 @@ jobs:
               line_508_514_seen = (
                   "spibounds_regions=508,514" in host_spi_log
                   or "spibounds_regions=508,514" in line_log
-                  or any("508,514" in str(v) for v in line_status.values())
               )
 
               sidebands_seen = (
                   "spibounds_regions=490,500,508,514,522,532" in host_spi_log
                   or "spibounds_regions=490,500,508,514,522,532" in side_log
-                  or any("490,500,508,514,522,532" in str(v) for v in side_status.values())
               )
 
               line_metric_exists = any(
@@ -1152,13 +1155,13 @@ jobs:
                   pass
           PY
 
-      - name: Save R3P R1 cache if ready
-        if: always()
+      - name: Save cache only if ready flag exists
+        if: always() && hashFiles('ACIRM_CACHE_R3P_R1/acirm_r3p_r1_cache_ready.flag') != ''
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: ACIRM_CACHE_R3P_R1
-          key: acirm-r21ax-r7g-r3p-r1-cache-v2-${{ github.run_id }}
+          key: acirm-r21ax-r7g-r3p-r1-cache-v1
 
       - name: Upload R3P R2 LIGHT artifact always
         if: always()
