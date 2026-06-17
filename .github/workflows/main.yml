@@ -1,4 +1,4 @@
-name: ACIRM R3P R2I explicit spi science params SPI511
+name: ACIRM R3P R2J fixed integer background SPI511
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  acirm-r3p-r2i-explicit-spi-science-params:
+  acirm-r3p-r2j-fixed-integer-background:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -15,12 +15,12 @@ jobs:
       - name: Prepare folders
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2I_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2I_RESULTS/work
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2J_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2J_RESULTS/work
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS
           mkdir -p ACIRM_CACHE_R3P_R1
-          echo "R2I_PREPARED"
+          echo "R2J_PREPARED"
 
       - name: Restore R3P R1 cache
         uses: actions/cache/restore@v4
@@ -30,25 +30,25 @@ jobs:
           restore-keys: |
             acirm-r21ax-r7g-r3p-r1-cache-
 
-      - name: Run R2I explicit SPI science parameters
+      - name: Run R2J fixed integer background method
         continue-on-error: true
         run: |
           set +e
 
-          MAIN_LOG="ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/main_execution.log"
-          echo "R2I_STARTED" | tee "$MAIN_LOG"
+          MAIN_LOG="ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/main_execution.log"
+          echo "R2J_STARTED" | tee "$MAIN_LOG"
           echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$MAIN_LOG"
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/main_execution.log
           import json
           import shutil
           import time
           from pathlib import Path
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2I_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2J_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS")
 
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           CACHE_DATA = CACHE / "data"
@@ -71,9 +71,9 @@ jobs:
               (OUT / "cache_ok.flag").write_text("CACHE_OK\n", encoding="utf-8")
           else:
               summary = {
-                  "run_id": "ACIRM_R21AX_R7G_R3P_R2I_EXPLICIT_SPI_SCIENCE_PARAMS_SPI511",
+                  "run_id": "ACIRM_R21AX_R7G_R3P_R2J_FIXED_INTEGER_BACKGROUND_SPI511",
                   "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                  "final_status": "R2I_CACHE_MISS_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL",
+                  "final_status": "R2J_CACHE_MISS_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL",
                   "scientific_status": "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL",
                   "checks": {
                       "ready_flag_exists": READY_FLAG.exists(),
@@ -92,28 +92,28 @@ jobs:
               (LIGHT / "SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
           PY
 
-          sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R2I_RESULTS ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
-          chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R2I_RESULTS ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R2J_RESULTS ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
+          chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R2J_RESULTS ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
 
-          if [ -f ACIRM_R21AX_R7G_R3P_R2I_RESULTS/cache_ok.flag ]; then
+          if [ -f ACIRM_R21AX_R7G_R3P_R2J_RESULTS/cache_ok.flag ]; then
             {
               echo "HOST_PREP_START"
               sudo apt-get update -y || true
               sudo apt-get install -y xvfb x11-xserver-utils zip || true
               pkill Xvfb 2>/dev/null || true
-              Xvfb :99 -screen 0 1280x1024x24 -ac +extension GLX +render -noreset > ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/xvfb.log 2>&1 &
+              Xvfb :99 -screen 0 1280x1024x24 -ac +extension GLX +render -noreset > ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/xvfb.log 2>&1 &
               sleep 4
               export DISPLAY=:99
               xhost +local: 2>/dev/null || true
               docker --version || true
               docker pull integralsw/osa:latest || true
               echo "HOST_PREP_END"
-            } 2>&1 | tee ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/host_prepare.log
+            } 2>&1 | tee ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/host_prepare.log
 
-            cat > ACIRM_R21AX_R7G_R3P_R2I_RESULTS/work/run_spi_r2i.sh <<'BASH'
+            cat > ACIRM_R21AX_R7G_R3P_R2J_RESULTS/work/run_spi_r2j.sh <<'BASH'
           set +e
 
-          echo "R2I_CONTAINER_START"
+          echo "R2J_CONTAINER_START"
           export DISPLAY=:99
           export HEADASNOQUERY=1
           export PIL_NO_GUI=1
@@ -166,7 +166,7 @@ jobs:
           echo "OG_FILE=$OG_FILE"
 
           if [ -z "$OG_FILE" ]; then
-            echo "R2I_NO_REAL_OG_SPI_FITS"
+            echo "R2J_NO_REAL_OG_SPI_FITS"
             exit 0
           fi
 
@@ -243,7 +243,7 @@ jobs:
           safe_pset spiros sigmathres "999"
           safe_pset spiros iteration-output "NO"
           safe_pset spiros optistat "CHI2"
-          safe_pset spiros background-method "GEDSAT"
+          safe_pset spiros background-method "3"
 
           safe_pset spi_obs_back method "GEDSAT"
           safe_pset spi_obs_back background_method "GEDSAT"
@@ -259,6 +259,7 @@ jobs:
             for i in $(seq 1 1200); do
               echo "" >> "$OUT"
               echo "GEDSAT" >> "$OUT"
+              echo "3" >> "$OUT"
               echo "no" >> "$OUT"
               echo "yes" >> "$OUT"
               echo "RADEC" >> "$OUT"
@@ -279,6 +280,7 @@ jobs:
             normalprompt=0
             status3004=0
             status35603=0
+            koverflow=0
             segfault=0
             kept=0
             maxkeep=1800000
@@ -293,6 +295,7 @@ jobs:
               case "$line" in *"default parameter prompting"*) normalprompt=$((normalprompt + 1));; esac
               case "$line" in *"status -3004"*) status3004=$((status3004 + 1));; esac
               case "$line" in *"status -35603"*) status35603=$((status35603 + 1));; esac
+              case "$line" in *"kOVERFLOW"*|*"Overflow occurred"*) koverflow=$((koverflow + 1));; esac
               case "$line" in *"segmentation violation"*|*"Segmentation"*) segfault=$((segfault + 1));; esac
 
               if [ "$orbit" -gt 20 ]; then
@@ -328,6 +331,7 @@ jobs:
               echo "normal_prompt_count=$normalprompt"
               echo "status3004_count=$status3004"
               echo "status35603_count=$status35603"
+              echo "koverflow_count=$koverflow"
               echo "segfault_count=$segfault"
               echo "killed_by_guard=$killed"
               echo "log_bytes_kept=$kept"
@@ -382,7 +386,7 @@ jobs:
             add_param "spiros_sigmathres" "999" "$PARAMS"
             add_param "spiros_iteration-output" "NO" "$PARAMS"
             add_param "spiros_optistat" "CHI2" "$PARAMS"
-            add_param "spiros_background-method" "GEDSAT" "$PARAMS"
+            add_param "spiros_background-method" "3" "$PARAMS"
 
             add_param "spi_phase_hist_orbit" "no" "$PARAMS"
             add_param "spi_phase_hist_asini" "0" "$PARAMS"
@@ -458,8 +462,8 @@ jobs:
             find "$PROD" -maxdepth 8 -type f -printf "%p %s\n" | sort || true
           }
 
-          run_case "R2I_LINE_508_514" "1" "508,514" "1" "/work/products_line"
-          run_case "R2I_SIDEBANDS_490_500_508_514_522_532" "3" "490,500,508,514,522,532" "1,1,1" "/work/products_sidebands"
+          run_case "R2J_LINE_508_514" "1" "508,514" "1" "/work/products_line"
+          run_case "R2J_SIDEBANDS_490_500_508_514_522_532" "3" "490,500,508,514,522,532" "1,1,1" "/work/products_sidebands"
 
           find /work -maxdepth 10 -type f -printf "%p %s\n" | sort > /work/container_logs/work_files_after_spi.txt
 
@@ -470,23 +474,23 @@ jobs:
             done
           } > /work/container_logs/fits_quicklook_spi.txt
 
-          echo "R2I_CONTAINER_END"
+          echo "R2J_CONTAINER_END"
           BASH
 
             docker run --rm \
               -e DISPLAY=:99 \
               -v /tmp/.X11-unix:/tmp/.X11-unix \
-              -v "$PWD/ACIRM_R21AX_R7G_R3P_R2I_RESULTS/data:/data" \
-              -v "$PWD/ACIRM_R21AX_R7G_R3P_R2I_RESULTS/work:/work" \
+              -v "$PWD/ACIRM_R21AX_R7G_R3P_R2J_RESULTS/data:/data" \
+              -v "$PWD/ACIRM_R21AX_R7G_R3P_R2J_RESULTS/work:/work" \
               integralsw/osa:latest \
-              bash /work/run_spi_r2i.sh \
-              > ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/host_container_spi511_line_sidebands.log 2>&1 || true
+              bash /work/run_spi_r2j.sh \
+              > ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/host_container_spi511_line_sidebands.log 2>&1 || true
 
-            sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R2I_RESULTS ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
-            chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R2I_RESULTS ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
+            sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R2J_RESULTS ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
+            chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R2J_RESULTS ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
           fi
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/main_execution.log
           import csv
           import hashlib
           import json
@@ -494,16 +498,16 @@ jobs:
           import time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2I_EXPLICIT_SPI_SCIENCE_PARAMS_SPI511"
+          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2J_FIXED_INTEGER_BACKGROUND_SPI511"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2I_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2J_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
           LOGS = OUT / "logs"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS")
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
-          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS.zip"
+          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS.zip"
 
           LIGHT.mkdir(parents=True, exist_ok=True)
           (LIGHT / "logs").mkdir(parents=True, exist_ok=True)
@@ -563,22 +567,22 @@ jobs:
               copy_log(p)
 
           for p in [
-              WORK / "container_logs" / "R2I_LINE_508_514.log",
-              WORK / "container_logs" / "R2I_LINE_508_514.status.txt",
-              WORK / "container_logs" / "R2I_LINE_508_514.params.txt",
-              WORK / "container_logs" / "R2I_LINE_508_514.answers.txt",
-              WORK / "container_logs" / "R2I_LINE_508_514.commonlog.txt",
-              WORK / "container_logs" / "R2I_LINE_508_514.commonlog_env.txt",
-              WORK / "container_logs" / "R2I_LINE_508_514.plist_after.txt",
-              WORK / "container_logs" / "R2I_LINE_508_514.tmp_work_files.txt",
-              WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.log",
-              WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.status.txt",
-              WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.params.txt",
-              WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.answers.txt",
-              WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.commonlog.txt",
-              WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.commonlog_env.txt",
-              WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.plist_after.txt",
-              WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.tmp_work_files.txt",
+              WORK / "container_logs" / "R2J_LINE_508_514.log",
+              WORK / "container_logs" / "R2J_LINE_508_514.status.txt",
+              WORK / "container_logs" / "R2J_LINE_508_514.params.txt",
+              WORK / "container_logs" / "R2J_LINE_508_514.answers.txt",
+              WORK / "container_logs" / "R2J_LINE_508_514.commonlog.txt",
+              WORK / "container_logs" / "R2J_LINE_508_514.commonlog_env.txt",
+              WORK / "container_logs" / "R2J_LINE_508_514.plist_after.txt",
+              WORK / "container_logs" / "R2J_LINE_508_514.tmp_work_files.txt",
+              WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.log",
+              WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.status.txt",
+              WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.params.txt",
+              WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.answers.txt",
+              WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.commonlog.txt",
+              WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.commonlog_env.txt",
+              WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.plist_after.txt",
+              WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.tmp_work_files.txt",
               WORK / "container_logs" / "work_files_after_spi.txt",
               WORK / "container_logs" / "fits_quicklook_spi.txt",
           ]:
@@ -602,12 +606,12 @@ jobs:
                   product_hints.append({"path": p, "bytes": r.get("bytes", ""), "category": "hint"})
           write_csv(LIGHT / "product_hints.csv", product_hints, ["path", "bytes", "category"])
 
-          line_status = parse_status(WORK / "container_logs" / "R2I_LINE_508_514.status.txt")
-          side_status = parse_status(WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.status.txt")
+          line_status = parse_status(WORK / "container_logs" / "R2J_LINE_508_514.status.txt")
+          side_status = parse_status(WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.status.txt")
 
           host_log = safe_text(LOGS / "host_container_spi511_line_sidebands.log", limit=1200000)
-          line_log = safe_text(WORK / "container_logs" / "R2I_LINE_508_514.log", limit=700000)
-          side_log = safe_text(WORK / "container_logs" / "R2I_SIDEBANDS_490_500_508_514_522_532.log", limit=700000)
+          line_log = safe_text(WORK / "container_logs" / "R2J_LINE_508_514.log", limit=700000)
+          side_log = safe_text(WORK / "container_logs" / "R2J_SIDEBANDS_490_500_508_514_522_532.log", limit=700000)
 
           def intval(x):
               try:
@@ -620,8 +624,8 @@ jobs:
           og_path = og_candidates[0]["path"] if og_candidates else ""
 
           actual_spi_started = (
-              "ACIRM_SPI_PROCESS_STARTED R2I_LINE_508_514" in host_log
-              or "ACIRM_SPI_PROCESS_STARTED R2I_LINE_508_514" in line_log
+              "ACIRM_SPI_PROCESS_STARTED R2J_LINE_508_514" in host_log
+              or "ACIRM_SPI_PROCESS_STARTED R2J_LINE_508_514" in line_log
               or bool(line_status.get("started_utc"))
           )
 
@@ -655,30 +659,34 @@ jobs:
               "normal_prompt_count": intval(line_status.get("normal_prompt_count", 0)) + intval(side_status.get("normal_prompt_count", 0)),
               "status3004_count": intval(line_status.get("status3004_count", 0)) + intval(side_status.get("status3004_count", 0)),
               "status35603_count": intval(line_status.get("status35603_count", 0)) + intval(side_status.get("status35603_count", 0)),
+              "koverflow_count": intval(line_status.get("koverflow_count", 0)) + intval(side_status.get("koverflow_count", 0)),
               "line_returncode": line_status.get("returncode", ""),
               "sidebands_returncode": side_status.get("returncode", "")
           }
 
           if line_metric or side_metric:
-              final_status = "R21AX_R7G_R3P_R2I_SPI511_PRODUCTS_PRESENT_REVIEW_PRODUCTS_NOT_FINAL_PROOF"
+              final_status = "R21AX_R7G_R3P_R2J_SPI511_PRODUCTS_PRESENT_REVIEW_PRODUCTS_NOT_FINAL_PROOF"
               scientific_status = "PRODUCTS_PRESENT_REVIEW_REQUIRED_NOT_DISCOVERY"
           elif not og_created:
-              final_status = "R21AX_R7G_R3P_R2I_NO_REAL_OG_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2J_NO_REAL_OG_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif not actual_spi_started:
-              final_status = "R21AX_R7G_R3P_R2I_OG_READY_BUT_SPI_NOT_STARTED_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2J_OG_READY_BUT_SPI_NOT_STARTED_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif prompt_loop:
-              final_status = "R21AX_R7G_R3P_R2I_SPI511_PROMPT_LOOP_GUARD_TRIGGERED_NO_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2J_SPI511_PROMPT_LOOP_GUARD_TRIGGERED_NO_511_METRIC_NO_PHYSICAL_NULL"
+              scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
+          elif checks["koverflow_count"] > 0:
+              final_status = "R21AX_R7G_R3P_R2J_SPI511_KOVERFLOW_REMAINING_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif checks["status35603_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2I_SPI511_STATUS35603_COMMONLOG_CAPTURED_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2J_SPI511_STATUS35603_COMMONLOG_CAPTURED_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif str(checks["line_returncode"]) == "124" or str(checks["sidebands_returncode"]) == "124":
-              final_status = "R21AX_R7G_R3P_R2I_SPI511_TIMEOUT_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2J_SPI511_TIMEOUT_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           else:
-              final_status = "R21AX_R7G_R3P_R2I_SPI511_EXECUTED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2J_SPI511_EXECUTED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
 
           summary = {
@@ -708,21 +716,21 @@ jobs:
           if Path(ZIP_NAME).exists():
               sha = sha256_file(ZIP_NAME)
               Path(ZIP_NAME + ".sha256.txt").write_text(sha + "  " + ZIP_NAME + "\n", encoding="utf-8")
-              print("R2I_ZIP_SHA256", sha)
+              print("R2J_ZIP_SHA256", sha)
 
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Upload R2I LIGHT artifact always
+      - name: Upload R2J LIGHT artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3P_R2I_LIGHT_RESULTS.zip.sha256.txt
-            ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/main_execution.log
-            ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/host_prepare.log
-            ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/xvfb.log
-            ACIRM_R21AX_R7G_R3P_R2I_RESULTS/logs/host_container_spi511_line_sidebands.log
+            ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3P_R2J_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/main_execution.log
+            ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/host_prepare.log
+            ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/xvfb.log
+            ACIRM_R21AX_R7G_R3P_R2J_RESULTS/logs/host_container_spi511_line_sidebands.log
           if-no-files-found: warn
