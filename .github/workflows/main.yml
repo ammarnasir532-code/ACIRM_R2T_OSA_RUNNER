@@ -1,4 +1,4 @@
-name: ACIRM R3P R2B prompt parfile fixed SPI511
+name: ACIRM R3P R2C bash guarded SPI511 no container python
 
 on:
   workflow_dispatch:
@@ -7,19 +7,19 @@ on:
       - main
 
 jobs:
-  acirm-r3p-r2b-prompt-parfile-fixed-spi511:
+  acirm-r3p-r2c-bash-guarded-spi511-no-container-python:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
     steps:
-      - name: Prepare R3P R2B folders
+      - name: Prepare R3P R2C folders
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2B_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2B_RESULTS/work
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS
-          echo "R3P_R2B_PREPARED"
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2C_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2C_RESULTS/work
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS
+          echo "R3P_R2C_PREPARED"
 
       - name: Restore R3P R1 cache
         id: r3p-r1-cache-restore
@@ -30,26 +30,25 @@ jobs:
           restore-keys: |
             acirm-r21ax-r7g-r3p-r1-cache-
 
-      - name: R3P R2B run from cache with parfile prompt fix
+      - name: R3P R2C run from cache using bash guard
         continue-on-error: true
         run: |
           set +e
 
-          echo "R3P_R2B main started" | tee ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs/main_execution.log
-          echo "cache_hit=${{ steps.r3p-r1-cache-restore.outputs.cache-hit }}" | tee -a ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs/main_execution.log
+          echo "R3P_R2C main started" | tee ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs/main_execution.log
+          echo "cache_hit=${{ steps.r3p-r1-cache-restore.outputs.cache-hit }}" | tee -a ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs/main_execution.log
 
-          python3 -u <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs/main_execution.log
+          python3 -u <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs/main_execution.log
           import json
-          import os
           import shutil
           import time
           from pathlib import Path
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2B_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2C_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
           LOGS = OUT / "logs"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS")
 
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           CACHE_DATA = CACHE / "data"
@@ -61,10 +60,10 @@ jobs:
 
           cache_ok = READY_FLAG.exists() and CACHE_DATA.exists() and CACHE_WORK.exists()
 
-          print("R3P_R2B_READY_FLAG_EXISTS", READY_FLAG.exists())
-          print("R3P_R2B_CACHE_DATA_EXISTS", CACHE_DATA.exists())
-          print("R3P_R2B_CACHE_WORK_EXISTS", CACHE_WORK.exists())
-          print("R3P_R2B_CACHE_OK", cache_ok)
+          print("R3P_R2C_READY_FLAG_EXISTS", READY_FLAG.exists())
+          print("R3P_R2C_CACHE_DATA_EXISTS", CACHE_DATA.exists())
+          print("R3P_R2C_CACHE_WORK_EXISTS", CACHE_WORK.exists())
+          print("R3P_R2C_CACHE_OK", cache_ok)
 
           if cache_ok:
               shutil.copytree(CACHE_DATA, DATA, dirs_exist_ok=True)
@@ -72,9 +71,9 @@ jobs:
               (OUT / "cache_ready_for_spi.flag").write_text("CACHE_OK\n", encoding="utf-8")
           else:
               summary = {
-                  "run_id": "ACIRM_R21AX_R7G_R3P_R2B_PROMPT_PARFILE_FIX_FROM_R3P_R1_CACHE",
+                  "run_id": "ACIRM_R21AX_R7G_R3P_R2C_BASH_GUARDED_SPI511_NO_CONTAINER_PYTHON",
                   "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                  "final_status": "R21AX_R7G_R3P_R2B_CACHE_MISS_NO_RERUN_NO_511_NO_PHYSICAL_NULL",
+                  "final_status": "R21AX_R7G_R3P_R2C_CACHE_MISS_NO_RERUN_NO_511_NO_PHYSICAL_NULL",
                   "claim_ceiling": "NO_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL",
                   "checks": {
                       "ready_flag_exists": READY_FLAG.exists(),
@@ -88,23 +87,23 @@ jobs:
                       "sideband_metric_exists": False
                   }
               }
-              (LIGHT / "R3P_R2B_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+              (LIGHT / "R3P_R2C_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
           PY
 
-          sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R2B_RESULTS ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
-          chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R2B_RESULTS ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R2C_RESULTS ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
+          chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R2C_RESULTS ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
 
-          if [ -f ACIRM_R21AX_R7G_R3P_R2B_RESULTS/cache_ready_for_spi.flag ]; then
+          if [ -f ACIRM_R21AX_R7G_R3P_R2C_RESULTS/cache_ready_for_spi.flag ]; then
             {
               echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
               docker --version || true
               docker pull integralsw/osa:latest || true
-            } | tee ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs/docker_status.log
+            } | tee ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs/docker_status.log
 
-            cat > ACIRM_R21AX_R7G_R3P_R2B_RESULTS/work/run_spi_r2b.sh <<'BASH'
+            cat > ACIRM_R21AX_R7G_R3P_R2C_RESULTS/work/run_spi_r2c.sh <<'BASH'
           set +e
 
-          echo "R3P_R2B_CONTAINER_START"
+          echo "R3P_R2C_CONTAINER_START"
 
           unset DISPLAY
           export DISPLAY=
@@ -151,23 +150,23 @@ jobs:
           export PFILES="/tmp/acirm_pfiles;/opt/osa/pfiles"
           export PATH=/opt/osa/bin:$PATH
 
-          echo "R3P_R2B_COMMAND_DISCOVERY"
-          for c in spi_science_analysis pset punlearn plist fstruct fdump ftlist; do
+          echo "R3P_R2C_COMMAND_DISCOVERY"
+          for c in spi_science_analysis pset punlearn plist fstruct fdump ftlist awk timeout stdbuf; do
             echo "COMMAND $c"
             command -v "$c" || true
           done
 
-          echo "R3P_R2B_PFILES_LIST"
+          echo "R3P_R2C_PFILES_LIST"
           ls -la /tmp/acirm_pfiles || true
 
-          echo "R3P_R2B_SPI_SCIENCE_PAR_HEAD"
+          echo "R3P_R2C_SPI_SCIENCE_PAR_HEAD"
           cat /tmp/acirm_pfiles/spi_science_analysis.par 2>/dev/null | head -300 || true
 
           OG_FILE=$(find /work/og -type f -name "og_spi.fits" | head -1)
           echo "OG_FILE=$OG_FILE"
 
           if [ -z "$OG_FILE" ]; then
-            echo "R3P_R2B_NO_OG_FILE"
+            echo "R3P_R2C_NO_OG_FILE"
             exit 0
           fi
 
@@ -219,130 +218,54 @@ jobs:
           safe_pset spiros iteration-output="NO"
           safe_pset spiros optistat="CHI2"
 
-          cat > /work/container_logs/guard_spi.py <<'PYG'
-          import json
-          import subprocess
-          import sys
-          import time
-          from pathlib import Path
-
-          case_name = sys.argv[1]
-          params_file = Path(sys.argv[2])
-          answers_file = Path(sys.argv[3])
-          product_dir = Path(sys.argv[4])
-          log_file = Path(sys.argv[5])
-          status_file = Path(sys.argv[6])
-
-          params = []
-          if params_file.exists():
-              for line in params_file.read_text(encoding="utf-8", errors="replace").splitlines():
-                  line = line.strip()
-                  if line:
-                      params.append(line)
-
-          product_dir.mkdir(parents=True, exist_ok=True)
-          log_file.parent.mkdir(parents=True, exist_ok=True)
-
-          cmd = ["spi_science_analysis"] + params
-
-          status = {
-              "case": case_name,
-              "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "cmd": cmd,
-              "returncode": None,
-              "timeout_seconds": 3300,
-              "killed_by_guard": False,
-              "orbit_asini_prompt_count": 0,
-              "source_catalog_prompt_count": 0,
-              "ephemeris_prompt_count": 0,
-              "log_bytes_kept": 0
+          cat > /work/container_logs/guard.awk <<'AWK'
+          BEGIN {
+            orbit=0
+            source=0
+            eph=0
+            kept=0
+            maxkeep=1200000
+            killed=0
           }
+          {
+            if (index($0, "Orbit asini parameter") > 0) orbit++
+            if (index($0, "Enter DOL for source catalog") > 0) source++
+            if (index($0, "DOL of the ephemeris data") > 0) eph++
 
-          max_keep = 1200000
-          start = time.time()
+            if (orbit > 6) {
+              print "ACIRM_GUARD_ORBIT_ASINI_LOOP_KILL"
+              killed=1
+              exit 77
+            }
 
-          with open(answers_file, "r", encoding="utf-8", errors="replace") as ans:
-              p = subprocess.Popen(
-                  cmd,
-                  cwd=str(product_dir),
-                  stdin=ans,
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.STDOUT,
-                  text=True,
-                  errors="replace",
-                  bufsize=1
-              )
-
-              with open(log_file, "w", encoding="utf-8", errors="replace") as lf:
-                  lf.write("ACIRM_CASE=" + case_name + "\n")
-                  lf.write("ACIRM_CMD=" + " ".join(cmd) + "\n")
-                  lf.flush()
-
-                  while True:
-                      if time.time() - start > status["timeout_seconds"]:
-                          status["killed_by_guard"] = True
-                          lf.write("\nACIRM_GUARD_TIMEOUT_KILL\n")
-                          try:
-                              p.kill()
-                          except Exception:
-                              pass
-                          break
-
-                      line = p.stdout.readline() if p.stdout is not None else ""
-
-                      if line == "" and p.poll() is not None:
-                          break
-
-                      if not line:
-                          time.sleep(0.1)
-                          continue
-
-                      if "Orbit asini parameter" in line:
-                          status["orbit_asini_prompt_count"] += 1
-
-                      if "Enter DOL for source catalog" in line:
-                          status["source_catalog_prompt_count"] += 1
-
-                      if "DOL of the ephemeris data" in line:
-                          status["ephemeris_prompt_count"] += 1
-
-                      if status["orbit_asini_prompt_count"] > 6:
-                          status["killed_by_guard"] = True
-                          lf.write("\nACIRM_GUARD_ORBIT_ASINI_LOOP_KILL\n")
-                          try:
-                              p.kill()
-                          except Exception:
-                              pass
-                          break
-
-                      b = len(line.encode("utf-8", "replace"))
-                      if status["log_bytes_kept"] + b <= max_keep:
-                          lf.write(line)
-                          status["log_bytes_kept"] += b
-
-              try:
-                  rc = p.wait(timeout=20)
-              except Exception:
-                  rc = 999
-
-          status["returncode"] = rc
-          status["ended_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-          status_file.write_text(json.dumps(status, indent=2), encoding="utf-8")
-          print(json.dumps(status, indent=2))
-          PYG
+            line=$0 "\n"
+            kept += length(line)
+            if (kept <= maxkeep) {
+              print $0
+            }
+          }
+          END {
+            print "orbit_asini_prompt_count=" orbit > status_file
+            print "source_catalog_prompt_count=" source >> status_file
+            print "ephemeris_prompt_count=" eph >> status_file
+            print "killed_by_guard=" killed >> status_file
+            print "log_bytes_kept=" kept >> status_file
+          }
+          AWK
 
           make_answers() {
             OUT="$1"
             rm -f "$OUT"
             echo "" >> "$OUT"
             echo "" >> "$OUT"
+            echo "NONE" >> "$OUT"
             echo "0" >> "$OUT"
             echo "1" >> "$OUT"
             echo "0" >> "$OUT"
             echo "0" >> "$OUT"
             echo "0" >> "$OUT"
             echo "0" >> "$OUT"
-            for i in $(seq 1 500); do
+            for i in $(seq 1 600); do
               echo "0" >> "$OUT"
             done
           }
@@ -376,7 +299,7 @@ jobs:
             PARAMS="/work/container_logs/${CASE}.params.txt"
             ANSWERS="/work/container_logs/${CASE}.answers.txt"
             LOG="/work/container_logs/${CASE}.guard.log"
-            STATUS="/work/container_logs/${CASE}.status.json"
+            STATUS="/work/container_logs/${CASE}.status.txt"
 
             rm -f "$PARAMS" "$ANSWERS" "$LOG" "$STATUS"
 
@@ -430,59 +353,78 @@ jobs:
 
             echo "SPI_CASE_BEGIN ${CASE}"
             cat "$PARAMS"
-            python3 /work/container_logs/guard_spi.py "$CASE" "$PARAMS" "$ANSWERS" "$PROD" "$LOG" "$STATUS"
+
+            echo "case=${CASE}" > "$STATUS"
+            echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATUS"
+            echo "ACIRM_SPI_PROCESS_STARTED ${CASE}"
+
+            CMD_ARGS="$(tr '\n' ' ' < "$PARAMS")"
+
+            if command -v stdbuf >/dev/null 2>&1; then
+              RUNNER="stdbuf -oL -eL spi_science_analysis"
+            else
+              RUNNER="spi_science_analysis"
+            fi
+
+            timeout 3300 bash -lc "set -o pipefail; ${RUNNER} ${CMD_ARGS} < '${ANSWERS}' 2>&1 | awk -v status_file='${STATUS}.awk' -f /work/container_logs/guard.awk" > "$LOG" 2>&1
+            RC="$?"
+
+            cat "${STATUS}.awk" >> "$STATUS" 2>/dev/null || true
+            echo "returncode=${RC}" >> "$STATUS"
+            echo "ended_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATUS"
+
+            echo "ACIRM_SPI_PROCESS_ENDED ${CASE} returncode=${RC}"
             echo "SPI_CASE_END ${CASE}"
 
             echo "PRODUCTS_AFTER_${CASE}"
             find "$PROD" -maxdepth 8 -type f -printf "%p %s\n" | sort || true
           }
 
-          run_case "R3P_R2B_LINE_508_514" "1" "508,514" "1" "/work/products_line"
-          run_case "R3P_R2B_SIDEBANDS_490_500_508_514_522_532" "3" "490,500,508,514,522,532" "1,1,1" "/work/products_sidebands"
+          run_case "R3P_R2C_LINE_508_514" "1" "508,514" "1" "/work/products_line"
+          run_case "R3P_R2C_SIDEBANDS_490_500_508_514_522_532" "3" "490,500,508,514,522,532" "1,1,1" "/work/products_sidebands"
 
-          echo "R3P_R2B_WORK_FILES_AFTER"
-          find /work -maxdepth 10 -type f -printf "%p %s\n" | sort > /work/container_logs/work_files_after_r2b.txt
-          cat /work/container_logs/work_files_after_r2b.txt
+          echo "R3P_R2C_WORK_FILES_AFTER"
+          find /work -maxdepth 10 -type f -printf "%p %s\n" | sort > /work/container_logs/work_files_after_r2c.txt
+          cat /work/container_logs/work_files_after_r2c.txt
 
-          echo "R3P_R2B_FITS_QUICKLOOK"
+          echo "R3P_R2C_FITS_QUICKLOOK"
           {
             for f in $(find /work/products_line /work/products_sidebands -type f \( -name "*.fits" -o -name "*.fits.gz" \) 2>/dev/null | sort | head -100); do
               echo "### $f"
               fstruct "$f" 2>&1 | head -120 || true
             done
-          } > /work/container_logs/fits_quicklook_r2b.txt
+          } > /work/container_logs/fits_quicklook_r2c.txt
 
-          echo "R3P_R2B_CONTAINER_END"
+          echo "R3P_R2C_CONTAINER_END"
           BASH
 
             docker run --rm \
-              -v "$PWD/ACIRM_R21AX_R7G_R3P_R2B_RESULTS/data:/data" \
-              -v "$PWD/ACIRM_R21AX_R7G_R3P_R2B_RESULTS/work:/work" \
+              -v "$PWD/ACIRM_R21AX_R7G_R3P_R2C_RESULTS/data:/data" \
+              -v "$PWD/ACIRM_R21AX_R7G_R3P_R2C_RESULTS/work:/work" \
               integralsw/osa:latest \
-              bash /work/run_spi_r2b.sh \
-              > ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs/host_container_spi_r2b.log 2>&1 || true
+              bash /work/run_spi_r2c.sh \
+              > ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs/host_container_spi_r2c.log 2>&1 || true
 
-            sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R2B_RESULTS ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
-            chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R2B_RESULTS ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
+            sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R2C_RESULTS ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
+            chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R2C_RESULTS ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS ACIRM_CACHE_R3P_R1 2>/dev/null || true
           fi
 
-          python3 -u <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs/main_execution.log
+          python3 -u <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs/main_execution.log
           import csv
           import hashlib
           import json
           import os
-          import shutil
           import time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2B_PROMPT_PARFILE_FIX_FROM_R3P_R1_CACHE"
+          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2C_BASH_GUARDED_SPI511_NO_CONTAINER_PYTHON"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2B_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2C_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
           LOGS = OUT / "logs"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS")
-          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS.zip"
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS")
+          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS.zip"
 
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
@@ -500,23 +442,14 @@ jobs:
                       h.update(chunk)
               return h.hexdigest()
 
-          def safe_text(path, limit=500000):
+          def safe_text(path, limit=800000):
               p = Path(path)
               if not p.exists() or not p.is_file():
                   return ""
               data = p.read_bytes()
               if len(data) > limit:
-                  data = data[:250000] + b"\nACIRM_LOG_TRUNCATED_MIDDLE\n" + data[-250000:]
+                  data = data[:350000] + b"\nACIRM_LOG_TRUNCATED_MIDDLE\n" + data[-350000:]
               return data.decode("utf-8", "replace")
-
-          def read_json(path):
-              p = Path(path)
-              if not p.exists():
-                  return {}
-              try:
-                  return json.loads(p.read_text(encoding="utf-8", errors="replace"))
-              except Exception:
-                  return {}
 
           def file_rows(root):
               rows = []
@@ -542,21 +475,30 @@ jobs:
               p = Path(src)
               if p.exists() and p.is_file():
                   dest = LIGHT / "logs" / p.name
-                  txt = safe_text(p, limit=700000)
+                  txt = safe_text(p, limit=900000)
                   dest.write_text(txt, encoding="utf-8", errors="replace")
+
+          def parse_status(path):
+              d = {}
+              txt = safe_text(path, limit=100000)
+              for line in txt.splitlines():
+                  if "=" in line:
+                      k, v = line.split("=", 1)
+                      d[k.strip()] = v.strip()
+              return d
 
           for p in sorted(LOGS.glob("*.log")):
               copy_log(p)
 
           for p in [
-              WORK / "container_logs" / "R3P_R2B_LINE_508_514.guard.log",
-              WORK / "container_logs" / "R3P_R2B_LINE_508_514.status.json",
-              WORK / "container_logs" / "R3P_R2B_LINE_508_514.params.txt",
-              WORK / "container_logs" / "R3P_R2B_SIDEBANDS_490_500_508_514_522_532.guard.log",
-              WORK / "container_logs" / "R3P_R2B_SIDEBANDS_490_500_508_514_522_532.status.json",
-              WORK / "container_logs" / "R3P_R2B_SIDEBANDS_490_500_508_514_522_532.params.txt",
-              WORK / "container_logs" / "work_files_after_r2b.txt",
-              WORK / "container_logs" / "fits_quicklook_r2b.txt",
+              WORK / "container_logs" / "R3P_R2C_LINE_508_514.guard.log",
+              WORK / "container_logs" / "R3P_R2C_LINE_508_514.status.txt",
+              WORK / "container_logs" / "R3P_R2C_LINE_508_514.params.txt",
+              WORK / "container_logs" / "R3P_R2C_SIDEBANDS_490_500_508_514_522_532.guard.log",
+              WORK / "container_logs" / "R3P_R2C_SIDEBANDS_490_500_508_514_522_532.status.txt",
+              WORK / "container_logs" / "R3P_R2C_SIDEBANDS_490_500_508_514_522_532.params.txt",
+              WORK / "container_logs" / "work_files_after_r2c.txt",
+              WORK / "container_logs" / "fits_quicklook_r2c.txt",
           ]:
               copy_log(p)
 
@@ -565,37 +507,62 @@ jobs:
           line_rows = file_rows(WORK / "products_line")
           side_rows = file_rows(WORK / "products_sidebands")
 
-          write_csv(LIGHT / "r3p_r2b_data_files.csv", data_rows, ["path", "bytes"])
-          write_csv(LIGHT / "r3p_r2b_work_files.csv", work_rows, ["path", "bytes"])
-          write_csv(LIGHT / "r3p_r2b_products_line.csv", line_rows, ["path", "bytes"])
-          write_csv(LIGHT / "r3p_r2b_products_sidebands.csv", side_rows, ["path", "bytes"])
+          write_csv(LIGHT / "r3p_r2c_data_files.csv", data_rows, ["path", "bytes"])
+          write_csv(LIGHT / "r3p_r2c_work_files.csv", work_rows, ["path", "bytes"])
+          write_csv(LIGHT / "r3p_r2c_products_line.csv", line_rows, ["path", "bytes"])
+          write_csv(LIGHT / "r3p_r2c_products_sidebands.csv", side_rows, ["path", "bytes"])
 
-          host_log = safe_text(LOGS / "host_container_spi_r2b.log", limit=900000)
-          line_log = safe_text(WORK / "container_logs" / "R3P_R2B_LINE_508_514.guard.log", limit=500000)
-          side_log = safe_text(WORK / "container_logs" / "R3P_R2B_SIDEBANDS_490_500_508_514_522_532.guard.log", limit=500000)
+          host_log = safe_text(LOGS / "host_container_spi_r2c.log", limit=1000000)
+          line_log = safe_text(WORK / "container_logs" / "R3P_R2C_LINE_508_514.guard.log", limit=600000)
+          side_log = safe_text(WORK / "container_logs" / "R3P_R2C_SIDEBANDS_490_500_508_514_522_532.guard.log", limit=600000)
 
-          line_status = read_json(WORK / "container_logs" / "R3P_R2B_LINE_508_514.status.json")
-          side_status = read_json(WORK / "container_logs" / "R3P_R2B_SIDEBANDS_490_500_508_514_522_532.status.json")
+          line_status = parse_status(WORK / "container_logs" / "R3P_R2C_LINE_508_514.status.txt")
+          side_status = parse_status(WORK / "container_logs" / "R3P_R2C_SIDEBANDS_490_500_508_514_522_532.status.txt")
 
           og_created = any("og_spi.fits" in r["path"] for r in work_rows)
-          actual_spi_started = ("SPI_CASE_BEGIN R3P_R2B_LINE_508_514" in host_log) or ("ACIRM_CASE=R3P_R2B_LINE_508_514" in line_log)
-          line_508_514_seen = ("spibounds_regions=508,514" in host_log) or ("spibounds_regions=508,514" in line_log)
-          sidebands_seen = ("spibounds_regions=490,500,508,514,522,532" in host_log) or ("spibounds_regions=490,500,508,514,522,532" in side_log)
 
-          prompt_loop_seen = bool(line_status.get("killed_by_guard")) or bool(side_status.get("killed_by_guard"))
-          orbit_count = int(line_status.get("orbit_asini_prompt_count", 0) or 0) + int(side_status.get("orbit_asini_prompt_count", 0) or 0)
+          actual_spi_started = (
+              "ACIRM_SPI_PROCESS_STARTED R3P_R2C_LINE_508_514" in host_log
+              and "python3: command not found" not in host_log
+          )
+
+          line_508_514_seen = (
+              "spibounds_regions=508,514" in host_log
+              or "spibounds_regions=508,514" in line_log
+          )
+
+          sidebands_seen = (
+              "spibounds_regions=490,500,508,514,522,532" in host_log
+              or "spibounds_regions=490,500,508,514,522,532" in side_log
+          )
+
+          def to_int(x):
+              try:
+                  return int(str(x).strip())
+              except Exception:
+                  return 0
+
+          line_kill = to_int(line_status.get("killed_by_guard", "0"))
+          side_kill = to_int(side_status.get("killed_by_guard", "0"))
+
+          prompt_loop_seen = bool(line_kill or side_kill)
+
+          orbit_count = (
+              to_int(line_status.get("orbit_asini_prompt_count", "0"))
+              + to_int(side_status.get("orbit_asini_prompt_count", "0"))
+          )
 
           line_metric_exists = any(str(r["path"]).endswith(".fits") or str(r["path"]).endswith(".fits.gz") for r in line_rows)
           sideband_metric_exists = any(str(r["path"]).endswith(".fits") or str(r["path"]).endswith(".fits.gz") for r in side_rows)
 
           if line_metric_exists or sideband_metric_exists:
-              final_status = "R21AX_R7G_R3P_R2B_SPI511_PRODUCTS_PRESENT_REVIEW_PRODUCTS_NOT_FINAL_PROOF"
+              final_status = "R21AX_R7G_R3P_R2C_SPI511_PRODUCTS_PRESENT_REVIEW_PRODUCTS_NOT_FINAL_PROOF"
           elif prompt_loop_seen:
-              final_status = "R21AX_R7G_R3P_R2B_SPI511_PROMPT_LOOP_STILL_PRESENT_NO_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2C_SPI511_PROMPT_LOOP_GUARD_TRIGGERED_NO_511_METRIC_NO_PHYSICAL_NULL"
           elif actual_spi_started:
-              final_status = "R21AX_R7G_R3P_R2B_SPI511_EXECUTED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2C_SPI511_EXECUTED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
           else:
-              final_status = "R21AX_R7G_R3P_R2B_SPI511_NOT_STARTED_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2C_SPI511_NOT_STARTED_NO_511_NO_PHYSICAL_NULL"
 
           checks = {
               "ready_flag_exists": READY_FLAG.exists(),
@@ -623,15 +590,15 @@ jobs:
               "checks": checks
           }
 
-          (LIGHT / "R3P_R2B_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-          (LIGHT / "R3P_R2B_CLAIM_BOUNDARY.txt").write_text(
+          (LIGHT / "R3P_R2C_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+          (LIGHT / "R3P_R2C_CLAIM_BOUNDARY.txt").write_text(
               "Runtime, cache, prompt, parameter, Docker, or OSA failure is not a physical null.\n"
               "Do not claim discovery/proof unless an actual 511 line/sideband metric is read from OSA products.\n",
               encoding="utf-8"
           )
 
           flat = [{"check": k, "value": v} for k, v in checks.items()]
-          write_csv(LIGHT / "r3p_r2b_checks_flat.csv", flat, ["check", "value"])
+          write_csv(LIGHT / "r3p_r2c_checks_flat.csv", flat, ["check", "value"])
 
           if Path(ZIP_NAME).exists():
               Path(ZIP_NAME).unlink()
@@ -641,20 +608,20 @@ jobs:
           if Path(ZIP_NAME).exists():
               sha = sha256_file(ZIP_NAME)
               Path(ZIP_NAME + ".sha256.txt").write_text(sha + "  " + ZIP_NAME + "\n", encoding="utf-8")
-              print("R3P_R2B_ZIP_SHA256", sha)
+              print("R3P_R2C_ZIP_SHA256", sha)
 
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Upload R3P R2B LIGHT artifact always
+      - name: Upload R3P R2C LIGHT artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3P_R2B_LIGHT_RESULTS.zip.sha256.txt
-            ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs/main_execution.log
-            ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs/docker_status.log
-            ACIRM_R21AX_R7G_R3P_R2B_RESULTS/logs/host_container_spi_r2b.log
+            ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3P_R2C_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs/main_execution.log
+            ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs/docker_status.log
+            ACIRM_R21AX_R7G_R3P_R2C_RESULTS/logs/host_container_spi_r2c.log
           if-no-files-found: warn
