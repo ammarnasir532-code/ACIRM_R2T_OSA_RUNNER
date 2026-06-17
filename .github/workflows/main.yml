@@ -1,4 +1,4 @@
-name: ACIRM R3P R2R direct SPI OPER local window specificity audit
+name: ACIRM R3P R2S direct SPI OPER peak morphology audit
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  acirm-r3p-r2r-direct-spi-oper-local-window-specificity:
+  acirm-r3p-r2s-direct-spi-oper-peak-morphology:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -15,10 +15,10 @@ jobs:
       - name: Prepare folders
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_LIGHT_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2S_PEAK_MORPHOLOGY_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2S_PEAK_MORPHOLOGY_LIGHT_RESULTS/logs
           mkdir -p ACIRM_CACHE_R3P_R1
-          echo "R2R_SPECIFICITY_PREPARED"
+          echo "R2S_PEAK_MORPHOLOGY_PREPARED"
 
       - name: Restore R3P R1 cache
         uses: actions/cache/restore@v4
@@ -28,23 +28,23 @@ jobs:
           restore-keys: |
             acirm-r21ax-r7g-r3p-r1-cache-
 
-      - name: Run R2R direct local window specificity audit
+      - name: Run R2S peak morphology center width audit
         continue-on-error: true
         run: |
           set +e
 
-          OUT="ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS"
-          LIGHT="ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_LIGHT_RESULTS"
+          OUT="ACIRM_R21AX_R7G_R3P_R2S_PEAK_MORPHOLOGY_RESULTS"
+          LIGHT="ACIRM_R21AX_R7G_R3P_R2S_PEAK_MORPHOLOGY_LIGHT_RESULTS"
           MAIN_LOG="$OUT/logs/main_execution.log"
 
-          echo "R2R_SPECIFICITY_STARTED" | tee "$MAIN_LOG"
+          echo "R2S_PEAK_MORPHOLOGY_STARTED" | tee "$MAIN_LOG"
           echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$MAIN_LOG"
 
           sudo apt-get update -y 2>&1 | tee "$OUT/logs/apt_update.log" || true
           sudo apt-get install -y zip python3-pip 2>&1 | tee "$OUT/logs/apt_install.log" || true
           python3 -m pip install --user astropy numpy 2>&1 | tee "$OUT/logs/pip_astropy_numpy.log" || true
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2S_PEAK_MORPHOLOGY_RESULTS/logs/main_execution.log
           import csv
           import hashlib
           import json
@@ -57,13 +57,13 @@ jobs:
           import numpy as np
           from astropy.io import fits
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_AUDIT"
+          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2S_DIRECT_SPI_OPER_PEAK_MORPHOLOGY_CENTER_WIDTH_AUDIT"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS")
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_LIGHT_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2S_PEAK_MORPHOLOGY_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2S_PEAK_MORPHOLOGY_LIGHT_RESULTS")
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
-          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_LIGHT_RESULTS.zip"
+          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2S_DIRECT_SPI_OPER_PEAK_MORPHOLOGY_LIGHT_RESULTS.zip"
 
           for p in [OUT, OUT / "logs", LIGHT, LIGHT / "logs"]:
               p.mkdir(parents=True, exist_ok=True)
@@ -105,19 +105,16 @@ jobs:
                   return None
               return float(np.sum(arr))
 
-          def mad_sigma(values):
-              arr = np.asarray(values, dtype=float)
-              arr = arr[np.isfinite(arr)]
-              if arr.size < 3:
+          def weighted_centroid(energy, values):
+              e = np.asarray(energy, dtype=float)
+              v = np.asarray(values, dtype=float)
+              m = np.isfinite(e) & np.isfinite(v) & (v > 0)
+              if not np.any(m):
                   return None
-              med = float(np.median(arr))
-              mad = float(np.median(np.abs(arr - med)))
-              if mad == 0:
-                  std = float(np.std(arr))
-                  if std == 0:
-                      return None
-                  return std
-              return 1.4826 * mad
+              sw = float(np.sum(v[m]))
+              if sw == 0:
+                  return None
+              return float(np.sum(e[m] * v[m]) / sw)
 
           def load_spi_oper_energy_values(path):
               with fits.open(path, memmap=False) as hdul:
@@ -171,11 +168,13 @@ jobs:
                   if elo_col and ehi_col:
                       elo = np.asarray(data[elo_col], dtype=float).reshape(-1)
                       ehi = np.asarray(data[ehi_col], dtype=float).reshape(-1)
+                      energy = (elo + ehi) / 2.0
                       energy_mode = "bounds"
                       energy_label = elo_col + "," + ehi_col
                   elif energy_col:
-                      elo = np.asarray(data[energy_col], dtype=float).reshape(-1)
-                      ehi = np.asarray(data[energy_col], dtype=float).reshape(-1)
+                      energy = np.asarray(data[energy_col], dtype=float).reshape(-1)
+                      elo = energy
+                      ehi = energy
                       energy_mode = "center"
                       energy_label = energy_col
                   else:
@@ -183,40 +182,109 @@ jobs:
 
                   val = np.asarray(data[value_col], dtype=float)
 
-                  if val.ndim == 1 and val.shape[0] == elo.shape[0]:
+                  if val.ndim == 1 and val.shape[0] == energy.shape[0]:
                       val_by_energy = val
-                  elif val.ndim >= 2 and val.shape[0] == elo.shape[0]:
+                  elif val.ndim >= 2 and val.shape[0] == energy.shape[0]:
                       val_by_energy = np.nansum(val.reshape(val.shape[0], -1), axis=1)
-                  elif val.ndim >= 2 and val.shape[-1] == elo.shape[0]:
+                  elif val.ndim >= 2 and val.shape[-1] == energy.shape[0]:
                       tmp = np.moveaxis(val, -1, 0)
                       val_by_energy = np.nansum(tmp.reshape(tmp.shape[0], -1), axis=1)
                   else:
                       raise RuntimeError("VALUE_ENERGY_SHAPE_MISMATCH")
 
-                  finite = np.isfinite(elo) & np.isfinite(ehi) & np.isfinite(val_by_energy)
-                  elo = elo[finite]
-                  ehi = ehi[finite]
-                  val_by_energy = np.asarray(val_by_energy[finite], dtype=float)
+                  finite = np.isfinite(energy) & np.isfinite(elo) & np.isfinite(ehi) & np.isfinite(val_by_energy)
+                  energy = np.asarray(energy[finite], dtype=float)
+                  elo = np.asarray(elo[finite], dtype=float)
+                  ehi = np.asarray(ehi[finite], dtype=float)
+                  values = np.asarray(val_by_energy[finite], dtype=float)
+
+                  order = np.argsort(energy)
+                  energy = energy[order]
+                  elo = elo[order]
+                  ehi = ehi[order]
+                  values = values[order]
 
                   return {
+                      "energy": energy,
                       "elo": elo,
                       "ehi": ehi,
-                      "values": val_by_energy,
+                      "values": values,
                       "energy_mode": energy_mode,
                       "energy_label": energy_label,
                       "value_col": value_col,
                       "hdu_name": str(getattr(selected, "name", ""))
                   }
 
-          def interval_mask(elo, ehi, energy_mode, lo, hi):
-              if energy_mode == "bounds":
-                  return (elo < hi) & (ehi > lo)
-              return (elo >= lo) & (elo <= hi)
+          def mask_window(obj, lo, hi):
+              if obj["energy_mode"] == "bounds":
+                  return (obj["elo"] < hi) & (obj["ehi"] > lo)
+              return (obj["energy"] >= lo) & (obj["energy"] <= hi)
 
-          def window_sum(obj, lo, hi):
-              mask = interval_mask(obj["elo"], obj["ehi"], obj["energy_mode"], lo, hi)
-              s = finite_sum(obj["values"][mask])
-              return s, int(np.sum(mask))
+          def sum_window(obj, lo, hi):
+              m = mask_window(obj, lo, hi)
+              return finite_sum(obj["values"][m]), int(np.sum(m))
+
+          def centroid_window(obj, lo, hi, baseline=None):
+              m = mask_window(obj, lo, hi)
+              e = obj["energy"][m]
+              v = obj["values"][m]
+              if baseline is not None:
+                  v = np.asarray(v, dtype=float) - float(baseline)
+                  v = np.where(v > 0, v, 0.0)
+              return weighted_centroid(e, v)
+
+          def fwhm_estimate(obj, lo, hi, baseline):
+              m = mask_window(obj, lo, hi)
+              e = np.asarray(obj["energy"][m], dtype=float)
+              v = np.asarray(obj["values"][m], dtype=float) - float(baseline)
+              v = np.where(np.isfinite(v), v, 0.0)
+              if e.size < 3:
+                  return "", "", "", ""
+              vmax = float(np.max(v))
+              if vmax <= 0:
+                  return "", "", "", ""
+              half = 0.5 * vmax
+              hm = v >= half
+              if not np.any(hm):
+                  return "", "", "", ""
+              e_half = e[hm]
+              return float(np.min(e_half)), float(np.max(e_half)), float(np.max(e_half) - np.min(e_half)), vmax
+
+          def scan_windows(obj, lo_min, hi_max, width, step):
+              rows = []
+              x = lo_min
+              while x <= hi_max - width + 1e-9:
+                  lo = round(x, 6)
+                  hi = round(lo + width, 6)
+                  s, bins = sum_window(obj, lo, hi)
+                  if s is not None:
+                      rows.append({
+                          "window_lo_keV": lo,
+                          "window_hi_keV": hi,
+                          "window_sum": s,
+                          "bin_count": bins,
+                          "overlaps_508_514": not (hi <= 508.0 or lo >= 514.0),
+                          "overlaps_500_520": not (hi <= 500.0 or lo >= 520.0)
+                      })
+                  x += step
+              return rows
+
+          def greedy_nonoverlap_windows(rows, min_gap_keV):
+              ranked = sorted(rows, key=lambda r: float(r["window_sum"]), reverse=True)
+              selected = []
+              for r in ranked:
+                  center = (float(r["window_lo_keV"]) + float(r["window_hi_keV"])) / 2.0
+                  ok = True
+                  for s in selected:
+                      sc = (float(s["window_lo_keV"]) + float(s["window_hi_keV"])) / 2.0
+                      if abs(center - sc) < min_gap_keV:
+                          ok = False
+                          break
+                  if ok:
+                      selected.append(r)
+                  if len(selected) >= 20:
+                      break
+              return selected
 
           ready_flag_exists = READY_FLAG.exists()
 
@@ -230,248 +298,245 @@ jobs:
               if scw and scw not in unique_by_scw:
                   unique_by_scw[scw] = p
 
+          morphology_rows = []
+          spectrum_rows = []
           window_rows = []
-          target_rows = []
-          all_ratios = []
-
-          target_lo = 508.0
-          target_hi = 514.0
-          width = 6.0
-          local_min = 450.0
-          local_max = 570.0
-          step = 1.0
+          nonoverlap_rows = []
 
           for scw, path in sorted(unique_by_scw.items()):
               try:
                   obj = load_spi_oper_energy_values(path)
 
-                  target_sum, target_bins = window_sum(obj, target_lo, target_hi)
-
-                  original_sb1_sum, original_sb1_bins = window_sum(obj, 490.0, 500.0)
-                  original_sb2_sum, original_sb2_bins = window_sum(obj, 522.0, 532.0)
-
-                  immediate_low_sum, immediate_low_bins = window_sum(obj, 502.0, 508.0)
-                  immediate_high_sum, immediate_high_bins = window_sum(obj, 514.0, 520.0)
-
-                  original_side_mean = None
-                  original_ratio = None
-                  if original_sb1_sum is not None and original_sb2_sum is not None:
-                      original_side_mean = (original_sb1_sum + original_sb2_sum) / 2.0
-                      if original_side_mean != 0 and target_sum is not None:
-                          original_ratio = target_sum / original_side_mean
-
-                  immediate_side_mean = None
-                  immediate_ratio = None
-                  if immediate_low_sum is not None and immediate_high_sum is not None:
-                      immediate_side_mean = (immediate_low_sum + immediate_high_sum) / 2.0
-                      if immediate_side_mean != 0 and target_sum is not None:
-                          immediate_ratio = target_sum / immediate_side_mean
-
-                  starts = []
-                  x = local_min
-                  while x <= local_max - width + 1e-9:
-                      starts.append(round(x, 6))
-                      x += step
-
-                  scw_window_rows = []
-                  for lo in starts:
-                      hi = lo + width
-                      s, bins = window_sum(obj, lo, hi)
-                      if s is None:
-                          continue
-                      row = {
+                  local_mask = (obj["energy"] >= 450.0) & (obj["energy"] <= 570.0)
+                  for e, v in zip(obj["energy"][local_mask], obj["values"][local_mask]):
+                      spectrum_rows.append({
                           "scw_id": scw,
-                          "path": str(path),
-                          "window_lo_keV": lo,
-                          "window_hi_keV": hi,
-                          "window_width_keV": width,
-                          "window_sum": s,
-                          "bin_count": bins,
-                          "is_target_508_514": abs(lo - target_lo) < 1e-9 and abs(hi - target_hi) < 1e-9
-                      }
-                      scw_window_rows.append(row)
+                          "energy_keV": float(e),
+                          "value": float(v),
+                          "is_508_514": bool(508.0 <= float(e) <= 514.0),
+                          "is_peak_context_500_522": bool(500.0 <= float(e) <= 522.0)
+                      })
 
-                  sums = [float(r["window_sum"]) for r in scw_window_rows]
-                  med = float(np.median(sums)) if sums else None
-                  mean = float(np.mean(sums)) if sums else None
-                  sd = float(np.std(sums, ddof=1)) if len(sums) > 1 else None
-                  robust = mad_sigma(sums)
+                  line_sum, line_bins = sum_window(obj, 508.0, 514.0)
+                  sb1_sum, sb1_bins = sum_window(obj, 490.0, 500.0)
+                  sb2_sum, sb2_bins = sum_window(obj, 522.0, 532.0)
+                  left_sum, left_bins = sum_window(obj, 502.0, 508.0)
+                  right_sum, right_bins = sum_window(obj, 514.0, 520.0)
 
-                  for r in scw_window_rows:
-                      s = float(r["window_sum"])
-                      r["local_median_sum"] = "" if med is None else med
-                      r["local_mean_sum"] = "" if mean is None else mean
-                      r["local_sample_std_sum"] = "" if sd is None else sd
-                      r["local_robust_sigma_mad"] = "" if robust is None else robust
-                      r["sum_to_local_median_ratio"] = "" if med in [None, 0] else s / med
-                      r["z_vs_local_mean"] = "" if sd in [None, 0] else (s - mean) / sd
-                      r["robust_z_vs_local_median"] = "" if robust in [None, 0] else (s - med) / robust
-                      window_rows.append(r)
+                  side_mean = ""
+                  line_to_side = ""
+                  if sb1_sum is not None and sb2_sum is not None:
+                      side_mean = (sb1_sum + sb2_sum) / 2.0
+                      if side_mean != 0 and line_sum is not None:
+                          line_to_side = line_sum / side_mean
 
-                  ranked = sorted(scw_window_rows, key=lambda r: float(r["window_sum"]), reverse=True)
-                  rank = ""
-                  higher_count = ""
-                  equal_or_higher_count = ""
-                  target_percentile = ""
-                  target_to_local_median_ratio = ""
-                  target_z = ""
-                  target_robust_z = ""
+                  immediate_mean = ""
+                  line_to_immediate = ""
+                  if left_sum is not None and right_sum is not None:
+                      immediate_mean = (left_sum + right_sum) / 2.0
+                      if immediate_mean != 0 and line_sum is not None:
+                          line_to_immediate = line_sum / immediate_mean
 
-                  if target_sum is not None and ranked:
-                      higher_count = sum(1 for r in ranked if float(r["window_sum"]) > float(target_sum))
-                      equal_or_higher_count = sum(1 for r in ranked if float(r["window_sum"]) >= float(target_sum))
-                      rank = higher_count + 1
-                      target_percentile = 1.0 - (higher_count / float(len(ranked)))
-                      if med not in [None, 0]:
-                          target_to_local_median_ratio = float(target_sum) / med
-                      if sd not in [None, 0]:
-                          target_z = (float(target_sum) - mean) / sd
-                      if robust not in [None, 0]:
-                          target_robust_z = (float(target_sum) - med) / robust
+                  baseline_values = []
+                  m_base1 = mask_window(obj, 490.0, 500.0)
+                  m_base2 = mask_window(obj, 522.0, 532.0)
+                  if np.any(m_base1):
+                      baseline_values.extend(list(obj["values"][m_base1]))
+                  if np.any(m_base2):
+                      baseline_values.extend(list(obj["values"][m_base2]))
 
-                  target_row = {
+                  baseline_median = ""
+                  if baseline_values:
+                      baseline_median = float(np.median(np.asarray(baseline_values, dtype=float)))
+
+                  raw_centroid_508_514 = centroid_window(obj, 508.0, 514.0, baseline=None)
+                  raw_centroid_506_516 = centroid_window(obj, 506.0, 516.0, baseline=None)
+
+                  excess_centroid_508_514 = ""
+                  excess_centroid_506_516 = ""
+                  fwhm_lo = ""
+                  fwhm_hi = ""
+                  fwhm_width = ""
+                  peak_excess_max = ""
+
+                  if baseline_median != "":
+                      c1 = centroid_window(obj, 508.0, 514.0, baseline=baseline_median)
+                      c2 = centroid_window(obj, 506.0, 516.0, baseline=baseline_median)
+                      if c1 is not None:
+                          excess_centroid_508_514 = c1
+                      if c2 is not None:
+                          excess_centroid_506_516 = c2
+                      fwhm_lo, fwhm_hi, fwhm_width, peak_excess_max = fwhm_estimate(obj, 490.0, 532.0, baseline_median)
+
+                  peak_mask = mask_window(obj, 500.0, 522.0)
+                  peak_energy_at_max = ""
+                  peak_value_at_max = ""
+                  if np.any(peak_mask):
+                      e_peak = obj["energy"][peak_mask]
+                      v_peak = obj["values"][peak_mask]
+                      idx = int(np.nanargmax(v_peak))
+                      peak_energy_at_max = float(e_peak[idx])
+                      peak_value_at_max = float(v_peak[idx])
+
+                  windows = scan_windows(obj, 450.0, 570.0, 6.0, 1.0)
+                  ranked = sorted(windows, key=lambda r: float(r["window_sum"]), reverse=True)
+
+                  for rank_idx, r in enumerate(ranked, start=1):
+                      row = dict(r)
+                      row["scw_id"] = scw
+                      row["rank_by_sum_desc"] = rank_idx
+                      window_rows.append(row)
+
+                  nonoverlap = greedy_nonoverlap_windows(windows, min_gap_keV=6.0)
+                  for rank_idx, r in enumerate(nonoverlap, start=1):
+                      row = dict(r)
+                      row["scw_id"] = scw
+                      row["nonoverlap_rank_by_sum_desc"] = rank_idx
+                      nonoverlap_rows.append(row)
+
+                  best_non511 = ""
+                  best_non511_lo = ""
+                  best_non511_hi = ""
+                  for r in ranked:
+                      if not bool(r["overlaps_500_520"]):
+                          best_non511 = float(r["window_sum"])
+                          best_non511_lo = float(r["window_lo_keV"])
+                          best_non511_hi = float(r["window_hi_keV"])
+                          break
+
+                  target_rank = ""
+                  target_sum_from_scan = ""
+                  higher_than_target = ""
+                  target_row_count = 0
+                  for rank_idx, r in enumerate(ranked, start=1):
+                      if abs(float(r["window_lo_keV"]) - 508.0) < 1e-9 and abs(float(r["window_hi_keV"]) - 514.0) < 1e-9:
+                          target_rank = rank_idx
+                          target_sum_from_scan = float(r["window_sum"])
+                          target_row_count = 1
+                          break
+
+                  if target_sum_from_scan != "":
+                      higher_than_target = sum(1 for r in ranked if float(r["window_sum"]) > float(target_sum_from_scan))
+
+                  target_vs_best_non511 = ""
+                  if target_sum_from_scan != "" and best_non511 not in ["", 0]:
+                      target_vs_best_non511 = float(target_sum_from_scan) / float(best_non511)
+
+                  morphology_rows.append({
                       "scw_id": scw,
                       "path": str(path),
                       "hdu_name": obj["hdu_name"],
                       "value_col": obj["value_col"],
                       "energy_label": obj["energy_label"],
                       "energy_mode": obj["energy_mode"],
-                      "target_508_514_sum": "" if target_sum is None else target_sum,
-                      "target_bin_count": target_bins,
-                      "original_sideband_490_500_sum": "" if original_sb1_sum is None else original_sb1_sum,
-                      "original_sideband_522_532_sum": "" if original_sb2_sum is None else original_sb2_sum,
-                      "original_sideband_mean_sum": "" if original_side_mean is None else original_side_mean,
-                      "original_line_to_sideband_ratio": "" if original_ratio is None else original_ratio,
-                      "immediate_sideband_502_508_sum": "" if immediate_low_sum is None else immediate_low_sum,
-                      "immediate_sideband_514_520_sum": "" if immediate_high_sum is None else immediate_high_sum,
-                      "immediate_sideband_mean_sum": "" if immediate_side_mean is None else immediate_side_mean,
-                      "immediate_line_to_sideband_ratio": "" if immediate_ratio is None else immediate_ratio,
-                      "local_window_count": len(ranked),
-                      "target_rank_by_6keV_sum_desc": rank,
-                      "target_higher_window_count": higher_count,
-                      "target_equal_or_higher_window_count": equal_or_higher_count,
-                      "target_specificity_percentile": target_percentile,
-                      "local_median_6keV_sum": "" if med is None else med,
-                      "local_mean_6keV_sum": "" if mean is None else mean,
-                      "local_sample_std_6keV_sum": "" if sd is None else sd,
-                      "local_robust_sigma_mad": "" if robust is None else robust,
-                      "target_to_local_median_ratio": target_to_local_median_ratio,
-                      "target_z_vs_local_mean": target_z,
-                      "target_robust_z_vs_local_median": target_robust_z,
+                      "line_508_514_sum": "" if line_sum is None else line_sum,
+                      "sideband_490_500_sum": "" if sb1_sum is None else sb1_sum,
+                      "sideband_522_532_sum": "" if sb2_sum is None else sb2_sum,
+                      "sideband_mean_sum": side_mean,
+                      "line_to_sideband_mean_ratio": line_to_side,
+                      "immediate_left_502_508_sum": "" if left_sum is None else left_sum,
+                      "immediate_right_514_520_sum": "" if right_sum is None else right_sum,
+                      "immediate_sideband_mean_sum": immediate_mean,
+                      "line_to_immediate_sideband_ratio": line_to_immediate,
+                      "baseline_median_from_490_500_522_532": baseline_median,
+                      "peak_energy_at_max_500_522_keV": peak_energy_at_max,
+                      "peak_value_at_max_500_522": peak_value_at_max,
+                      "raw_centroid_508_514_keV": "" if raw_centroid_508_514 is None else raw_centroid_508_514,
+                      "raw_centroid_506_516_keV": "" if raw_centroid_506_516 is None else raw_centroid_506_516,
+                      "excess_centroid_508_514_keV": excess_centroid_508_514,
+                      "excess_centroid_506_516_keV": excess_centroid_506_516,
+                      "excess_fwhm_lo_keV": fwhm_lo,
+                      "excess_fwhm_hi_keV": fwhm_hi,
+                      "excess_fwhm_width_keV": fwhm_width,
+                      "peak_excess_max": peak_excess_max,
+                      "target_rank_by_6keV_sum_desc": target_rank,
+                      "target_higher_window_count": higher_than_target,
+                      "best_non511_6keV_window_lo": best_non511_lo,
+                      "best_non511_6keV_window_hi": best_non511_hi,
+                      "best_non511_6keV_window_sum": best_non511,
+                      "target_to_best_non511_6keV_sum_ratio": target_vs_best_non511,
                       "error": ""
-                  }
-
-                  target_rows.append(target_row)
-
-                  if original_ratio not in [None, ""]:
-                      all_ratios.append(float(original_ratio))
+                  })
 
               except Exception as e:
-                  target_rows.append({
+                  morphology_rows.append({
                       "scw_id": scw,
                       "path": str(path),
                       "hdu_name": "",
                       "value_col": "",
                       "energy_label": "",
                       "energy_mode": "",
-                      "target_508_514_sum": "",
-                      "target_bin_count": "",
-                      "original_sideband_490_500_sum": "",
-                      "original_sideband_522_532_sum": "",
-                      "original_sideband_mean_sum": "",
-                      "original_line_to_sideband_ratio": "",
-                      "immediate_sideband_502_508_sum": "",
-                      "immediate_sideband_514_520_sum": "",
+                      "line_508_514_sum": "",
+                      "sideband_490_500_sum": "",
+                      "sideband_522_532_sum": "",
+                      "sideband_mean_sum": "",
+                      "line_to_sideband_mean_ratio": "",
+                      "immediate_left_502_508_sum": "",
+                      "immediate_right_514_520_sum": "",
                       "immediate_sideband_mean_sum": "",
-                      "immediate_line_to_sideband_ratio": "",
-                      "local_window_count": "",
+                      "line_to_immediate_sideband_ratio": "",
+                      "baseline_median_from_490_500_522_532": "",
+                      "peak_energy_at_max_500_522_keV": "",
+                      "peak_value_at_max_500_522": "",
+                      "raw_centroid_508_514_keV": "",
+                      "raw_centroid_506_516_keV": "",
+                      "excess_centroid_508_514_keV": "",
+                      "excess_centroid_506_516_keV": "",
+                      "excess_fwhm_lo_keV": "",
+                      "excess_fwhm_hi_keV": "",
+                      "excess_fwhm_width_keV": "",
+                      "peak_excess_max": "",
                       "target_rank_by_6keV_sum_desc": "",
                       "target_higher_window_count": "",
-                      "target_equal_or_higher_window_count": "",
-                      "target_specificity_percentile": "",
-                      "local_median_6keV_sum": "",
-                      "local_mean_6keV_sum": "",
-                      "local_sample_std_6keV_sum": "",
-                      "local_robust_sigma_mad": "",
-                      "target_to_local_median_ratio": "",
-                      "target_z_vs_local_mean": "",
-                      "target_robust_z_vs_local_median": "",
+                      "best_non511_6keV_window_lo": "",
+                      "best_non511_6keV_window_hi": "",
+                      "best_non511_6keV_window_sum": "",
+                      "target_to_best_non511_6keV_sum_ratio": "",
                       "error": repr(e)[:500]
                   })
 
+          morphology_fields = [
+              "scw_id", "path", "hdu_name", "value_col", "energy_label", "energy_mode",
+              "line_508_514_sum", "sideband_490_500_sum", "sideband_522_532_sum",
+              "sideband_mean_sum", "line_to_sideband_mean_ratio",
+              "immediate_left_502_508_sum", "immediate_right_514_520_sum",
+              "immediate_sideband_mean_sum", "line_to_immediate_sideband_ratio",
+              "baseline_median_from_490_500_522_532",
+              "peak_energy_at_max_500_522_keV", "peak_value_at_max_500_522",
+              "raw_centroid_508_514_keV", "raw_centroid_506_516_keV",
+              "excess_centroid_508_514_keV", "excess_centroid_506_516_keV",
+              "excess_fwhm_lo_keV", "excess_fwhm_hi_keV", "excess_fwhm_width_keV",
+              "peak_excess_max", "target_rank_by_6keV_sum_desc",
+              "target_higher_window_count", "best_non511_6keV_window_lo",
+              "best_non511_6keV_window_hi", "best_non511_6keV_window_sum",
+              "target_to_best_non511_6keV_sum_ratio", "error"
+          ]
+
+          write_csv(LIGHT / "peak_morphology_summary.csv", morphology_rows, morphology_fields)
+
           write_csv(
-              LIGHT / "target_508_514_specificity_summary.csv",
-              target_rows,
-              [
-                  "scw_id", "path", "hdu_name", "value_col", "energy_label", "energy_mode",
-                  "target_508_514_sum", "target_bin_count",
-                  "original_sideband_490_500_sum", "original_sideband_522_532_sum",
-                  "original_sideband_mean_sum", "original_line_to_sideband_ratio",
-                  "immediate_sideband_502_508_sum", "immediate_sideband_514_520_sum",
-                  "immediate_sideband_mean_sum", "immediate_line_to_sideband_ratio",
-                  "local_window_count", "target_rank_by_6keV_sum_desc",
-                  "target_higher_window_count", "target_equal_or_higher_window_count",
-                  "target_specificity_percentile", "local_median_6keV_sum",
-                  "local_mean_6keV_sum", "local_sample_std_6keV_sum",
-                  "local_robust_sigma_mad", "target_to_local_median_ratio",
-                  "target_z_vs_local_mean", "target_robust_z_vs_local_median", "error"
-              ]
+              LIGHT / "local_spectrum_450_570.csv",
+              spectrum_rows,
+              ["scw_id", "energy_keV", "value", "is_508_514", "is_peak_context_500_522"]
           )
 
           write_csv(
-              LIGHT / "all_local_6keV_windows_450_570.csv",
+              LIGHT / "ranked_6keV_windows_450_570.csv",
               window_rows,
               [
-                  "scw_id", "path", "window_lo_keV", "window_hi_keV",
-                  "window_width_keV", "window_sum", "bin_count", "is_target_508_514",
-                  "local_median_sum", "local_mean_sum", "local_sample_std_sum",
-                  "local_robust_sigma_mad", "sum_to_local_median_ratio",
-                  "z_vs_local_mean", "robust_z_vs_local_median"
+                  "scw_id", "rank_by_sum_desc", "window_lo_keV", "window_hi_keV",
+                  "window_sum", "bin_count", "overlaps_508_514", "overlaps_500_520"
               ]
           )
 
-          ranked_all = sorted(window_rows, key=lambda r: float(r["window_sum"]), reverse=True)
           write_csv(
-              LIGHT / "ranked_all_local_6keV_windows_by_sum.csv",
-              ranked_all,
+              LIGHT / "nonoverlap_peak_windows_450_570.csv",
+              nonoverlap_rows,
               [
-                  "scw_id", "window_lo_keV", "window_hi_keV",
-                  "window_sum", "bin_count", "is_target_508_514",
-                  "sum_to_local_median_ratio", "z_vs_local_mean", "robust_z_vs_local_median", "path"
+                  "scw_id", "nonoverlap_rank_by_sum_desc", "window_lo_keV", "window_hi_keV",
+                  "window_sum", "bin_count", "overlaps_508_514", "overlaps_500_520"
               ]
           )
-
-          best_target = target_rows[0] if target_rows else {}
-          target_rank = best_target.get("target_rank_by_6keV_sum_desc", "")
-          target_percentile = best_target.get("target_specificity_percentile", "")
-          target_robust_z = best_target.get("target_robust_z_vs_local_median", "")
-          immediate_ratio = best_target.get("immediate_line_to_sideband_ratio", "")
-          original_ratio = best_target.get("original_line_to_sideband_ratio", "")
-
-          checks = {
-              "ready_flag_exists": ready_flag_exists,
-              "spi_oper_file_count_total": len(spi_oper_paths),
-              "unique_scw_count": len(unique_by_scw),
-              "target_rows_count": len(target_rows),
-              "local_window_rows_count": len(window_rows),
-              "target_508_514_seen": bool(best_target.get("target_508_514_sum", "") != ""),
-              "original_line_to_sideband_ratio": original_ratio,
-              "immediate_line_to_sideband_ratio": immediate_ratio,
-              "target_rank_by_6keV_sum_desc": target_rank,
-              "target_specificity_percentile": target_percentile,
-              "target_robust_z_vs_local_median": target_robust_z,
-              "target_to_local_median_ratio": best_target.get("target_to_local_median_ratio", ""),
-              "target_higher_window_count": best_target.get("target_higher_window_count", ""),
-              "local_window_count": best_target.get("local_window_count", ""),
-              "full_osa_executed": False,
-              "spi_science_analysis_executed": False
-          }
-
-          with open(LIGHT / "checks_flat.csv", "w", newline="", encoding="utf-8") as f:
-              w = csv.DictWriter(f, fieldnames=["check", "value"])
-              w.writeheader()
-              for k, v in checks.items():
-                  w.writerow({"check": k, "value": v})
 
           def as_float(x):
               try:
@@ -482,26 +547,71 @@ jobs:
                   pass
               return None
 
-          percentile_v = as_float(target_percentile)
-          robust_z_v = as_float(target_robust_z)
-          immediate_ratio_v = as_float(immediate_ratio)
-          original_ratio_v = as_float(original_ratio)
+          best = morphology_rows[0] if morphology_rows else {}
 
-          if not target_rows:
-              final_status = "R21AX_R7G_R3P_R2R_NO_SPI_OPER_TARGET_ROW_NO_511_METRIC"
+          peak_energy = as_float(best.get("peak_energy_at_max_500_522_keV", ""))
+          raw_centroid = as_float(best.get("raw_centroid_508_514_keV", ""))
+          excess_centroid = as_float(best.get("excess_centroid_508_514_keV", ""))
+          fwhm_width = as_float(best.get("excess_fwhm_width_keV", ""))
+          target_rank = best.get("target_rank_by_6keV_sum_desc", "")
+          target_vs_non511 = as_float(best.get("target_to_best_non511_6keV_sum_ratio", ""))
+          line_to_side = as_float(best.get("line_to_sideband_mean_ratio", ""))
+          line_to_immediate = as_float(best.get("line_to_immediate_sideband_ratio", ""))
+
+          centered_peak = False
+          if peak_energy is not None and 509.0 <= peak_energy <= 513.0:
+              centered_peak = True
+          if excess_centroid is not None and 509.0 <= excess_centroid <= 513.0:
+              centered_peak = True
+          if raw_centroid is not None and 509.0 <= raw_centroid <= 513.0:
+              centered_peak = True
+
+          checks = {
+              "ready_flag_exists": ready_flag_exists,
+              "spi_oper_file_count_total": len(spi_oper_paths),
+              "unique_scw_count": len(unique_by_scw),
+              "morphology_row_count": len(morphology_rows),
+              "spectrum_rows_450_570_count": len(spectrum_rows),
+              "window_rows_count": len(window_rows),
+              "nonoverlap_peak_rows_count": len(nonoverlap_rows),
+              "scw_id": best.get("scw_id", ""),
+              "target_rank_by_6keV_sum_desc": target_rank,
+              "target_higher_window_count": best.get("target_higher_window_count", ""),
+              "line_to_sideband_mean_ratio": best.get("line_to_sideband_mean_ratio", ""),
+              "line_to_immediate_sideband_ratio": best.get("line_to_immediate_sideband_ratio", ""),
+              "peak_energy_at_max_500_522_keV": best.get("peak_energy_at_max_500_522_keV", ""),
+              "raw_centroid_508_514_keV": best.get("raw_centroid_508_514_keV", ""),
+              "excess_centroid_508_514_keV": best.get("excess_centroid_508_514_keV", ""),
+              "excess_fwhm_width_keV": best.get("excess_fwhm_width_keV", ""),
+              "best_non511_6keV_window_lo": best.get("best_non511_6keV_window_lo", ""),
+              "best_non511_6keV_window_hi": best.get("best_non511_6keV_window_hi", ""),
+              "target_to_best_non511_6keV_sum_ratio": best.get("target_to_best_non511_6keV_sum_ratio", ""),
+              "peak_centered_near_511": centered_peak,
+              "full_osa_executed": False,
+              "spi_science_analysis_executed": False
+          }
+
+          with open(LIGHT / "checks_flat.csv", "w", newline="", encoding="utf-8") as f:
+              w = csv.DictWriter(f, fieldnames=["check", "value"])
+              w.writeheader()
+              for k, v in checks.items():
+                  w.writerow({"check": k, "value": v})
+
+          if not morphology_rows:
+              final_status = "R21AX_R7G_R3P_R2S_NO_SPI_OPER_MORPHOLOGY_ROW_NO_511_METRIC"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
-          elif best_target.get("error", ""):
-              final_status = "R21AX_R7G_R3P_R2R_SPI_OPER_READ_ERROR_NO_511_SPECIFICITY"
-              scientific_status = "NO_COMPLETE_511_SPECIFICITY_NOT_OSA_PROOF_NO_PHYSICAL_NULL"
-          elif percentile_v is not None and percentile_v >= 0.95 and robust_z_v is not None and robust_z_v >= 2.0:
-              final_status = "R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_508_514_LOCALLY_SPECIFIC_RAW_CANDIDATE_NOT_OSA_PROOF"
-              scientific_status = "DIRECT_RAW_LOCAL_SPECIFICITY_SUPPORT_NOT_DISCOVERY_NOT_FULL_OSA"
-          elif percentile_v is not None and percentile_v >= 0.80:
-              final_status = "R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_508_514_MODERATELY_HIGH_LOCAL_WINDOW_NOT_OSA_PROOF"
-              scientific_status = "DIRECT_RAW_MODERATE_SPECIFICITY_NOT_DISCOVERY_NOT_FULL_OSA"
+          elif best.get("error", ""):
+              final_status = "R21AX_R7G_R3P_R2S_SPI_OPER_MORPHOLOGY_READ_ERROR"
+              scientific_status = "NO_COMPLETE_MORPHOLOGY_NOT_OSA_PROOF_NO_PHYSICAL_NULL"
+          elif str(target_rank) == "1" and centered_peak:
+              final_status = "R21AX_R7G_R3P_R2S_DIRECT_SPI_OPER_PEAK_CENTERED_NEAR_511_RAW_SUPPORT_NOT_OSA_PROOF"
+              scientific_status = "DIRECT_RAW_PEAK_MORPHOLOGY_SUPPORT_NOT_DISCOVERY_NOT_FULL_OSA"
+          elif str(target_rank) == "1":
+              final_status = "R21AX_R7G_R3P_R2S_DIRECT_SPI_OPER_508_514_TOP_WINDOW_BUT_CENTERING_WEAK_RAW_STRUCTURE_ONLY"
+              scientific_status = "DIRECT_RAW_BROAD_STRUCTURE_NOT_DISCOVERY_NOT_FULL_OSA"
           else:
-              final_status = "R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_508_514_NOT_LOCALLY_SPECIFIC_RAW_RATIO_WEAKENED"
-              scientific_status = "RAW_RATIO_NOT_LOCAL_SPECIFIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2S_DIRECT_SPI_OPER_508_514_NOT_DOMINANT_IN_MORPHOLOGY_AUDIT"
+              scientific_status = "RAW_MORPHOLOGY_WEAKENED_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
 
           summary = {
               "run_id": RUN_ID,
@@ -509,28 +619,24 @@ jobs:
               "final_status": final_status,
               "scientific_status": scientific_status,
               "checks": checks,
-              "method": "DIRECT_SPI_OPER_RAW_LOCAL_6KEV_WINDOW_SPECIFICITY_AUDIT_NO_FULL_OSA",
-              "local_scan": {
-                  "min_keV": local_min,
-                  "max_keV": local_max,
-                  "window_width_keV": width,
-                  "step_keV": step
-              },
+              "method": "DIRECT_SPI_OPER_RAW_PEAK_MORPHOLOGY_CENTER_WIDTH_AUDIT_NO_FULL_OSA",
               "target_window_keV": [508.0, 514.0],
-              "claim_ceiling": "DIRECT_RAW_OPERATIONAL_SPECIFICITY_ONLY_NOT_FULL_OSA_PROOF_NOT_DISCOVERY"
+              "peak_context_keV": [500.0, 522.0],
+              "local_scan_keV": [450.0, 570.0],
+              "claim_ceiling": "DIRECT_RAW_OPERATIONAL_MORPHOLOGY_ONLY_NOT_FULL_OSA_PROOF_NOT_DISCOVERY"
           }
 
           safe_text(LIGHT / "SUMMARY.json", json.dumps(summary, indent=2))
           safe_text(
               LIGHT / "CLAIM_BOUNDARY.txt",
-              "R2R tests whether the raw 508-514 keV window is locally specific inside spi_oper.fits.\n"
+              "R2S tests raw peak morphology around 511 keV inside spi_oper.fits.\n"
               "It does not execute spi_science_analysis and is not OSA proof.\n"
-              "If 508-514 is not locally high versus other 6 keV windows, the R2Q raw ratio is weakened.\n"
+              "A centered raw morphology is operational support only, not a detection or discovery claim.\n"
               "No physical null is implied by this direct raw audit.\n"
           )
 
           phone = []
-          phone.append("ACIRM R2R DIRECT SPI OPER LOCAL WINDOW SPECIFICITY AUDIT")
+          phone.append("ACIRM R2S DIRECT SPI OPER PEAK MORPHOLOGY AUDIT")
           phone.append("final_status=" + final_status)
           phone.append("scientific_status=" + scientific_status)
           for k, v in checks.items():
@@ -552,19 +658,19 @@ jobs:
           if Path(ZIP_NAME).exists():
               sha = sha256_file(ZIP_NAME)
               safe_text(ZIP_NAME + ".sha256.txt", sha + "  " + ZIP_NAME + "\n")
-              print("R2R_SPECIFICITY_ZIP_SHA256", sha)
+              print("R2S_PEAK_MORPHOLOGY_ZIP_SHA256", sha)
 
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Upload R2R specificity artifact always
+      - name: Upload R2S peak morphology artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3P_R2S_DIRECT_SPI_OPER_PEAK_MORPHOLOGY_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3P_R2R_DIRECT_SPI_OPER_LOCAL_WINDOW_SPECIFICITY_LIGHT_RESULTS.zip.sha256.txt
-            ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS/logs/main_execution.log
-            ACIRM_R21AX_R7G_R3P_R2R_SPECIFICITY_RESULTS/logs/pip_astropy_numpy.log
+            ACIRM_R21AX_R7G_R3P_R2S_DIRECT_SPI_OPER_PEAK_MORPHOLOGY_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3P_R2S_DIRECT_SPI_OPER_PEAK_MORPHOLOGY_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3P_R2S_PEAK_MORPHOLOGY_RESULTS/logs/main_execution.log
+            ACIRM_R21AX_R7G_R3P_R2S_PEAK_MORPHOLOGY_RESULTS/logs/pip_astropy_numpy.log
           if-no-files-found: warn
