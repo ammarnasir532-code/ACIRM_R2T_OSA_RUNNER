@@ -1,4 +1,4 @@
-name: ACIRM R3P R2M fast xvfb batch line only SPI511
+name: ACIRM R3P R2N fast IC master locator optional line retry
 
 on:
   workflow_dispatch:
@@ -7,20 +7,20 @@ on:
       - main
 
 jobs:
-  acirm-r3p-r2m-fast-xvfb-batch-line-only:
+  acirm-r3p-r2n-fast-ic-master-locator:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
 
     steps:
       - name: Prepare folders
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/work
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/work
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS/logs
           mkdir -p ACIRM_CACHE_R3P_R1
-          echo "R2M_FAST_PREPARED"
+          echo "R2N_FAST_PREPARED"
 
       - name: Restore R3P R1 cache
         uses: actions/cache/restore@v4
@@ -30,28 +30,28 @@ jobs:
           restore-keys: |
             acirm-r21ax-r7g-r3p-r1-cache-
 
-      - name: Run R2M fast xvfb batch line only
+      - name: Run R2N IC master locator and optional line retry
         continue-on-error: true
         run: |
           set +e
 
-          OUT="ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS"
-          LIGHT="ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS"
+          OUT="ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS"
+          LIGHT="ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS"
           MAIN_LOG="$OUT/logs/main_execution.log"
 
-          echo "R2M_FAST_STARTED" | tee "$MAIN_LOG"
+          echo "R2N_FAST_STARTED" | tee "$MAIN_LOG"
           echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$MAIN_LOG"
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/main_execution.log
           import json
           import shutil
           import time
           from pathlib import Path
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS")
 
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           CACHE_DATA = CACHE / "data"
@@ -74,20 +74,14 @@ jobs:
               (OUT / "cache_ok.flag").write_text("CACHE_OK\n", encoding="utf-8")
           else:
               summary = {
-                  "run_id": "ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY",
+                  "run_id": "ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR",
                   "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                  "final_status": "R2M_FAST_CACHE_MISS_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL",
+                  "final_status": "R2N_FAST_CACHE_MISS_IC_LOCATOR_ONLY_NO_SPI_NO_511_NO_PHYSICAL_NULL",
                   "scientific_status": "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL",
                   "checks": {
                       "ready_flag_exists": READY_FLAG.exists(),
-                      "cache_file_count": 0,
-                      "data_file_count": 0,
-                      "work_file_count": 0,
-                      "og_created": False,
-                      "actual_spi_started": False,
-                      "line_508_514_seen": False,
-                      "batch_flag_used": False,
-                      "xvfb_used": False,
+                      "ic_master_found": False,
+                      "line_retry_attempted": False,
                       "line_metric_exists": False
                   },
                   "claim_ceiling": "NOT_DISCOVERY_NOT_FINAL_PROOF_NOT_OSA_PROOF"
@@ -113,10 +107,10 @@ jobs:
               echo "HOST_PREP_END"
             } 2>&1 | tee "$OUT/logs/host_prepare.log"
 
-            cat > "$OUT/work/run_spi_r2m_fast.sh" <<'BASH'
+            cat > "$OUT/work/run_spi_r2n_fast.sh" <<'BASH'
           set +e
 
-          echo "R2M_FAST_CONTAINER_START"
+          echo "R2N_FAST_CONTAINER_START"
 
           mkdir -p /tmp/acirm_pfiles
           mkdir -p /tmp/acirm_work
@@ -151,7 +145,6 @@ jobs:
           export PIL_NO_GUI=1
           export PIL_NOTTY=1
           export ISDC_ENV=/opt/osa
-          export REP_BASE_PROD=/tmp/acirm_rep
           export COMMONLOGFILE=/tmp/acirm_work/commonlog.txt
           export PFILES="/tmp/acirm_pfiles;/opt/osa/pfiles"
           export PATH=/opt/osa/bin:$PATH
@@ -171,26 +164,114 @@ jobs:
             fi
           done
 
-          echo "COMMAND_DISCOVERY"
-          for c in spi_science_analysis pset punlearn plist timeout stdbuf fstruct fdump ftlist strings xdpyinfo; do
-            echo "$c=$(command -v "$c" || true)"
-          done
+          {
+            echo "COMMAND_DISCOVERY"
+            for c in spi_science_analysis pset punlearn plist timeout stdbuf fstruct fdump ftlist strings xdpyinfo find; do
+              echo "$c=$(command -v "$c" || true)"
+            done
+
+            echo ""
+            echo "ENV_AFTER_INIT"
+            env | sort | grep -E "^(DISPLAY|HEADASNOQUERY|PIL|PFILES|ISDC|REP_BASE_PROD|COMMONLOGFILE|PATH|LD_LIBRARY_PATH)=" || true
+
+            echo ""
+            echo "DISPLAY_CHECK"
+            xdpyinfo -display "$DISPLAY" 2>&1 | head -60 || true
+          } > /work/container_logs/environment_and_display.txt 2>&1
+
+          echo "IC_MASTER_SEARCH_START"
 
           {
-            echo "DISPLAY=$DISPLAY"
-            xdpyinfo -display "$DISPLAY" 2>&1 | head -60 || true
-          } > /work/container_logs/xvfb_display_check.txt 2>&1
+            echo "SEARCH_ROOTS"
+            for root in /opt/osa /isdc /data /work /usr/local /tmp; do
+              if [ -e "$root" ]; then
+                echo "ROOT_EXISTS $root"
+              else
+                echo "ROOT_MISSING $root"
+              fi
+            done
+
+            echo ""
+            echo "FIND_IC_MASTER_LIMITED"
+            for root in /opt/osa /isdc /data /work /usr/local /tmp; do
+              if [ -e "$root" ]; then
+                timeout 35 find "$root" -type f -name "ic_master_file.fits" -print 2>/dev/null || true
+              fi
+            done
+
+            echo ""
+            echo "FIND_IDX_IC_DIRS"
+            for root in /opt/osa /isdc /data /work /usr/local /tmp; do
+              if [ -e "$root" ]; then
+                timeout 20 find "$root" -type d -path "*/idx/ic" -print 2>/dev/null || true
+              fi
+            done
+          } > /work/container_logs/ic_master_search.txt 2>&1
+
+          grep -E "/ic_master_file\.fits$" /work/container_logs/ic_master_search.txt | sort -u > /work/container_logs/ic_master_candidates.txt || true
+
+          {
+            echo "SPI_CALIBRATION_HINT_SEARCH"
+            for root in /opt/osa /isdc /data /work /usr/local /tmp; do
+              if [ -e "$root" ]; then
+                echo "### ROOT $root"
+                timeout 35 find "$root" -type f \( \
+                  -iname "*spi*coef*cal*" -o \
+                  -iname "*SPI*COEF*CAL*" -o \
+                  -iname "*gain*coef*" -o \
+                  -iname "*spi*gain*" -o \
+                  -iname "*ic_master_file.fits" \
+                \) -printf "%p %s\n" 2>/dev/null | head -300 || true
+              fi
+            done
+          } > /work/container_logs/spi_calibration_hint_search.txt 2>&1
+
+          BEST_ROOT=""
+          BEST_IC=""
+
+          while IFS= read -r p; do
+            case "$p" in
+              */idx/ic/ic_master_file.fits)
+                root="${p%/idx/ic/ic_master_file.fits}"
+                if [ -f "$root/idx/ic/ic_master_file.fits" ]; then
+                  BEST_ROOT="$root"
+                  BEST_IC="$p"
+                  break
+                fi
+                ;;
+            esac
+          done < /work/container_logs/ic_master_candidates.txt
+
+          {
+            echo "BEST_ROOT=$BEST_ROOT"
+            echo "BEST_IC=$BEST_IC"
+            if [ -n "$BEST_ROOT" ]; then
+              echo "IC_MASTER_FOUND=True"
+              ls -l "$BEST_ROOT/idx/ic/ic_master_file.fits" 2>/dev/null || true
+            else
+              echo "IC_MASTER_FOUND=False"
+            fi
+          } > /work/container_logs/ic_selection.env
 
           OG_FILE=$(find /work/og -type f -name "og_spi.fits" | head -1)
-          echo "OG_FILE=$OG_FILE"
+          echo "OG_FILE=$OG_FILE" > /work/container_logs/og_locator.txt
 
           if [ -z "$OG_FILE" ]; then
-            echo "R2M_FAST_NO_REAL_OG_SPI_FITS"
+            echo "R2N_NO_REAL_OG_SPI_FITS" >> /work/container_logs/og_locator.txt
+            echo "R2N_FAST_CONTAINER_END_NO_OG"
             exit 0
           fi
 
-          cp -f /tmp/acirm_pfiles/spi_science_analysis.par /work/container_logs/spi_science_analysis.par.used 2>/dev/null || true
+          if [ -z "$BEST_ROOT" ]; then
+            echo "R2N_NO_IC_MASTER_FOUND_SKIP_LINE_RETRY" > /work/container_logs/line_retry_skipped.txt
+            echo "R2N_FAST_CONTAINER_END_NO_IC"
+            exit 0
+          fi
 
+          export REP_BASE_PROD="$BEST_ROOT"
+          echo "REP_BASE_PROD=$REP_BASE_PROD" > /work/container_logs/selected_rep_base_prod.txt
+
+          cp -f /tmp/acirm_pfiles/spi_science_analysis.par /work/container_logs/spi_science_analysis.par.used 2>/dev/null || true
           timeout 20 spi_science_analysis -h > /work/container_logs/spi_science_analysis_help.txt 2>&1 || true
 
           has_param() {
@@ -289,6 +370,9 @@ jobs:
             status3004=0
             status3023=0
             status35603=0
+            status250002=0
+            calnotfound=0
+            icmissing=0
             koverflow=0
             segfault=0
             kept=0
@@ -306,6 +390,9 @@ jobs:
               case "$line" in *"status -3004"*) status3004=$((status3004 + 1));; esac
               case "$line" in *"status -3023"*) status3023=$((status3023 + 1));; esac
               case "$line" in *"status -35603"*) status35603=$((status35603 + 1));; esac
+              case "$line" in *"status -250002"*) status250002=$((status250002 + 1));; esac
+              case "$line" in *"CAL_NOT_FOUND"*) calnotfound=$((calnotfound + 1));; esac
+              case "$line" in *"ic_master_file.fits"*|*"IC Master Group"*) icmissing=$((icmissing + 1));; esac
               case "$line" in *"kOVERFLOW"*|*"Overflow occurred"*) koverflow=$((koverflow + 1));; esac
               case "$line" in *"segmentation violation"*|*"Segmentation"*) segfault=$((segfault + 1));; esac
 
@@ -344,6 +431,9 @@ jobs:
               echo "status3004_count=$status3004"
               echo "status3023_count=$status3023"
               echo "status35603_count=$status35603"
+              echo "status250002_count=$status250002"
+              echo "cal_not_found_count=$calnotfound"
+              echo "ic_master_message_count=$icmissing"
               echo "koverflow_count=$koverflow"
               echo "segfault_count=$segfault"
               echo "killed_by_guard=$killed"
@@ -357,7 +447,7 @@ jobs:
             return 0
           }
 
-          CASE="R2M_FAST_XVFB_BATCH_LINE_508_514"
+          CASE="R2N_FAST_IC_LINE_508_514"
           PARAMS="/work/container_logs/${CASE}.params.txt"
           ANSWERS="/work/container_logs/${CASE}.answers.txt"
           LOG="/work/container_logs/${CASE}.log"
@@ -431,6 +521,8 @@ jobs:
           make_answers "$ANSWERS"
 
           echo "SPI_CASE_BEGIN ${CASE}"
+          echo "REP_BASE_PROD=$REP_BASE_PROD"
+          echo "IC_MASTER=$BEST_IC"
           echo "DISPLAY=$DISPLAY"
           echo "BATCH_FLAG_USED=-b"
           echo "SIDE_BANDS_SKIPPED=True"
@@ -438,9 +530,12 @@ jobs:
 
           echo "case=${CASE}" > "$STATUS"
           echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATUS"
+          echo "rep_base_prod=${REP_BASE_PROD}" >> "$STATUS"
+          echo "ic_master=${BEST_IC}" >> "$STATUS"
           echo "display=${DISPLAY}" >> "$STATUS"
           echo "xvfb_used=True" >> "$STATUS"
           echo "batch_flag_used=True" >> "$STATUS"
+          echo "line_retry_attempted=True" >> "$STATUS"
           echo "sidebands_skipped=True" >> "$STATUS"
           echo "ACIRM_SPI_PROCESS_STARTED ${CASE}"
 
@@ -460,7 +555,7 @@ jobs:
           cp -f /tmp/acirm_work/commonlog.txt "/work/container_logs/${CASE}.commonlog.txt" 2>/dev/null || true
           cp -f "$COMMONLOGFILE" "/work/container_logs/${CASE}.commonlog_env.txt" 2>/dev/null || true
           plist spi_science_analysis > "/work/container_logs/${CASE}.plist_after.txt" 2>&1 || true
-          find /tmp/acirm_work -maxdepth 3 -type f -printf "%p %s\n" > "/work/container_logs/${CASE}.tmp_work_files.txt" 2>/dev/null || true
+          find /tmp/acirm_work -maxdepth 4 -type f -printf "%p %s\n" > "/work/container_logs/${CASE}.tmp_work_files.txt" 2>/dev/null || true
 
           echo "ACIRM_SPI_PROCESS_ENDED ${CASE} returncode=${RC}"
           echo "PRODUCTS_AFTER_${CASE}"
@@ -475,7 +570,7 @@ jobs:
 
           find /work -maxdepth 10 -type f -printf "%p %s\n" | sort > /work/container_logs/work_files_after_spi.txt
 
-          echo "R2M_FAST_CONTAINER_END"
+          echo "R2N_FAST_CONTAINER_END"
           BASH
 
             docker run --rm \
@@ -484,14 +579,14 @@ jobs:
               -v "$PWD/$OUT/data:/data" \
               -v "$PWD/$OUT/work:/work" \
               integralsw/osa:latest \
-              bash /work/run_spi_r2m_fast.sh \
-              > "$OUT/logs/host_container_r2m_fast.log" 2>&1 || true
+              bash /work/run_spi_r2n_fast.sh \
+              > "$OUT/logs/host_container_r2n_fast.log" 2>&1 || true
 
             sudo chown -R "$(id -u):$(id -g)" "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 2>/dev/null || true
             chmod -R u+rwX,go+rX "$OUT" "$LIGHT" ACIRM_CACHE_R3P_R1 2>/dev/null || true
           fi
 
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/main_execution.log
+          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/main_execution.log
           import csv
           import hashlib
           import json
@@ -499,17 +594,17 @@ jobs:
           import time
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY"
+          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
           LOGS = OUT / "logs"
           CL = WORK / "container_logs"
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS")
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS")
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
-          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS.zip"
+          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS.zip"
 
           LIGHT.mkdir(parents=True, exist_ok=True)
           (LIGHT / "logs").mkdir(parents=True, exist_ok=True)
@@ -582,13 +677,16 @@ jobs:
           write_csv(LIGHT / "work_files.csv", work_rows, ["path", "bytes"])
           write_csv(LIGHT / "cache_files.csv", cache_rows, ["path", "bytes"])
 
-          status = parse_status(CL / "R2M_FAST_XVFB_BATCH_LINE_508_514.status.txt")
+          status = parse_status(CL / "R2N_FAST_IC_LINE_508_514.status.txt")
 
-          host_log = safe_text(LOGS / "host_container_r2m_fast.log", limit=800000)
-          case_log = safe_text(CL / "R2M_FAST_XVFB_BATCH_LINE_508_514.log", limit=800000)
-          common_log = safe_text(CL / "R2M_FAST_XVFB_BATCH_LINE_508_514.commonlog.txt", limit=800000)
-          display_check = safe_text(CL / "xvfb_display_check.txt", limit=120000)
-          joined = host_log + "\n" + case_log + "\n" + common_log + "\n" + display_check
+          host_log = safe_text(LOGS / "host_container_r2n_fast.log", limit=800000)
+          case_log = safe_text(CL / "R2N_FAST_IC_LINE_508_514.log", limit=800000)
+          common_log = safe_text(CL / "R2N_FAST_IC_LINE_508_514.commonlog.txt", limit=800000)
+          ic_search = safe_text(CL / "ic_master_search.txt", limit=400000)
+          ic_candidates = safe_text(CL / "ic_master_candidates.txt", limit=200000)
+          ic_selection = safe_text(CL / "ic_selection.env", limit=100000)
+          selected_rep = safe_text(CL / "selected_rep_base_prod.txt", limit=100000)
+          joined = host_log + "\n" + case_log + "\n" + common_log + "\n" + ic_search + "\n" + ic_candidates + "\n" + ic_selection + "\n" + selected_rep
 
           def intval(x):
               try:
@@ -602,6 +700,17 @@ jobs:
 
           line_metric = any((str(r["path"]).endswith(".fits") or str(r["path"]).endswith(".fits.gz")) and int(r.get("bytes") or 0) > 1024 for r in line_rows)
 
+          ic_master_found = "IC_MASTER_FOUND=True" in ic_selection
+          line_retry_attempted = status.get("line_retry_attempted", "") == "True"
+
+          best_root = ""
+          best_ic = ""
+          for line in ic_selection.splitlines():
+              if line.startswith("BEST_ROOT="):
+                  best_root = line.split("=", 1)[1].strip()
+              if line.startswith("BEST_IC="):
+                  best_ic = line.split("=", 1)[1].strip()
+
           checks = {
               "ready_flag_exists": READY_FLAG.exists(),
               "cache_file_count": len(cache_rows),
@@ -609,9 +718,13 @@ jobs:
               "work_file_count": len(work_rows),
               "og_created": og_created,
               "og_spi_path": og_path,
-              "actual_spi_started": bool(status.get("started_utc")) or "ACIRM_SPI_PROCESS_STARTED R2M_FAST_XVFB_BATCH_LINE_508_514" in joined,
-              "batch_flag_used": status.get("batch_flag_used", "") == "True" or "BATCH_FLAG_USED=-b" in joined,
-              "xvfb_used": status.get("xvfb_used", "") == "True" or "name of display" in display_check.lower(),
+              "ic_master_found": ic_master_found,
+              "best_rep_base_prod": best_root,
+              "best_ic_master": best_ic,
+              "line_retry_attempted": line_retry_attempted,
+              "actual_spi_started": bool(status.get("started_utc")) or "ACIRM_SPI_PROCESS_STARTED R2N_FAST_IC_LINE_508_514" in joined,
+              "batch_flag_used": status.get("batch_flag_used", "") == "True",
+              "xvfb_used": status.get("xvfb_used", "") == "True",
               "line_508_514_seen": "spibounds_regions=508,514" in joined,
               "sidebands_skipped": True,
               "line_product_count": len(line_rows),
@@ -625,6 +738,9 @@ jobs:
               "status3004_count": intval(status.get("status3004_count", 0)),
               "status3023_count": intval(status.get("status3023_count", 0)),
               "status35603_count": intval(status.get("status35603_count", 0)),
+              "status250002_count": intval(status.get("status250002_count", 0)) + joined.count("status -250002"),
+              "cal_not_found_count": intval(status.get("cal_not_found_count", 0)) + joined.count("CAL_NOT_FOUND"),
+              "ic_master_message_count": intval(status.get("ic_master_message_count", 0)),
               "koverflow_count": intval(status.get("koverflow_count", 0)),
               "segfault_count": intval(status.get("segfault_count", 0)) + joined.count("segmentation violation"),
               "returncode": status.get("returncode", "")
@@ -639,39 +755,36 @@ jobs:
           product_hints = []
           for r in work_rows:
               p = str(r.get("path", ""))
-              if "og_spi.fits" in p or "products_line" in p or p.endswith(".fits") or p.endswith(".fits.gz"):
+              if "og_spi.fits" in p or "products_line" in p or "ic_master_file.fits" in p or p.endswith(".fits") or p.endswith(".fits.gz"):
                   product_hints.append({"path": p, "bytes": r.get("bytes", ""), "category": "hint"})
           write_csv(LIGHT / "product_hints.csv", product_hints, ["path", "bytes", "category"])
 
           if line_metric:
-              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_PRODUCTS_PRESENT_REVIEW_NOT_FINAL_PROOF"
+              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_LINE_PRODUCTS_PRESENT_REVIEW_NOT_FINAL_PROOF"
               scientific_status = "PRODUCTS_PRESENT_REVIEW_REQUIRED_NOT_DISCOVERY"
           elif not checks["ready_flag_exists"]:
-              final_status = "R21AX_R7G_R3P_R2M_FAST_CACHE_MISS_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2N_FAST_CACHE_MISS_NO_SPI_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif not og_created:
-              final_status = "R21AX_R7G_R3P_R2M_FAST_NO_REAL_OG_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2N_FAST_NO_REAL_OG_SPI_NOT_RUN_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
-          elif checks["status3023_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2M_FAST_BATCH_FLAG_OR_PARAMS_REJECTED_STATUS3023_NO_511_NO_PHYSICAL_NULL"
+          elif not ic_master_found:
+              final_status = "R21AX_R7G_R3P_R2N_FAST_NO_IC_MASTER_FOUND_LINE_RETRY_SKIPPED_NO_511_NO_PHYSICAL_NULL"
+              scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
+          elif checks["cal_not_found_count"] > 0 or checks["status250002_count"] > 0:
+              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_MASTER_FOUND_BUT_CALIBRATION_STILL_NOT_RESOLVED_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif checks["segfault_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_SEGFAULT_NO_511_NO_PHYSICAL_NULL"
-              scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
-          elif checks["gui_attempt_count"] > 0 and str(checks["returncode"]) == "124":
-              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_GUI_ENTRY_TIMEOUT_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_LINE_SEGFAULT_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif str(checks["returncode"]) == "124":
-              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_TIMEOUT_NO_GUI_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_LINE_TIMEOUT_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           elif checks["status35603_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2M_FAST_STATUS35603_NO_511_NO_PHYSICAL_NULL"
-              scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
-          elif checks["koverflow_count"] > 0:
-              final_status = "R21AX_R7G_R3P_R2M_FAST_KOVERFLOW_NO_511_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2N_FAST_STATUS35603_NO_511_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
           else:
-              final_status = "R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_EXECUTED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
+              final_status = "R21AX_R7G_R3P_R2N_FAST_IC_LOCATOR_COMPLETED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
               scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
 
           summary = {
@@ -680,13 +793,13 @@ jobs:
               "final_status": final_status,
               "scientific_status": scientific_status,
               "checks": checks,
-              "runtime_design": "FAST_LINE_ONLY_XVFB_BATCH_FLAG_MINUS_B_TIMEOUT_900_SECONDS_NO_SIDEBANDS",
+              "runtime_design": "FAST_IC_MASTER_LOCATOR_OPTIONAL_LINE_ONLY_RETRY_MINUS_B_XVFB_TIMEOUT_900_NO_SIDEBANDS",
               "claim_ceiling": "NOT_DISCOVERY_NOT_FINAL_PROOF_NOT_OSA_PROOF_UNLESS_ACTUAL_511_LINE_METRIC_IS_READ_FROM_OSA_PRODUCTS"
           }
 
           (LIGHT / "SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
           (LIGHT / "CLAIM_BOUNDARY.txt").write_text(
-              "This fast run tests spi_science_analysis -b with Xvfb DISPLAY=:99 on the 508-514 keV line only.\n"
+              "This fast run locates IC master calibration context and only retries 508-514 keV line if IC master is found.\n"
               "Sidebands are intentionally skipped.\n"
               "Do not claim 511 detection/proof/discovery unless a valid OSA product metric is read.\n",
               encoding="utf-8"
@@ -700,21 +813,21 @@ jobs:
           if Path(ZIP_NAME).exists():
               sha = sha256_file(ZIP_NAME)
               Path(ZIP_NAME + ".sha256.txt").write_text(sha + "  " + ZIP_NAME + "\n", encoding="utf-8")
-              print("R2M_FAST_ZIP_SHA256", sha)
+              print("R2N_FAST_ZIP_SHA256", sha)
 
           print(json.dumps(summary, indent=2))
           PY
 
-      - name: Upload R2M fast artifact always
+      - name: Upload R2N fast artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3P_R2M_FAST_XVFB_BATCH_LINE_ONLY_LIGHT_RESULTS.zip.sha256.txt
-            ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/main_execution.log
-            ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/host_prepare.log
-            ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/xvfb.log
-            ACIRM_R21AX_R7G_R3P_R2M_FAST_RESULTS/logs/host_container_r2m_fast.log
+            ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3P_R2N_FAST_IC_MASTER_LOCATOR_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/main_execution.log
+            ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/host_prepare.log
+            ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/xvfb.log
+            ACIRM_R21AX_R7G_R3P_R2N_FAST_RESULTS/logs/host_container_r2n_fast.log
           if-no-files-found: warn
