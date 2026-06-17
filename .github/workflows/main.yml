@@ -1,4 +1,4 @@
-name: ACIRM R3P R1 cache permissions fixed SPI511
+name: ACIRM R3P R2 cache restore prompt killed SPI511
 
 on:
   workflow_dispatch:
@@ -7,20 +7,19 @@ on:
       - main
 
 jobs:
-  acirm-r3p-r1-cache-permissions-fixed-spi511:
+  acirm-r3p-r2-cache-restore-prompt-killed-spi511:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
     steps:
-      - name: Prepare R3P R1 folders
+      - name: Prepare R3P R2 folders
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3P_R1_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3P_R1_RESULTS/data
-          mkdir -p ACIRM_R21AX_R7G_R3P_R1_RESULTS/work
-          mkdir -p ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS
-          mkdir -p ACIRM_CACHE_R3P_R1
-          echo "R3P_R1_PREPARED"
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2_RESULTS/logs
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2_RESULTS/data
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2_RESULTS/work
+          mkdir -p ACIRM_R21AX_R7G_R3P_R2_LIGHT_RESULTS
+          echo "R3P_R2_PREPARED"
 
       - name: Restore R3P R1 cache
         id: r3p-r1-cache-restore
@@ -38,18 +37,17 @@ jobs:
             echo "cache_hit=${{ steps.r3p-r1-cache-restore.outputs.cache-hit }}"
             docker --version || true
             docker pull integralsw/osa:latest || true
-          } | tee ACIRM_R21AX_R7G_R3P_R1_RESULTS/logs/docker_status.log
+          } | tee ACIRM_R21AX_R7G_R3P_R2_RESULTS/logs/docker_status.log
           exit 0
 
-      - name: R3P R1 build restore cache then run SPI511
+      - name: R3P R2 restore cache and run prompt-killed SPI511
         continue-on-error: true
         run: |
           set +e
-          echo "R3P_R1 main started" | tee ACIRM_R21AX_R7G_R3P_R1_RESULTS/logs/main_execution.log
+          echo "R3P_R2 main started" | tee ACIRM_R21AX_R7G_R3P_R2_RESULTS/logs/main_execution.log
 
-          python3 -u <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R1_RESULTS/logs/main_execution.log
+          python3 -u <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2_RESULTS/logs/main_execution.log
           import csv
-          import gzip
           import hashlib
           import json
           import os
@@ -60,35 +58,27 @@ jobs:
           import traceback
           from pathlib import Path
 
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R1_CACHE_PERMISSIONS_FIXED_SPI511"
+          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2_CACHE_RESTORE_PROMPT_KILLED_SPI511"
 
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R1_RESULTS")
+          OUT = Path("ACIRM_R21AX_R7G_R3P_R2_RESULTS")
           DATA = OUT / "data"
           WORK = OUT / "work"
           LOGS = OUT / "logs"
+          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2_LIGHT_RESULTS")
+
           CACHE = Path("ACIRM_CACHE_R3P_R1")
           CACHE_DATA = CACHE / "data"
           CACHE_WORK = CACHE / "work"
           READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
 
-          for p in [OUT, DATA, WORK, LOGS, CACHE, CACHE_DATA, CACHE_WORK]:
-              p.mkdir(parents=True, exist_ok=True)
+          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2_LIGHT_RESULTS.zip"
 
           REV = "2504"
           SCW = "250400090010"
-          BASES = [
-              "https://heasarc.gsfc.nasa.gov/FTP/integral/data",
-              "http://heasarc.gsfc.nasa.gov/FTP/integral/data",
-          ]
 
-          SCW_DIR = DATA / "scw" / REV / (SCW + ".001")
-          AUX_DIR = DATA / "aux" / "adp" / (REV + ".001")
-          SCW_DIR.mkdir(parents=True, exist_ok=True)
-          AUX_DIR.mkdir(parents=True, exist_ok=True)
+          for p in [OUT, DATA, WORK, LOGS, LIGHT]:
+              p.mkdir(parents=True, exist_ok=True)
 
-          download_rows = []
-          dal_rows = []
-          missing_rows = []
           command_rows = []
 
           def now_utc():
@@ -106,7 +96,7 @@ jobs:
           def fix_permissions():
               uid = str(os.getuid())
               gid = str(os.getgid())
-              for p in [OUT, CACHE]:
+              for p in [OUT, LIGHT, CACHE]:
                   if p.exists():
                       run_host(["sudo", "chown", "-R", uid + ":" + gid, str(p)], timeout=300)
                       run_host(["chmod", "-R", "u+rwX,go+rX", str(p)], timeout=300)
@@ -118,246 +108,83 @@ jobs:
                       h.update(chunk)
               return h.hexdigest()
 
-          def safe_sha(path):
-              p = Path(path)
-              try:
-                  if p.exists() and p.is_file() and p.stat().st_size <= 50 * 1024 * 1024:
-                      return sha256_file(p)
-                  if p.exists() and p.is_file():
-                      return "SKIPPED_LARGE_FILE"
-              except Exception:
-                  return ""
-              return ""
-
-          def is_gzip(path):
-              try:
-                  with open(path, "rb") as f:
-                      return f.read(2) == b"\x1f\x8b"
-              except Exception:
-                  return False
-
-          def is_fits(path):
-              try:
-                  with open(path, "rb") as f:
-                      head = f.read(16)
-                  return head.startswith(b"SIMPLE") or head.startswith(b"XTENSION")
-              except Exception:
-                  return False
-
-          def accept(path):
+          def safe_read(path, limit=200000):
               p = Path(path)
               if not p.exists():
-                  return False, "missing"
-              if p.stat().st_size <= 1024:
-                  return False, "too_small_" + str(p.stat().st_size)
-              if is_gzip(p):
-                  return True, "gzip"
-              if is_fits(p):
-                  return True, "fits"
-              return False, "not_fits_or_gzip"
-
-          def norm_name(x):
-              return Path(str(x).strip().split("[")[0].strip()).name
-
-          def final_path_for(logical):
-              logical = str(logical).split("[")[0].strip()
-              if logical.startswith("/data/"):
-                  return DATA / logical[len("/data/"):]
-              if logical.startswith("data/"):
-                  return DATA / logical[len("data/"):]
-              return SCW_DIR / norm_name(logical)
-
-          def urls_for(logical):
-              logical = str(logical).split("[")[0].strip()
-              out = []
-
-              if logical.startswith("/data/"):
-                  rel = logical[len("/data/"):]
-                  for base in BASES:
-                      out.append(base + "/" + rel)
-                      if rel.endswith(".fits") and not rel.endswith(".fits.gz"):
-                          out.append(base + "/" + rel + ".gz")
-                  return out
-
-              name = norm_name(logical)
-              roots = [
-                  "scw/" + REV + "/" + SCW + ".001",
-                  "aux/adp/" + REV + ".001",
-                  "aux/adp",
-                  "aux",
-                  "idx",
-                  "cat",
-                  "ic",
-              ]
-
-              for base in BASES:
-                  for root in roots:
-                      out.append(base + "/" + root + "/" + name)
-                      if name.endswith(".fits") and not name.endswith(".fits.gz"):
-                          out.append(base + "/" + root + "/" + name + ".gz")
-              return out
-
-          def materialize(tmp, final_path):
-              tmp = Path(tmp)
-              final_path = Path(final_path)
-              final_path.parent.mkdir(parents=True, exist_ok=True)
-
-              if is_gzip(tmp):
-                  with gzip.open(tmp, "rb") as src, open(final_path, "wb") as dst:
-                      shutil.copyfileobj(src, dst)
-                  tmp.unlink(missing_ok=True)
-              else:
-                  if final_path.exists():
-                      final_path.unlink()
-                  tmp.rename(final_path)
-
-          def download_logical(logical, category, iteration):
-              final_path = final_path_for(logical)
-
-              if final_path.exists() and final_path.stat().st_size > 1024:
-                  download_rows.append({
-                      "iteration": iteration,
-                      "category": category,
-                      "logical_path": str(logical),
-                      "final_path": str(final_path),
-                      "url": "already_exists",
-                      "attempt": 0,
-                      "returncode": 0,
-                      "ok": True,
-                      "reason": "already_exists",
-                      "bytes": final_path.stat().st_size,
-                      "sha256": safe_sha(final_path),
-                      "log_tail": "",
-                  })
-                  return True
-
-              for i, url in enumerate(urls_for(logical), start=1):
-                  tmp = final_path.parent / (".download_" + final_path.name + "_" + str(i) + ".part")
-                  if tmp.exists():
-                      tmp.unlink()
-
-                  row = {
-                      "iteration": iteration,
-                      "category": category,
-                      "logical_path": str(logical),
-                      "final_path": str(final_path),
-                      "url": url,
-                      "attempt": i,
-                      "returncode": "",
-                      "ok": False,
-                      "reason": "",
-                      "bytes": 0,
-                      "sha256": "",
-                      "log_tail": "",
-                  }
-
-                  try:
-                      cmd = [
-                          "curl", "-4", "-L",
-                          "--retry", "5",
-                          "--retry-delay", "8",
-                          "--connect-timeout", "60",
-                          "--max-time", "900",
-                          "--fail",
-                          "-o", str(tmp),
-                          url,
-                      ]
-                      p = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-                      ok, reason = accept(tmp)
-                      row["returncode"] = p.returncode
-                      row["reason"] = reason
-                      row["log_tail"] = p.stdout[-3000:]
-
-                      if ok:
-                          materialize(tmp, final_path)
-                          row["ok"] = True
-                          row["bytes"] = final_path.stat().st_size
-                          row["sha256"] = safe_sha(final_path)
-                          download_rows.append(row)
-                          return True
-                  except Exception as e:
-                      row["reason"] = repr(e)
-
-                  download_rows.append(row)
-
-              return False
-
-          def seed_known_files():
-              scw_files = [
-                  "swg.fits",
-                  "sc_time.fits",
-                  "sc_attitude.fits",
-                  "sc_gti.fits",
-                  "sc_hk.fits",
-                  "sc_modes.fits",
-                  "sc_orbit_param.fits",
-                  "spi_oper.fits",
-                  "spi_spectra.fits",
-                  "spi_gti.fits",
-                  "spi_hk.fits",
-                  "spi_science_hk.fits",
-                  "spi_science_param.fits",
-                  "spi_acs.fits",
-                  "spi_block.fits",
-                  "ibis_hk.fits",
-                  "ibis_raw_shadow.fits",
-                  "ibis_dead.fits",
-                  "jmx1_hk.fits",
-                  "jmx2_hk.fits",
-                  "jemx1_hk.fits",
-                  "jemx2_hk.fits",
-                  "picsit_hk.fits",
-                  "isgri_hk.fits",
-              ]
-
-              aux_files = [
-                  "orbit_historic.fits",
-                  "orbit_predicted.fits",
-                  "attitude_historic.fits",
-                  "attitude_predicted_01.fits",
-                  "attitude_predicted.fits",
-                  "time_correlation.fits",
-                  "pointing_definition_predicted_0001.fits",
-                  "pointing_definition_predicted.fits",
-                  "pointing_definition_historic.fits",
-                  "pointing_definition_predicted_0000.fits",
-                  "pointing_definition_predicted_0002.fits",
-                  "observation_log.fits",
-                  "moc_out_of_limits.fits",
-                  "slew_definition.fits",
-              ]
-
-              for x in scw_files:
-                  download_logical("/data/scw/" + REV + "/" + SCW + ".001/" + x, "seed_scw", 0)
-
-              for x in aux_files:
-                  download_logical("/data/aux/adp/" + REV + ".001/" + x, "seed_aux_adp", 0)
-
-          def parse_swg_refs():
-              refs = []
-              swg = SCW_DIR / "swg.fits"
-              if not swg.exists():
-                  return refs
-
+                  return ""
               try:
-                  text = swg.read_bytes().decode("latin1", "ignore")
-                  found = re.findall(r"([A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)", text)
-                  for ref in sorted(set(found)):
-                      name = norm_name(ref)
-                      if name and name != "swg.fits":
-                          refs.append("/data/scw/" + REV + "/" + SCW + ".001/" + name)
+                  data = p.read_bytes()
+                  if len(data) > limit:
+                      data = data[-limit:]
+                  return data.decode("utf-8", "replace")
               except Exception:
-                  pass
+                  return ""
 
-              return refs
+          def write_csv(path, rows, fieldnames):
+              path = Path(path)
+              path.parent.mkdir(parents=True, exist_ok=True)
+              with open(path, "w", newline="", encoding="utf-8") as f:
+                  w = csv.DictWriter(f, fieldnames=fieldnames)
+                  w.writeheader()
+                  for r in rows:
+                      w.writerow({k: r.get(k, "") for k in fieldnames})
+
+          def file_rows(root):
+              rows = []
+              root = Path(root)
+              if not root.exists():
+                  return rows
+              for p in sorted(root.rglob("*")):
+                  if p.is_file():
+                      try:
+                          rows.append({
+                              "path": str(p),
+                              "bytes": p.stat().st_size,
+                          })
+                      except Exception:
+                          rows.append({
+                              "path": str(p),
+                              "bytes": "",
+                          })
+              return rows
+
+          def copy_cache_to_results():
+              if CACHE_DATA.exists():
+                  shutil.copytree(CACHE_DATA, DATA, dirs_exist_ok=True)
+              if CACHE_WORK.exists():
+                  shutil.copytree(CACHE_WORK, WORK, dirs_exist_ok=True)
+
+          def build_cache_miss_artifact():
+              summary = {
+                  "run_id": RUN_ID,
+                  "created_utc": now_utc(),
+                  "final_status": "R21AX_R7G_R3P_R2_CACHE_MISS_NO_RERUN_NO_511_NO_PHYSICAL_NULL",
+                  "claim_ceiling": "NO_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL",
+                  "checks": {
+                      "r3p_r1_cache_hit": False,
+                      "ready_flag_exists": READY_FLAG.exists(),
+                      "cache_data_exists": CACHE_DATA.exists(),
+                      "cache_work_exists": CACHE_WORK.exists(),
+                      "og_created": False,
+                      "actual_spi_started": False,
+                      "line_508_514_seen": False,
+                      "sidebands_seen": False,
+                      "line_metric_exists": False,
+                      "sideband_metric_exists": False,
+                  }
+              }
+              (LIGHT / "R3P_R2_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+              (LIGHT / "R3P_R2_CLAIM_BOUNDARY.txt").write_text(
+                  "CACHE MISS ONLY. NO SPI. NO 511 METRIC. NO OSA PROOF. NOT DISCOVERY. NO PHYSICAL NULL.\n",
+                  encoding="utf-8",
+              )
 
           def run_container(script, name, timeout_seconds):
               log_path = LOGS / ("host_container_" + name + ".log")
-
               cmd = [
                   "docker", "run", "--rm",
-                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3P_R1_RESULTS/data:/data",
-                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3P_R1_RESULTS/work:/work",
+                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3P_R2_RESULTS/data:/data",
+                  "-v", os.getcwd() + "/ACIRM_R21AX_R7G_R3P_R2_RESULTS/work:/work",
                   "integralsw/osa:latest",
                   "bash", "-lc", script,
               ]
@@ -383,19 +210,23 @@ jobs:
                   rc = 999
 
               fix_permissions()
+
+              if len(txt.encode("utf-8", "replace")) > 1500000:
+                  txt = txt[:500000] + "\nACIRM_LOG_TRUNCATED_MIDDLE\n" + txt[-500000:]
+
               log_path.write_text(txt, encoding="utf-8", errors="replace")
 
               command_rows.append({
                   "name": name,
                   "returncode": rc,
                   "log_path": str(log_path),
-                  "log_bytes": len(txt.encode("utf-8", "replace")),
+                  "log_bytes": log_path.stat().st_size if log_path.exists() else 0,
               })
 
               return rc, txt
 
           def env_prefix():
-              return '''
+              return r'''
                 set +e
                 unset DISPLAY
                 export DISPLAY=
@@ -403,7 +234,9 @@ jobs:
                 export PIL_NO_GUI=1
                 export PIL_NOTTY=1
 
-                mkdir -p /tmp/acirm_pfiles /tmp/acirm_work /tmp/acirm_rep /work/og /work/products_line /work/products_sidebands /work/container_logs
+                mkdir -p /tmp/acirm_pfiles /tmp/acirm_work /tmp/acirm_rep
+                mkdir -p /work/og /work/products_line /work/products_sidebands /work/container_logs
+
                 cp -f /opt/osa/pfiles/*.par /tmp/acirm_pfiles/ 2>/dev/null || true
 
                 if [ -f /tmp/acirm_pfiles/spi_science_analysis.par ]; then
@@ -434,448 +267,447 @@ jobs:
                 export PATH=/opt/osa/bin:$PATH
               '''
 
-          def parse_missing(txt):
-              if "DAL_FILE_NOT_ACCESSIBLE" not in txt and "status -2004" not in txt and "not accessible" not in txt.lower():
-                  return []
-
-              found = set()
-              patterns = [
-                  r"(/data/[A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)",
-                  r"([A-Za-z0-9_./+-]+\.fits(?:\.gz)?(?:\[[^\]]+\])?)",
-              ]
-
-              for pat in patterns:
-                  for m in re.findall(pat, txt):
-                      clean = str(m).split("[")[0].strip()
-                      if clean.endswith(".fits") or clean.endswith(".fits.gz"):
-                          found.add(clean)
-
-              out = []
-              for m in sorted(found):
-                  if m.startswith("/data/"):
-                      out.append(m)
-                  else:
-                      name = norm_name(m)
-                      aux_names = [
-                          "observation_log.fits",
-                          "moc_out_of_limits.fits",
-                          "time_correlation.fits",
-                          "slew_definition.fits",
-                      ]
-                      if name.startswith("orbit") or "attitude" in name or "pointing" in name or name in aux_names:
-                          out.append("/data/aux/adp/" + REV + ".001/" + name)
-                      else:
-                          out.append("/data/scw/" + REV + "/" + SCW + ".001/" + name)
-
-              return sorted(set(out))
-
-          def run_dal_verify(iteration):
-              script = env_prefix() + '''
-                TARGET=/data/scw/2504/250400090010.001/swg.fits
-                echo "R3P_R1_DAL_ITERATION=''' + str(iteration) + '''"
-                echo "local_file_count=$(find /data -type f | wc -l)"
-                timeout 600 dal_verify "$TARGET" 2>&1 || true
-                echo "commonlog_tail"
-                cat /tmp/acirm_work/commonlog.txt 2>/dev/null | tail -700 || true
-              '''
-              rc, txt = run_container(script, "dal_verify_iteration_" + str(iteration).zfill(2), 720)
-              return txt
-
-          def create_og():
-              script = env_prefix() + '''
-                TARGET=/data/scw/2504/250400090010.001/swg.fits
-                echo "R3P_R1_CREATE_OG_NO_MODE_PARAMETER"
-                timeout 900 og_create idxSwg="$TARGET" ogid=ACIRM_R3P_R1 baseDir=/work/og instrument=SPI 2>&1 | tee /work/container_logs/container_og_create_r3p_r1.log || true
-                find /work/og -maxdepth 8 -type f -printf "%p %s\\n" | sort | tee /work/container_logs/container_og_files_after_create.txt || true
-              '''
-              rc, txt = run_container(script, "og_create", 1000)
-              return txt
-
-          def command_discovery():
-              script = env_prefix() + '''
-                echo "R3P_R1_COMMAND_DISCOVERY"
-                for c in dal_verify og_create spi_science_analysis fdump fstruct ftlist plist pset punlearn; do
-                  echo "COMMAND $c"
-                  command -v "$c" || true
-                done
-                echo "spi_science_analysis.par"
-                cat /tmp/acirm_pfiles/spi_science_analysis.par 2>/dev/null || true
-                echo "og_create.par"
-                cat /tmp/acirm_pfiles/og_create.par 2>/dev/null || true
-              '''
-              rc, txt = run_container(script, "command_discovery", 240)
-              return txt
-
-          def spi511_run():
-              script = env_prefix() + '''
+          def prompt_killed_spi511():
+              script = env_prefix() + r'''
                 set +e
-                mkdir -p /work/products_line /work/products_sidebands /work/container_logs
 
-                OG_FILE=$(find /work/og -type f -name "og_spi.fits" | sort | head -1)
-                if [ -z "$OG_FILE" ]; then OG_FILE=$(find /work/og -type f -iname "*og*.fits" | sort | head -1); fi
+                echo "R3P_R2_PROMPT_KILLED_SPI511_START"
+                echo "data_file_count=$(find /data -type f | wc -l)"
+                echo "work_file_count_before=$(find /work -type f | wc -l)"
+
+                OG_FILE=$(find /work/og -type f -name "og_spi.fits" | head -1)
                 echo "OG_FILE=$OG_FILE"
+
+                if [ -z "$OG_FILE" ]; then
+                  echo "R3P_R2_NO_OG_FILE"
+                  exit 0
+                fi
 
                 PAR=/tmp/acirm_pfiles/spi_science_analysis.par
 
-                has_par() {
-                  grep -q -E "^ *$1[,) ]" "$PAR" 2>/dev/null
+                cat > /work/container_logs/spi_guarded.py <<'PYRUN'
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+case_name = sys.argv[1]
+params_file = Path(sys.argv[2])
+answers_file = Path(sys.argv[3])
+product_dir = Path(sys.argv[4])
+log_file = Path(sys.argv[5])
+status_file = Path(sys.argv[6])
+
+params = [line.rstrip("\n") for line in params_file.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+product_dir.mkdir(parents=True, exist_ok=True)
+log_file.parent.mkdir(parents=True, exist_ok=True)
+
+cmd = ["spi_science_analysis"] + params
+
+status = {
+    "case": case_name,
+    "cmd": cmd,
+    "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "returncode": None,
+    "killed_by_prompt_guard": False,
+    "timeout_guard_seconds": 3000,
+    "orbit_asini_prompt_count": 0,
+    "source_catalog_prompt_count": 0,
+    "ephemeris_prompt_count": 0,
+    "total_log_bytes_written": 0,
+}
+
+max_log_bytes = 900000
+start = time.time()
+
+with open(answers_file, "r", encoding="utf-8", errors="replace") as ans:
+    p = subprocess.Popen(
+        cmd,
+        cwd=str(product_dir),
+        stdin=ans,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        bufsize=1,
+    )
+
+    with open(log_file, "w", encoding="utf-8", errors="replace") as lf:
+        lf.write("ACIRM_SPI_GUARDED_CASE=" + case_name + "\n")
+        lf.write("ACIRM_SPI_GUARDED_CMD=" + " ".join(cmd) + "\n")
+        lf.flush()
+
+        while True:
+            if time.time() - start > status["timeout_guard_seconds"]:
+                status["killed_by_prompt_guard"] = True
+                lf.write("\nACIRM_SPI_GUARD_TIMEOUT_KILL\n")
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+                break
+
+            line = p.stdout.readline() if p.stdout is not None else ""
+            if line == "" and p.poll() is not None:
+                break
+
+            if not line:
+                time.sleep(0.1)
+                continue
+
+            if "Orbit asini parameter" in line:
+                status["orbit_asini_prompt_count"] += 1
+            if "Enter DOL for source catalog" in line:
+                status["source_catalog_prompt_count"] += 1
+            if "DOL of the ephemeris data" in line:
+                status["ephemeris_prompt_count"] += 1
+
+            if status["orbit_asini_prompt_count"] > 12:
+                status["killed_by_prompt_guard"] = True
+                lf.write("\nACIRM_SPI_GUARD_ORBIT_ASINI_PROMPT_LOOP_KILL\n")
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+                break
+
+            encoded_len = len(line.encode("utf-8", "replace"))
+            if status["total_log_bytes_written"] + encoded_len <= max_log_bytes:
+                lf.write(line)
+                status["total_log_bytes_written"] += encoded_len
+
+        try:
+            rc = p.wait(timeout=20)
+        except Exception:
+            rc = 999
+
+status["returncode"] = rc
+status["ended_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+status_file.write_text(json.dumps(status, indent=2), encoding="utf-8")
+print(json.dumps(status, indent=2))
+PYRUN
+
+                make_answers() {
+                  OUT="$1"
+                  rm -f "$OUT"
+                  # Accept defaults for catalog, coordinates, fluxes, ephemeris, phase options, orbit=no.
+                  for i in $(seq 1 11); do echo "" >> "$OUT"; done
+                  # Fill orbital values if OSA still asks despite run_phase_analysis=no.
+                  echo "0" >> "$OUT"
+                  echo "1" >> "$OUT"
+                  echo "0" >> "$OUT"
+                  echo "0" >> "$OUT"
+                  echo "0" >> "$OUT"
+                  echo "0" >> "$OUT"
+                  # Extra safe fallback answers to prevent blank prompt loops.
+                  for i in $(seq 1 300); do echo "0" >> "$OUT"; done
                 }
 
-                add_if_has() {
-                  local pname="$1"
-                  local pvalue="$2"
-                  if has_par "$pname"; then
-                    CMD+=("$pname=$pvalue")
-                    echo "ADD_PARAM $pname=$pvalue"
+                add_param() {
+                  NAME="$1"
+                  VALUE="$2"
+                  FILE="$3"
+                  if grep -q "^${NAME}," "$PAR" 2>/dev/null; then
+                    echo "${NAME}=${VALUE}" >> "$FILE"
+                    echo "ADD_PARAM ${NAME}=${VALUE}"
                   else
-                    echo "SKIP_PARAM $pname"
+                    echo "SKIP_PARAM ${NAME}"
                   fi
                 }
 
-                run_spi_cmd() {
-                  local workdir="$1"
-                  local logname="$2"
-                  local band_regions="$3"
-                  local band_nregions="$4"
-                  local band_nbins="$5"
+                run_case() {
+                  CASE="$1"
+                  NREG="$2"
+                  REGIONS="$3"
+                  NBINS="$4"
+                  PROD_DIR="$5"
 
-                  cd "$workdir" || return 0
-                  CMD=(spi_science_analysis)
+                  mkdir -p "$PROD_DIR"
+                  PARAMS="/work/container_logs/${CASE}.params.txt"
+                  ANSWERS="/work/container_logs/${CASE}.answers.txt"
+                  LOG="/work/container_logs/${CASE}.guarded.log"
+                  STATUS="/work/container_logs/${CASE}.status.json"
 
-                  add_if_has obs_group "$OG_FILE"
-                  add_if_has run_cat_extract no
-                  add_if_has run_pointing yes
-                  add_if_has run_binning yes
-                  add_if_has run_background no
-                  add_if_has run_spiros no
-                  add_if_has run_phase_analysis no
-                  add_if_has run_gaincorrection no
-                  add_if_has run_fullcheck no
-                  add_if_has use_pointing_filter no
-                  add_if_has run_simulation no
-                  add_if_has add_mock_source no
-                  add_if_has mock_source no
-                  add_if_has sim_source no
-                  add_if_has use_simulation no
-                  add_if_has spibounds_nregions "$band_nregions"
-                  add_if_has spibounds_regions "$band_regions"
-                  add_if_has spibounds_nbins "$band_nbins"
-                  add_if_has detectors 0-18
-                  add_if_has clobber yes
-                  add_if_has log_File "$logname.inner.log"
-                  add_if_has mode h
+                  rm -f "$PARAMS" "$ANSWERS" "$LOG" "$STATUS"
 
-                  echo "SPI_CMD_BEGIN $logname"
-                  printf '%q ' "${CMD[@]}"
-                  echo ""
-                  echo "SPI_CMD_END $logname"
+                  add_param "obs_group" "$OG_FILE" "$PARAMS"
 
-                  yes "" | timeout 900 "${CMD[@]}" 2>&1 | tee "/work/container_logs/$logname.blank.log" || true
+                  add_param "run_cat_extract" "no" "$PARAMS"
+                  add_param "run_pointing" "yes" "$PARAMS"
+                  add_param "run_binning" "yes" "$PARAMS"
+                  add_param "run_background" "no" "$PARAMS"
+                  add_param "run_spiros" "no" "$PARAMS"
+                  add_param "run_phase_analysis" "no" "$PARAMS"
+                  add_param "run_gaincorrection" "no" "$PARAMS"
+                  add_param "run_fullcheck" "no" "$PARAMS"
+                  add_param "use_pointing_filter" "no" "$PARAMS"
+                  add_param "run_simulation" "no" "$PARAMS"
 
-                  if grep -q -E "status -3004|Add a mock source|run_simulation|parameter.*query" "/work/container_logs/$logname.blank.log" 2>/dev/null; then
-                    yes no | timeout 420 "${CMD[@]}" 2>&1 | tee "/work/container_logs/$logname.no.log" || true
-                  fi
+                  add_param "catalog" "NONE" "$PARAMS"
+                  add_param "spiros_source-cat-dol" "source_cat.fits[1]" "$PARAMS"
+                  add_param "coordinates" "RADEC" "$PARAMS"
+                  add_param "cat_extract_fluxMin" "0.001" "$PARAMS"
+                  add_param "cat_extract_fluxMax" "1000" "$PARAMS"
+
+                  add_param "spibounds_nregions" "$NREG" "$PARAMS"
+                  add_param "spibounds_regions" "$REGIONS" "$PARAMS"
+                  add_param "spibounds_nbins" "$NBINS" "$PARAMS"
+                  add_param "detectors" "0-18" "$PARAMS"
+                  add_param "clobber" "yes" "$PARAMS"
+                  add_param "log_File" "${CASE}.inner.log" "$PARAMS"
+
+                  add_param "spi_phase_hist_ephemDOL" "ephemeris.fits" "$PARAMS"
+                  add_param "spi_phase_hist_phaseBinNum" "20" "$PARAMS"
+                  add_param "spi_phase_hist_phaseSameWidthBin" "yes" "$PARAMS"
+                  add_param "spi_phase_hist_phaseBounds" "0,1" "$PARAMS"
+                  add_param "spi_phase_hist_phaseSubtractOff" "no" "$PARAMS"
+                  add_param "spi_phase_hist_phaseOffNum" "0" "$PARAMS"
+                  add_param "spi_phase_hist_orbit" "no" "$PARAMS"
+                  add_param "spi_phase_hist_asini" "0" "$PARAMS"
+                  add_param "spi_phase_hist_porb" "1" "$PARAMS"
+                  add_param "spi_phase_hist_T90epoch" "0" "$PARAMS"
+                  add_param "spi_phase_hist_ecc" "0" "$PARAMS"
+                  add_param "spi_phase_hist_omega_d" "0" "$PARAMS"
+                  add_param "spi_phase_hist_pporb" "0" "$PARAMS"
+
+                  add_param "spiros_mode" "SPECTRA" "$PARAMS"
+                  add_param "spiros_energy-subset" "1" "$PARAMS"
+                  add_param "spiros_pointing-subset" "" "$PARAMS"
+                  add_param "spiros_detector-subset" "" "$PARAMS"
+                  add_param "spiros_background-method" "0" "$PARAMS"
+                  add_param "spiros_srclocbins" "FIRST" "$PARAMS"
+                  add_param "spiros_nofsources" "0" "$PARAMS"
+                  add_param "spiros_sigmathres" "999" "$PARAMS"
+                  add_param "spiros_iteration-output" "NO" "$PARAMS"
+                  add_param "spiros_optistat" "CHI2" "$PARAMS"
+                  add_param "spiros_source-timing-mode" "QUICKLOOK" "$PARAMS"
+                  add_param "spiros_source-timing-scale" "0" "$PARAMS"
+
+                  make_answers "$ANSWERS"
+
+                  echo "SPI_CMD_BEGIN ${CASE}"
+                  cat "$PARAMS"
+                  python3 /work/container_logs/spi_guarded.py "$CASE" "$PARAMS" "$ANSWERS" "$PROD_DIR" "$LOG" "$STATUS"
+                  echo "SPI_CMD_END ${CASE}"
+
+                  echo "PRODUCTS_AFTER_${CASE}"
+                  find "$PROD_DIR" -maxdepth 8 -type f -printf "%p %s\n" | sort || true
                 }
 
-                if [ -z "$OG_FILE" ]; then
-                  echo "NO_OG_FILE_FOR_SPI511"
-                else
-                  run_spi_cmd /work/products_line R3P_R1_LINE_508_514 508,514 1 1
-                  run_spi_cmd /work/products_sidebands R3P_R1_SIDEBANDS_490_500_508_514_522_532 490,500,508,514,522,532 3 1,1,1
-                fi
+                run_case "R3P_R2_LINE_508_514" "1" "508,514" "1" "/work/products_line"
+                run_case "R3P_R2_SIDEBANDS_490_500_508_514_522_532" "3" "490,500,508,514,522,532" "1,1,1" "/work/products_sidebands"
 
-                find /work -maxdepth 10 -type f -printf "%p %s\\n" | sort | tee /work/container_logs/work_files_after_spi511.txt || true
+                echo "WORK_FILES_AFTER_R3P_R2"
+                find /work -maxdepth 10 -type f -printf "%p %s\n" | sort > /work/container_logs/work_files_after_r3p_r2.txt
+                cat /work/container_logs/work_files_after_r3p_r2.txt
 
-                echo "R3P_R1_FITS_QUICKLOOK"
-                for f in $(find /work -type f -name "*.fits" | sort | head -200); do
-                  echo "### FITS_FILE $f"
-                  if command -v fstruct >/dev/null 2>&1; then timeout 45 fstruct "$f" 2>&1 | head -120 || true; fi
-                  if command -v ftlist >/dev/null 2>&1; then timeout 45 ftlist "$f" H 2>&1 | head -100 || true; fi
-                done | tee /work/container_logs/fits_quicklook.txt || true
+                echo "FITS_QUICKLOOK_R3P_R2"
+                {
+                  for f in $(find /work/products_line /work/products_sidebands -type f \( -name "*.fits" -o -name "*.fits.gz" \) 2>/dev/null | sort | head -80); do
+                    echo "### $f"
+                    fstruct "$f" 2>&1 | head -80 || true
+                  done
+                } > /work/container_logs/fits_quicklook_r3p_r2.txt
 
-                grep -R -n -E "508|511|514|490|500|522|532|PIL_BOGUS_CMDLINE|segmentation|Attempting to launch GUI|status|error|Error|ERROR|spi|spectrum|PHA|RMF|ARF|evts|det|mock|simulation|ADD_PARAM|SKIP_PARAM" /work/container_logs /work/products_line /work/products_sidebands 2>/dev/null | head -4000 | tee /work/container_logs/selected_hits.txt || true
+                echo "R3P_R2_PROMPT_KILLED_SPI511_END"
               '''
-              rc, txt = run_container(script, "spi511_line_sideband", 3100)
-              return txt
+              return run_container(script, "prompt_killed_spi511", 7600)
 
-          def copy_cache_to_results():
-              if CACHE_DATA.exists() and any(CACHE_DATA.rglob("*")):
-                  if DATA.exists():
-                      shutil.rmtree(DATA)
-                  shutil.copytree(CACHE_DATA, DATA)
-              if CACHE_WORK.exists() and any(CACHE_WORK.rglob("*")):
-                  if WORK.exists():
-                      shutil.rmtree(WORK)
-                  shutil.copytree(CACHE_WORK, WORK)
-              DATA.mkdir(parents=True, exist_ok=True)
-              WORK.mkdir(parents=True, exist_ok=True)
-              fix_permissions()
+          def build_light_artifact():
+              LIGHT.mkdir(parents=True, exist_ok=True)
+              (LIGHT / "logs").mkdir(parents=True, exist_ok=True)
 
-          def copy_results_to_cache():
-              fix_permissions()
-              if CACHE_DATA.exists():
-                  shutil.rmtree(CACHE_DATA)
-              if CACHE_WORK.exists():
-                  shutil.rmtree(CACHE_WORK)
-              shutil.copytree(DATA, CACHE_DATA)
-              shutil.copytree(WORK, CACHE_WORK)
-              READY_FLAG.write_text("ACIRM_R3P_R1_CACHE_READY\ncreated_utc=" + now_utc() + "\n", encoding="utf-8")
-              fix_permissions()
+              # Copy small host logs.
+              for p in sorted(LOGS.glob("*.log")):
+                  try:
+                      shutil.copy2(p, LIGHT / "logs" / p.name)
+                  except Exception:
+                      pass
 
-          def build_cache_if_needed():
-              if READY_FLAG.exists():
-                  copy_cache_to_results()
-                  return "CACHE_RESTORED_READY"
+              # Copy selected container logs only if small.
+              selected = [
+                  WORK / "container_logs" / "R3P_R2_LINE_508_514.guarded.log",
+                  WORK / "container_logs" / "R3P_R2_LINE_508_514.status.json",
+                  WORK / "container_logs" / "R3P_R2_LINE_508_514.params.txt",
+                  WORK / "container_logs" / "R3P_R2_LINE_508_514.answers.txt",
+                  WORK / "container_logs" / "R3P_R2_SIDEBANDS_490_500_508_514_522_532.guarded.log",
+                  WORK / "container_logs" / "R3P_R2_SIDEBANDS_490_500_508_514_522_532.status.json",
+                  WORK / "container_logs" / "R3P_R2_SIDEBANDS_490_500_508_514_522_532.params.txt",
+                  WORK / "container_logs" / "R3P_R2_SIDEBANDS_490_500_508_514_522_532.answers.txt",
+                  WORK / "container_logs" / "work_files_after_r3p_r2.txt",
+                  WORK / "container_logs" / "fits_quicklook_r3p_r2.txt",
+              ]
 
-              seed_known_files()
+              for p in selected:
+                  if p.exists() and p.is_file():
+                      dest = LIGHT / "logs" / p.name
+                      try:
+                          if p.stat().st_size <= 2000000:
+                              shutil.copy2(p, dest)
+                          else:
+                              txt = safe_read(p, limit=500000)
+                              dest.write_text(txt, encoding="utf-8", errors="replace")
+                      except Exception:
+                          pass
 
-              for ref in parse_swg_refs():
-                  ok = download_logical(ref, "swg_ref", 0)
-                  missing_rows.append({"iteration": 0, "missing_ref": ref, "download_ok": ok, "category": "swg_ref"})
+              data_rows = file_rows(DATA)
+              work_rows = file_rows(WORK)
+              product_line_rows = file_rows(WORK / "products_line")
+              product_sideband_rows = file_rows(WORK / "products_sidebands")
+              og_rows = [r for r in work_rows if "og_spi.fits" in r["path"] or "swg_spi.fits" in r["path"] or "swg_idx_spi.fits" in r["path"]]
 
-              status = "NOT_READY"
-              repeated = set()
+              write_csv(LIGHT / "r3p_r2_data_files.csv", data_rows, ["path", "bytes"])
+              write_csv(LIGHT / "r3p_r2_work_files.csv", work_rows, ["path", "bytes"])
+              write_csv(LIGHT / "r3p_r2_products_line.csv", product_line_rows, ["path", "bytes"])
+              write_csv(LIGHT / "r3p_r2_products_sidebands.csv", product_sideband_rows, ["path", "bytes"])
+              write_csv(LIGHT / "r3p_r2_og_files.csv", og_rows, ["path", "bytes"])
+              write_csv(LIGHT / "r3p_r2_commands.csv", command_rows, ["name", "returncode", "log_path", "log_bytes"])
 
-              for it in range(1, 15):
-                  txt = run_dal_verify(it)
-                  missing = parse_missing(txt)
-                  dal_missing = ("DAL_FILE_NOT_ACCESSIBLE" in txt) or ("status -2004" in txt)
+              line_log = safe_read(WORK / "container_logs" / "R3P_R2_LINE_508_514.guarded.log", limit=400000)
+              side_log = safe_read(WORK / "container_logs" / "R3P_R2_SIDEBANDS_490_500_508_514_522_532.guarded.log", limit=400000)
+              host_log = safe_read(LOGS / "host_container_prompt_killed_spi511.log", limit=500000)
 
-                  dal_rows.append({
-                      "iteration": it,
-                      "dal_file_not_accessible": dal_missing,
-                      "missing_count": len(missing),
-                      "missing_refs_joined": "|".join(missing),
-                  })
+              def read_status(name):
+                  p = WORK / "container_logs" / name
+                  if not p.exists():
+                      return {}
+                  try:
+                      return json.loads(p.read_text(encoding="utf-8", errors="replace"))
+                  except Exception:
+                      return {}
 
-                  if not dal_missing:
-                      status = "DAL_OK"
-                      break
+              line_status = read_status("R3P_R2_LINE_508_514.status.json")
+              side_status = read_status("R3P_R2_SIDEBANDS_490_500_508_514_522_532.status.json")
 
-                  if not missing:
-                      status = "DAL_MISSING_UNPARSEABLE"
-                      break
+              og_created = any("og_spi.fits" in r["path"] for r in work_rows)
+              actual_spi_started = ("SPI_CMD_BEGIN R3P_R2_LINE_508_514" in host_log) or ("ACIRM_SPI_GUARDED_CASE=R3P_R2_LINE_508_514" in line_log)
+              line_508_514_seen = ("spibounds_regions=508,514" in host_log) or ("spibounds_regions=508,514" in line_log)
+              sidebands_seen = ("spibounds_regions=490,500,508,514,522,532" in host_log) or ("spibounds_regions=490,500,508,514,522,532" in side_log)
 
-                  key = tuple(missing)
-                  if key in repeated:
-                      status = "REPEATED_MISSING_AFTER_DOWNLOAD"
-                      break
-                  repeated.add(key)
+              prompt_loop_seen = bool(line_status.get("killed_by_prompt_guard")) or bool(side_status.get("killed_by_prompt_guard"))
+              orbit_asini_prompt_count = int(line_status.get("orbit_asini_prompt_count", 0) or 0) + int(side_status.get("orbit_asini_prompt_count", 0) or 0)
 
-                  any_ok = False
-                  for ref in missing:
-                      ok = download_logical(ref, "dal_missing", it)
-                      any_ok = any_ok or ok
-                      missing_rows.append({"iteration": it, "missing_ref": ref, "download_ok": ok, "category": "dal_missing"})
+              line_product_count = len(product_line_rows)
+              sideband_product_count = len(product_sideband_rows)
 
-                  if not any_ok:
-                      status = "DAL_MISSING_DOWNLOAD_FAILED"
-                      break
+              line_metric_exists = any(
+                  (r["bytes"] and str(r["bytes"]) != "0" and (str(r["path"]).endswith(".fits") or str(r["path"]).endswith(".fits.gz")))
+                  for r in product_line_rows
+              )
+              sideband_metric_exists = any(
+                  (r["bytes"] and str(r["bytes"]) != "0" and (str(r["path"]).endswith(".fits") or str(r["path"]).endswith(".fits.gz")))
+                  for r in product_sideband_rows
+              )
 
-              if status == "DAL_OK":
-                  og_txt = create_og()
-                  og_exists = "og_spi.fits" in og_txt or any("og_spi.fits" in x["path"] for x in list_files(WORK))
-                  if og_exists:
-                      copy_results_to_cache()
-                      status = "DAL_OK_OG_CREATED_CACHE_READY"
-                  else:
-                      status = "DAL_OK_OG_NOT_CREATED"
-
-              return status
-
-          def write_csv(path, rows, fields):
-              with open(path, "w", newline="", encoding="utf-8") as f:
-                  w = csv.DictWriter(f, fieldnames=fields)
-                  w.writeheader()
-                  for r in rows:
-                      for k in fields:
-                          r.setdefault(k, "")
-                      w.writerow(r)
-
-          def list_files(root):
-              rows = []
-              root = Path(root)
-              if not root.exists():
-                  return rows
-              for p in sorted(root.rglob("*")):
-                  if p.is_file():
-                      rows.append({"path": str(p), "bytes": p.stat().st_size, "sha256": safe_sha(p)})
-              return rows
-
-          def main():
-              print("R3P_R1_STARTED", now_utc())
-
-              cache_status = build_cache_if_needed()
-              print("cache_status", cache_status)
-
-              discovery_txt = command_discovery()
-
-              work_files_pre = list_files(WORK)
-              og_ready = any("og_spi.fits" in x["path"] for x in work_files_pre)
-
-              actual_spi_started = False
-              spi_txt = ""
-
-              if og_ready:
-                  actual_spi_started = True
-                  spi_txt = spi511_run()
+              if line_metric_exists or sideband_metric_exists:
+                  final_status = "R21AX_R7G_R3P_R2_SPI511_PRODUCTS_PRESENT_REVIEW_PRODUCTS_NOT_FINAL_PROOF"
+              elif prompt_loop_seen:
+                  final_status = "R21AX_R7G_R3P_R2_SPI511_PROMPT_GUARD_TRIGGERED_NO_511_METRIC_NO_PHYSICAL_NULL"
+              elif actual_spi_started:
+                  final_status = "R21AX_R7G_R3P_R2_SPI511_EXECUTED_NO_READABLE_511_METRIC_NO_PHYSICAL_NULL"
               else:
-                  spi_txt = "SPI511_SKIPPED_NO_OG"
-
-              fix_permissions()
-
-              data_files = list_files(DATA)
-              work_files = list_files(WORK)
-              cache_files = list_files(CACHE)
-
-              joined = discovery_txt + "\n" + spi_txt
-
-              product_hints = []
-              for p in work_files:
-                  low = p["path"].lower()
-                  if any(k in low for k in ["spi", "spec", "spectrum", "pha", "rmf", "arf", "og", "energy", "511", "508", "514", "hist", "evts"]):
-                      product_hints.append(p)
+                  final_status = "R21AX_R7G_R3P_R2_SPI511_NOT_STARTED_NO_511_NO_PHYSICAL_NULL"
 
               checks = {
-                  "cache_status": cache_status,
-                  "ready_flag_exists": READY_FLAG.exists(),
-                  "og_created": any("og_spi.fits" in x["path"] for x in work_files),
+                  "r3p_r1_cache_ready_flag_exists": READY_FLAG.exists(),
+                  "data_file_count": len(data_rows),
+                  "work_file_count": len(work_rows),
+                  "og_created": og_created,
                   "actual_spi_started": actual_spi_started,
-                  "line_508_514_seen": ("508,514" in joined) or ("508" in joined and "514" in joined),
-                  "sidebands_seen": "490,500,508,514,522,532" in joined,
-                  "wrong_param_seen": "PIL_BOGUS_CMDLINE" in joined or "bogus parameter name" in joined,
-                  "gui_seen": "Attempting to launch GUI" in joined,
-                  "segfault_seen": "segmentation violation" in joined or "*** Break ***" in joined,
-                  "status_3004_seen": "status -3004" in joined,
-                  "status_3023_seen": "status -3023" in joined,
-                  "status_3003_seen": "status -3003" in joined,
-                  "data_file_count": len(data_files),
-                  "work_file_count": len(work_files),
-                  "cache_file_count": len(cache_files),
-                  "product_hint_count": len(product_hints),
+                  "line_508_514_seen": line_508_514_seen,
+                  "sidebands_seen": sidebands_seen,
+                  "line_product_count": line_product_count,
+                  "sideband_product_count": sideband_product_count,
+                  "line_metric_exists": line_metric_exists,
+                  "sideband_metric_exists": sideband_metric_exists,
+                  "prompt_loop_seen": prompt_loop_seen,
+                  "orbit_asini_prompt_count": orbit_asini_prompt_count,
+                  "line_returncode": line_status.get("returncode", ""),
+                  "sidebands_returncode": side_status.get("returncode", ""),
+                  "line_killed_by_prompt_guard": line_status.get("killed_by_prompt_guard", ""),
+                  "sidebands_killed_by_prompt_guard": side_status.get("killed_by_prompt_guard", ""),
               }
-
-              if checks["ready_flag_exists"] and checks["og_created"] and checks["actual_spi_started"] and checks["line_508_514_seen"]:
-                  final_status = "R21AX_R7G_R3P_R1_CACHE_OG_SPI511_LINE_EXECUTED_REVIEW_PRODUCTS_NOT_FINAL_PROOF"
-              elif checks["ready_flag_exists"] and checks["og_created"] and checks["actual_spi_started"]:
-                  final_status = "R21AX_R7G_R3P_R1_CACHE_OG_SPI_ATTEMPTED_REVIEW_LOGS_NO_PHYSICAL_NULL"
-              elif checks["ready_flag_exists"] and checks["og_created"]:
-                  final_status = "R21AX_R7G_R3P_R1_CACHE_OG_READY_SPI_NOT_STARTED_REVIEW_REQUIRED_NO_511_NO_PHYSICAL_NULL"
-              else:
-                  final_status = "R21AX_R7G_R3P_R1_CACHE_OR_OG_NOT_READY_NO_511_NO_PHYSICAL_NULL"
-
-              write_csv(OUT / "r3p_r1_download_manifest.csv", download_rows, ["iteration", "category", "logical_path", "final_path", "url", "attempt", "returncode", "ok", "reason", "bytes", "sha256", "log_tail"])
-              write_csv(OUT / "r3p_r1_dal_iterations.csv", dal_rows, ["iteration", "dal_file_not_accessible", "missing_count", "missing_refs_joined"])
-              write_csv(OUT / "r3p_r1_missing_resolution.csv", missing_rows, ["iteration", "missing_ref", "download_ok", "category"])
-              write_csv(OUT / "r3p_r1_commands.csv", command_rows, ["name", "returncode", "log_path", "log_bytes"])
-              write_csv(OUT / "r3p_r1_data_files.csv", data_files, ["path", "bytes", "sha256"])
-              write_csv(OUT / "r3p_r1_work_files.csv", work_files, ["path", "bytes", "sha256"])
-              write_csv(OUT / "r3p_r1_cache_files.csv", cache_files, ["path", "bytes", "sha256"])
-              write_csv(OUT / "r3p_r1_product_hints.csv", product_hints, ["path", "bytes", "sha256"])
-
-              with open(OUT / "r3p_r1_checks_flat.csv", "w", newline="", encoding="utf-8") as f:
-                  w = csv.DictWriter(f, fieldnames=["check", "value"])
-                  w.writeheader()
-                  for k, v in checks.items():
-                      w.writerow({"check": k, "value": v})
 
               summary = {
                   "run_id": RUN_ID,
                   "created_utc": now_utc(),
-                  "claim_ceiling": "CACHE_PERMISSIONS_FIXED_SPI511_LINE_SIDEBAND_EXECUTION_NOT_DISCOVERY_NOT_FINAL_PROOF",
-                  "scw": SCW,
                   "rev": REV,
-                  "cache_status": cache_status,
-                  "checks": checks,
+                  "scw": SCW,
                   "final_status": final_status,
+                  "claim_ceiling": "NOT_DISCOVERY_NOT_FINAL_PROOF_NOT_OSA_PROOF_UNLESS_ACTUAL_METRIC_IS_READ",
+                  "checks": checks,
               }
 
-              (OUT / "R3P_R1_CACHE_PERMISSIONS_FIXED_SPI511_SUMMARY.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
-              print(json.dumps(summary, indent=2, sort_keys=True))
-              fix_permissions()
+              (LIGHT / "R3P_R2_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+              (LIGHT / "R3P_R2_CLAIM_BOUNDARY.txt").write_text(
+                  "R3P_R2 tests OSA/SPI 511 execution only.\n"
+                  "Runtime, prompt, cache, OSA, or parameter failure is not a physical null.\n"
+                  "Do not claim discovery or proof unless a real line/sideband metric is read from OSA products.\n",
+                  encoding="utf-8",
+              )
+
+              flat_rows = [{"check": k, "value": v} for k, v in checks.items()]
+              write_csv(LIGHT / "r3p_r2_checks_flat.csv", flat_rows, ["check", "value"])
+
+              zip_path = Path(ZIP_NAME)
+              if zip_path.exists():
+                  zip_path.unlink()
+              run_host(["zip", "-r", ZIP_NAME, str(LIGHT)], timeout=600)
+              sha = sha256_file(zip_path)
+              Path(ZIP_NAME + ".sha256.txt").write_text(sha + "  " + ZIP_NAME + "\n", encoding="utf-8")
 
           try:
-              main()
+              print("R3P_R2_CACHE_READY_FLAG_EXISTS", READY_FLAG.exists())
+              print("R3P_R2_CACHE_DATA_EXISTS", CACHE_DATA.exists())
+              print("R3P_R2_CACHE_WORK_EXISTS", CACHE_WORK.exists())
+
+              if not READY_FLAG.exists() or not CACHE_DATA.exists() or not CACHE_WORK.exists():
+                  build_cache_miss_artifact()
+                  zip_path = Path(ZIP_NAME)
+                  if zip_path.exists():
+                      zip_path.unlink()
+                  run_host(["zip", "-r", ZIP_NAME, str(LIGHT)], timeout=600)
+                  sha = sha256_file(zip_path)
+                  Path(ZIP_NAME + ".sha256.txt").write_text(sha + "  " + ZIP_NAME + "\n", encoding="utf-8")
+              else:
+                  copy_cache_to_results()
+                  fix_permissions()
+                  prompt_killed_spi511()
+                  fix_permissions()
+                  build_light_artifact()
+
+              print("R3P_R2_DONE")
           except Exception:
               err = traceback.format_exc()
-              print("R3P_R1_FATAL_EXCEPTION")
               print(err)
-              fallback = {
-                  "run_id": RUN_ID,
-                  "created_utc": now_utc(),
-                  "claim_ceiling": "CACHE_PERMISSIONS_FIXED_SPI511_LINE_SIDEBAND_EXECUTION_NOT_DISCOVERY_NOT_FINAL_PROOF",
-                  "final_status": "R21AX_R7G_R3P_R1_FATAL_EXCEPTION_CAPTURED_NO_511_NO_PHYSICAL_NULL",
-                  "exception": err,
-              }
-              (OUT / "R3P_R1_FATAL_EXCEPTION.json").write_text(json.dumps(fallback, indent=2), encoding="utf-8")
-              (OUT / "R3P_R1_CACHE_PERMISSIONS_FIXED_SPI511_SUMMARY.json").write_text(json.dumps(fallback, indent=2), encoding="utf-8")
-              fix_permissions()
+              (LOGS / "fatal_error.log").write_text(err, encoding="utf-8", errors="replace")
+              try:
+                  summary = {
+                      "run_id": RUN_ID,
+                      "created_utc": now_utc(),
+                      "final_status": "R21AX_R7G_R3P_R2_FATAL_RUNTIME_FAILURE_NO_511_NO_PHYSICAL_NULL",
+                      "error": err[-5000:],
+                      "claim_ceiling": "NO_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL",
+                  }
+                  LIGHT.mkdir(parents=True, exist_ok=True)
+                  (LIGHT / "R3P_R2_SUMMARY.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+                  run_host(["zip", "-r", ZIP_NAME, str(LIGHT)], timeout=600)
+                  if Path(ZIP_NAME).exists():
+                      Path(ZIP_NAME + ".sha256.txt").write_text(sha256_file(ZIP_NAME) + "  " + ZIP_NAME + "\n", encoding="utf-8")
+              except Exception:
+                  pass
           PY
 
-          sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R1_RESULTS ACIRM_CACHE_R3P_R1 || true
-          chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R1_RESULTS ACIRM_CACHE_R3P_R1 || true
-          echo "R3P_R1 main ended"
-          exit 0
-
-      - name: Check R3P R1 cache
-        id: r3p-r1-cache-check
-        if: always()
-        run: |
-          set +e
-          sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R1_RESULTS ACIRM_CACHE_R3P_R1 || true
-          chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R1_RESULTS ACIRM_CACHE_R3P_R1 || true
-
-          if [ -f ACIRM_CACHE_R3P_R1/acirm_r3p_r1_cache_ready.flag ]; then
-            echo "cache_ready=true" >> "$GITHUB_OUTPUT"
-            echo "R3P_R1_CACHE_READY_TRUE"
-          else
-            echo "cache_ready=false" >> "$GITHUB_OUTPUT"
-            echo "R3P_R1_CACHE_READY_FALSE"
-          fi
-
-      - name: Save R3P R1 cache
-        if: always() && steps.r3p-r1-cache-restore.outputs.cache-hit != 'true' && steps.r3p-r1-cache-check.outputs.cache_ready == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ACIRM_CACHE_R3P_R1
-          key: acirm-r21ax-r7g-r3p-r1-cache-v1
-
-      - name: Build R3P R1 LIGHT artifact
-        if: always()
-        run: |
-          set +e
-          sudo chown -R "$(id -u):$(id -g)" ACIRM_R21AX_R7G_R3P_R1_RESULTS ACIRM_CACHE_R3P_R1 || true
-          chmod -R u+rwX,go+rX ACIRM_R21AX_R7G_R3P_R1_RESULTS ACIRM_CACHE_R3P_R1 || true
-
-          mkdir -p ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/logs
-
-          cp ACIRM_R21AX_R7G_R3P_R1_RESULTS/logs/*.log ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/logs/ || true
-          cp ACIRM_R21AX_R7G_R3P_R1_RESULTS/*.json ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/ || true
-          cp ACIRM_R21AX_R7G_R3P_R1_RESULTS/*.csv ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/ || true
-
-          echo "R3P_R1 cache permissions fixed SPI511 line sideband execution." > ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/R3P_R1_CLAIM_BOUNDARY.txt
-          echo "Fixes previous docker --user PFILES permission failure by running Docker default root and repairing host permissions after container exit." >> ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/R3P_R1_CLAIM_BOUNDARY.txt
-          echo "Checks required: ready_flag_exists, og_created, actual_spi_started, line_508_514_seen." >> ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/R3P_R1_CLAIM_BOUNDARY.txt
-          echo "Heavy FITS and OSA products are excluded from phone artifact." >> ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/R3P_R1_CLAIM_BOUNDARY.txt
-
-          du -h ACIRM_R21AX_R7G_R3P_R1_RESULTS/data > ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/data_size_report.txt || true
-          du -h ACIRM_R21AX_R7G_R3P_R1_RESULTS/work > ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/work_size_report.txt || true
-          du -h ACIRM_CACHE_R3P_R1 > ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/cache_size_report.txt || true
-
-          find ACIRM_R21AX_R7G_R3P_R1_RESULTS/data -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/data_file_list.csv || true
-          find ACIRM_R21AX_R7G_R3P_R1_RESULTS/work -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/work_file_list.csv || true
-          find ACIRM_CACHE_R3P_R1 -type f -printf "%p,%s\n" > ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS/cache_file_list.csv || true
-
-          zip -r ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS.zip ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS
-          sha256sum ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS.zip > ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS.zip.sha256.txt
-          cat ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS.zip.sha256.txt
-          exit 0
-
-      - name: Upload R3P R1 LIGHT artifact
+      - name: Upload R3P R2 LIGHT artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS
+          name: ACIRM_R21AX_R7G_R3P_R2_LIGHT_RESULTS
           path: |
-            ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3P_R1_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3P_R2_LIGHT_RESULTS.zip
+            ACIRM_R21AX_R7G_R3P_R2_LIGHT_RESULTS.zip.sha256.txt
+            ACIRM_R21AX_R7G_R3P_R2_RESULTS/logs/main_execution.log
+            ACIRM_R21AX_R7G_R3P_R2_RESULTS/logs/docker_status.log
+          if-no-files-found: warn
