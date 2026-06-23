@@ -1,711 +1,345 @@
-name: ACIRM R3P R2T direct SPI OPER occupancy normalized audit
+name: ACIRM R17K OSA SPI511 Official Product Generator
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
-  acirm-r3p-r2t-direct-spi-oper-occupancy-normalized:
+  r17k-osa-spi511-official-products:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 180
 
     steps:
-      - name: Prepare folders
+      - name: Prepare folders and locked inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ACIRM_R17K_OSA_OUTPUTS repo/scw/2504 logs scripts products selected_products
+          cat > ACIRM_R17K_OSA_OUTPUTS/LOCKED_SCW_LIST.txt <<'EOF'
+          250400090010
+          250400020010
+          250400080010
+          250400030010
+          250400070021
+          250400040010
+          250400060010
+          250400050010
+          EOF
+          sed -i 's/^ *//' ACIRM_R17K_OSA_OUTPUTS/LOCKED_SCW_LIST.txt
+          cp ACIRM_R17K_OSA_OUTPUTS/LOCKED_SCW_LIST.txt scw.list
+          cat > ACIRM_R17K_OSA_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_CLAIM_CEILING:
+          OFFICIAL_OSA_PRODUCT_GENERATION_OR_LOCATOR_ONLY
+          NOT_DISCOVERY
+          NOT_PARTICLE_PROOF
+          NOT_SOURCE_ATTRIBUTION
+          NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_PRODUCTS_AND_LOCKED_CONTROLS_PASS
+          EOF
+          cat > ACIRM_R17K_OSA_OUTPUTS/R17K_STATUS.txt <<'EOF'
+          R17K_STARTED
+          EOF
+
+      - name: System diagnostics
+        shell: bash
         run: |
           set +e
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2T_OCCUPANCY_NORM_RESULTS/logs
-          mkdir -p ACIRM_R21AX_R7G_R3P_R2T_DIRECT_SPI_OPER_OCCUPANCY_NORMALIZED_LIGHT_RESULTS/logs
-          mkdir -p ACIRM_CACHE_R3P_R1
-          echo "R2T_OCCUPANCY_NORMALIZED_PREPARED"
+          uname -a | tee logs/uname.txt
+          df -h | tee logs/df_start.txt
+          free -h | tee logs/free_start.txt
+          docker --version | tee logs/docker_version.txt
+          python3 --version | tee logs/python_version.txt
+          sudo apt-get update -y > logs/apt_update.log 2>&1
+          sudo apt-get install -y rsync curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
+          python3 -m pip install -q astropy numpy requests > logs/pip_install.log 2>&1
 
-      - name: Restore R3P R1 cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ACIRM_CACHE_R3P_R1
-          key: acirm-r21ax-r7g-r3p-r1-cache-v1
-          restore-keys: |
-            acirm-r21ax-r7g-r3p-r1-cache-
-
-      - name: Run R2T occupancy normalized SPI OPER audit
-        continue-on-error: true
+      - name: Fetch locked Rev 2504 SCW directories from HEASARC
+        shell: bash
         run: |
-          set +e
-
-          OUT="ACIRM_R21AX_R7G_R3P_R2T_OCCUPANCY_NORM_RESULTS"
-          LIGHT="ACIRM_R21AX_R7G_R3P_R2T_DIRECT_SPI_OPER_OCCUPANCY_NORMALIZED_LIGHT_RESULTS"
-          MAIN_LOG="$OUT/logs/main_execution.log"
-
-          echo "R2T_OCCUPANCY_NORMALIZED_STARTED" | tee "$MAIN_LOG"
-          echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$MAIN_LOG"
-
-          sudo apt-get update -y 2>&1 | tee "$OUT/logs/apt_update.log" || true
-          sudo apt-get install -y zip python3-pip 2>&1 | tee "$OUT/logs/apt_install.log" || true
-          python3 -m pip install --user astropy numpy 2>&1 | tee "$OUT/logs/pip_astropy_numpy.log" || true
-
-          python3 - <<'PY' 2>&1 | tee -a ACIRM_R21AX_R7G_R3P_R2T_OCCUPANCY_NORM_RESULTS/logs/main_execution.log
-          import csv
-          import hashlib
-          import json
-          import math
-          import os
-          import re
-          import time
+          set -Eeuo pipefail
+          cat > scripts/fetch_locked_scw.py <<'PY'
+          import re, sys, json, time, hashlib
           from pathlib import Path
-
-          import numpy as np
-          from astropy.io import fits
-
-          RUN_ID = "ACIRM_R21AX_R7G_R3P_R2T_DIRECT_SPI_OPER_OCCUPANCY_NORMALIZED_INTENSITY_AUDIT"
-
-          OUT = Path("ACIRM_R21AX_R7G_R3P_R2T_OCCUPANCY_NORM_RESULTS")
-          LIGHT = Path("ACIRM_R21AX_R7G_R3P_R2T_DIRECT_SPI_OPER_OCCUPANCY_NORMALIZED_LIGHT_RESULTS")
-          CACHE = Path("ACIRM_CACHE_R3P_R1")
-          READY_FLAG = CACHE / "acirm_r3p_r1_cache_ready.flag"
-          ZIP_NAME = "ACIRM_R21AX_R7G_R3P_R2T_DIRECT_SPI_OPER_OCCUPANCY_NORMALIZED_LIGHT_RESULTS.zip"
-
-          CAP_VALUE = 32767.0
-
-          for p in [OUT, OUT / "logs", LIGHT, LIGHT / "logs"]:
-              p.mkdir(parents=True, exist_ok=True)
-
-          def now_utc():
-              return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-          def sha256_file(path):
-              h = hashlib.sha256()
-              with open(path, "rb") as f:
-                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                      h.update(chunk)
-              return h.hexdigest()
-
-          def safe_text(path, text):
-              Path(path).write_text(str(text), encoding="utf-8", errors="replace")
-
-          def write_csv(path, rows, fields):
-              with open(path, "w", newline="", encoding="utf-8") as f:
-                  w = csv.DictWriter(f, fieldnames=fields)
-                  w.writeheader()
-                  for r in rows:
-                      w.writerow({k: r.get(k, "") for k in fields})
-
-          def extract_scw(path):
-              s = str(path)
-              m = re.search(r"/scw/([0-9]{4})/([0-9]{12}\.[0-9]{3})/", s)
-              if m:
-                  return m.group(2)
-              m = re.search(r"([0-9]{12}\.[0-9]{3})", s)
-              if m:
-                  return m.group(1)
-              return ""
-
-          def as_float(x):
-              try:
-                  v = float(x)
-                  if math.isfinite(v):
-                      return v
-              except Exception:
-                  return None
-              return None
-
-          def load_spi_oper_matrix(path):
-              with fits.open(path, memmap=False) as hdul:
-                  selected = None
-                  for hdu in hdul:
-                      if str(getattr(hdu, "name", "")).strip() == "SPI.-OPSD-ALL":
-                          selected = hdu
-                          break
-
-                  if selected is None:
-                      for hdu in hdul:
-                          if hdu.data is not None and hasattr(hdu, "columns"):
-                              cols = list(hdu.columns.names)
-                              if "PSD_DATA" in cols:
-                                  selected = hdu
-                                  break
-
-                  if selected is None:
-                      raise RuntimeError("NO_SPI_OPSD_ALL_OR_PSD_DATA")
-
-                  cols = list(selected.columns.names)
-                  data = selected.data
-
-                  value_col = "PSD_DATA" if "PSD_DATA" in cols else ""
-                  if not value_col:
-                      for c in cols:
-                          cu = c.upper()
-                          if "DATA" in cu or "COUNT" in cu or "RATE" in cu:
-                              value_col = c
-                              break
-
-                  if not value_col:
-                      raise RuntimeError("NO_VALUE_COL")
-
-                  energy_col = ""
-                  for c in cols:
-                      cu = c.upper()
-                      if cu in ["ENERGY", "E_MEAN", "E_CEN", "E_CENTER", "PI", "PSD_ENERGY"]:
-                          energy_col = c
-                          break
-
-                  elo_col = ""
-                  ehi_col = ""
-                  for c in cols:
-                      cu = c.upper().replace("-", "_")
-                      if cu in ["E_MIN", "E_LO", "ENERG_LO", "ENERGY_LO", "E_LOW"]:
-                          elo_col = c
-                      if cu in ["E_MAX", "E_HI", "ENERG_HI", "ENERGY_HI", "E_HIGH"]:
-                          ehi_col = c
-
-                  if elo_col and ehi_col:
-                      elo = np.asarray(data[elo_col], dtype=float).reshape(-1)
-                      ehi = np.asarray(data[ehi_col], dtype=float).reshape(-1)
-                      energy = (elo + ehi) / 2.0
-                      energy_mode = "bounds"
-                      energy_label = elo_col + "," + ehi_col
-                  elif energy_col:
-                      energy = np.asarray(data[energy_col], dtype=float).reshape(-1)
-                      elo = energy.copy()
-                      ehi = energy.copy()
-                      energy_mode = "center"
-                      energy_label = energy_col
-                  else:
-                      raise RuntimeError("NO_ENERGY_COL")
-
-                  raw = np.asarray(data[value_col], dtype=float)
-
-                  n_energy = energy.shape[0]
-                  if raw.ndim == 1 and raw.shape[0] == n_energy:
-                      matrix = raw.reshape(n_energy, 1)
-                      raw_shape_case = "1D_ENERGY"
-                  elif raw.ndim >= 2 and raw.shape[0] == n_energy:
-                      matrix = raw.reshape(n_energy, -1)
-                      raw_shape_case = "ENERGY_FIRST"
-                  elif raw.ndim >= 2 and raw.shape[-1] == n_energy:
-                      tmp = np.moveaxis(raw, -1, 0)
-                      matrix = tmp.reshape(n_energy, -1)
-                      raw_shape_case = "ENERGY_LAST"
-                  else:
-                      raise RuntimeError("VALUE_ENERGY_SHAPE_MISMATCH raw_shape=" + str(raw.shape) + " n_energy=" + str(n_energy))
-
-                  finite_energy = np.isfinite(energy) & np.isfinite(elo) & np.isfinite(ehi)
-                  matrix_finite_any = np.any(np.isfinite(matrix), axis=1)
-                  keep = finite_energy & matrix_finite_any
-
-                  energy = np.asarray(energy[keep], dtype=float)
-                  elo = np.asarray(elo[keep], dtype=float)
-                  ehi = np.asarray(ehi[keep], dtype=float)
-                  matrix = np.asarray(matrix[keep, :], dtype=float)
-
-                  order = np.argsort(energy)
-                  energy = energy[order]
-                  elo = elo[order]
-                  ehi = ehi[order]
-                  matrix = matrix[order, :]
-
-                  return {
-                      "energy": energy,
-                      "elo": elo,
-                      "ehi": ehi,
-                      "matrix": matrix,
-                      "energy_mode": energy_mode,
-                      "energy_label": energy_label,
-                      "value_col": value_col,
-                      "hdu_name": str(getattr(selected, "name", "")),
-                      "raw_shape_case": raw_shape_case,
-                      "raw_shape": str(raw.shape),
-                      "matrix_shape": str(matrix.shape)
-                  }
-
-          def mask_window(obj, lo, hi):
-              if obj["energy_mode"] == "bounds":
-                  return (obj["elo"] < hi) & (obj["ehi"] > lo)
-              return (obj["energy"] >= lo) & (obj["energy"] <= hi)
-
-          def window_stats(obj, lo, hi):
-              mask = mask_window(obj, lo, hi)
-              energy_bin_count = int(np.sum(mask))
-              if energy_bin_count <= 0:
-                  return None
-
-              sub = np.asarray(obj["matrix"][mask, :], dtype=float)
-              vals = sub.reshape(-1)
-              vals = vals[np.isfinite(vals)]
-              if vals.size == 0:
-                  return None
-
-              total_sum = float(np.sum(vals))
-              cell_count = int(vals.size)
-              nonzero_count = int(np.sum(vals > 0))
-              cap_count = int(np.sum(vals >= CAP_VALUE))
-              max_value = float(np.max(vals))
-              min_value = float(np.min(vals))
-              median_value = float(np.median(vals))
-              mean_per_cell = float(total_sum / cell_count) if cell_count > 0 else ""
-              mean_per_energy_bin = float(total_sum / energy_bin_count) if energy_bin_count > 0 else ""
-              cap_fraction = float(cap_count / cell_count) if cell_count > 0 else ""
-              nonzero_fraction = float(nonzero_count / cell_count) if cell_count > 0 else ""
-
-              per_energy_sum = np.nansum(sub, axis=1)
-              per_energy_cap_fraction = np.mean(sub >= CAP_VALUE, axis=1)
-              max_energy_index = int(np.nanargmax(per_energy_sum))
-              max_energy_keV = float(obj["energy"][mask][max_energy_index])
-              max_energy_sum = float(per_energy_sum[max_energy_index])
-              max_energy_cap_fraction = float(per_energy_cap_fraction[max_energy_index])
-
-              return {
-                  "window_lo_keV": float(lo),
-                  "window_hi_keV": float(hi),
-                  "window_width_keV": float(hi - lo),
-                  "energy_bin_count": energy_bin_count,
-                  "cell_count": cell_count,
-                  "window_sum": total_sum,
-                  "mean_per_energy_bin": mean_per_energy_bin,
-                  "mean_per_cell": mean_per_cell,
-                  "median_cell_value": median_value,
-                  "min_cell_value": min_value,
-                  "max_cell_value": max_value,
-                  "cap32767_count": cap_count,
-                  "cap32767_fraction": cap_fraction,
-                  "nonzero_count": nonzero_count,
-                  "nonzero_fraction": nonzero_fraction,
-                  "max_energy_keV_by_sum": max_energy_keV,
-                  "max_energy_sum": max_energy_sum,
-                  "max_energy_cap32767_fraction": max_energy_cap_fraction
-              }
-
-          def ratio(a, b):
-              av = as_float(a)
-              bv = as_float(b)
-              if av is None or bv is None or bv == 0:
-                  return ""
-              return float(av / bv)
-
-          def mean_pair(a, b):
-              av = as_float(a)
-              bv = as_float(b)
-              if av is None or bv is None:
-                  return ""
-              return float((av + bv) / 2.0)
-
-          def rank_desc(rows, key, target_value):
-              tv = as_float(target_value)
-              if tv is None:
-                  return {"rank": "", "higher": "", "equal_or_higher": "", "percentile": ""}
-              vals = []
-              for r in rows:
-                  v = as_float(r.get(key, ""))
-                  if v is not None:
-                      vals.append(v)
-              if not vals:
-                  return {"rank": "", "higher": "", "equal_or_higher": "", "percentile": ""}
-              higher = sum(1 for v in vals if v > tv)
-              equal_or_higher = sum(1 for v in vals if v >= tv)
-              rank = higher + 1
-              percentile = 1.0 - (higher / float(len(vals)))
-              return {
-                  "rank": int(rank),
-                  "higher": int(higher),
-                  "equal_or_higher": int(equal_or_higher),
-                  "percentile": float(percentile)
-              }
-
-          ready_flag_exists = READY_FLAG.exists()
-
-          spi_oper_paths = []
-          if CACHE.exists():
-              spi_oper_paths = sorted(CACHE.rglob("spi_oper.fits"))
-
-          unique_by_scw = {}
-          for p in spi_oper_paths:
-              scw = extract_scw(p)
-              if scw and scw not in unique_by_scw:
-                  unique_by_scw[scw] = p
-
-          window_rows = []
-          target_rows = []
-          energy_bin_rows = []
-
-          for scw, path in sorted(unique_by_scw.items()):
-              try:
-                  obj = load_spi_oper_matrix(path)
-
-                  local_energy_mask = (obj["energy"] >= 450.0) & (obj["energy"] <= 570.0)
-                  for i in np.where(local_energy_mask)[0]:
-                      row_vals = np.asarray(obj["matrix"][i, :], dtype=float)
-                      finite = row_vals[np.isfinite(row_vals)]
-                      if finite.size == 0:
-                          continue
-                      energy_bin_rows.append({
-                          "scw_id": scw,
-                          "energy_keV": float(obj["energy"][i]),
-                          "cell_count": int(finite.size),
-                          "energy_sum": float(np.sum(finite)),
-                          "mean_per_cell": float(np.mean(finite)),
-                          "median_cell_value": float(np.median(finite)),
-                          "max_cell_value": float(np.max(finite)),
-                          "cap32767_count": int(np.sum(finite >= CAP_VALUE)),
-                          "cap32767_fraction": float(np.sum(finite >= CAP_VALUE) / float(finite.size)),
-                          "is_508_514": bool(508.0 <= float(obj["energy"][i]) <= 514.0),
-                          "is_500_522": bool(500.0 <= float(obj["energy"][i]) <= 522.0)
-                      })
-
-                  windows = []
-                  x = 450.0
-                  while x <= 570.0 - 6.0 + 1e-9:
-                      lo = round(x, 6)
-                      hi = round(lo + 6.0, 6)
-                      st = window_stats(obj, lo, hi)
-                      if st is not None:
-                          st["scw_id"] = scw
-                          st["path"] = str(path)
-                          st["overlaps_508_514"] = bool(not (hi <= 508.0 or lo >= 514.0))
-                          st["is_target_508_514"] = bool(abs(lo - 508.0) < 1e-9 and abs(hi - 514.0) < 1e-9)
-                          windows.append(st)
-                      x += 1.0
-
-                  window_rows.extend(windows)
-
-                  target = window_stats(obj, 508.0, 514.0)
-                  sb1 = window_stats(obj, 490.0, 500.0)
-                  sb2 = window_stats(obj, 522.0, 532.0)
-                  imm_left = window_stats(obj, 502.0, 508.0)
-                  imm_right = window_stats(obj, 514.0, 520.0)
-
-                  if target is None:
-                      target_rows.append({
-                          "scw_id": scw,
-                          "path": str(path),
-                          "error": "NO_TARGET_WINDOW_STATS"
-                      })
-                      continue
-
-                  sum_side_mean = mean_pair(sb1.get("window_sum", "") if sb1 else "", sb2.get("window_sum", "") if sb2 else "")
-                  bin_side_mean = mean_pair(sb1.get("mean_per_energy_bin", "") if sb1 else "", sb2.get("mean_per_energy_bin", "") if sb2 else "")
-                  cell_side_mean = mean_pair(sb1.get("mean_per_cell", "") if sb1 else "", sb2.get("mean_per_cell", "") if sb2 else "")
-                  cap_side_mean = mean_pair(sb1.get("cap32767_fraction", "") if sb1 else "", sb2.get("cap32767_fraction", "") if sb2 else "")
-
-                  sum_imm_mean = mean_pair(imm_left.get("window_sum", "") if imm_left else "", imm_right.get("window_sum", "") if imm_right else "")
-                  bin_imm_mean = mean_pair(imm_left.get("mean_per_energy_bin", "") if imm_left else "", imm_right.get("mean_per_energy_bin", "") if imm_right else "")
-                  cell_imm_mean = mean_pair(imm_left.get("mean_per_cell", "") if imm_left else "", imm_right.get("mean_per_cell", "") if imm_right else "")
-                  cap_imm_mean = mean_pair(imm_left.get("cap32767_fraction", "") if imm_left else "", imm_right.get("cap32767_fraction", "") if imm_right else "")
-
-                  r_sum = rank_desc(windows, "window_sum", target.get("window_sum", ""))
-                  r_mean_bin = rank_desc(windows, "mean_per_energy_bin", target.get("mean_per_energy_bin", ""))
-                  r_mean_cell = rank_desc(windows, "mean_per_cell", target.get("mean_per_cell", ""))
-                  r_cap = rank_desc(windows, "cap32767_fraction", target.get("cap32767_fraction", ""))
-                  r_max_cell = rank_desc(windows, "max_cell_value", target.get("max_cell_value", ""))
-
-                  row = {
-                      "scw_id": scw,
-                      "path": str(path),
-                      "hdu_name": obj["hdu_name"],
-                      "value_col": obj["value_col"],
-                      "energy_label": obj["energy_label"],
-                      "energy_mode": obj["energy_mode"],
-                      "raw_shape_case": obj["raw_shape_case"],
-                      "raw_shape": obj["raw_shape"],
-                      "matrix_shape": obj["matrix_shape"],
-
-                      "target_window_sum": target.get("window_sum", ""),
-                      "target_energy_bin_count": target.get("energy_bin_count", ""),
-                      "target_cell_count": target.get("cell_count", ""),
-                      "target_mean_per_energy_bin": target.get("mean_per_energy_bin", ""),
-                      "target_mean_per_cell": target.get("mean_per_cell", ""),
-                      "target_median_cell_value": target.get("median_cell_value", ""),
-                      "target_max_cell_value": target.get("max_cell_value", ""),
-                      "target_cap32767_count": target.get("cap32767_count", ""),
-                      "target_cap32767_fraction": target.get("cap32767_fraction", ""),
-                      "target_nonzero_fraction": target.get("nonzero_fraction", ""),
-                      "target_max_energy_keV_by_sum": target.get("max_energy_keV_by_sum", ""),
-                      "target_max_energy_sum": target.get("max_energy_sum", ""),
-                      "target_max_energy_cap32767_fraction": target.get("max_energy_cap32767_fraction", ""),
-
-                      "original_sideband_mean_sum": sum_side_mean,
-                      "original_sideband_mean_per_energy_bin": bin_side_mean,
-                      "original_sideband_mean_per_cell": cell_side_mean,
-                      "original_sideband_mean_cap32767_fraction": cap_side_mean,
-
-                      "immediate_sideband_mean_sum": sum_imm_mean,
-                      "immediate_sideband_mean_per_energy_bin": bin_imm_mean,
-                      "immediate_sideband_mean_per_cell": cell_imm_mean,
-                      "immediate_sideband_mean_cap32767_fraction": cap_imm_mean,
-
-                      "target_to_original_sideband_sum_ratio": ratio(target.get("window_sum", ""), sum_side_mean),
-                      "target_to_original_sideband_mean_per_energy_bin_ratio": ratio(target.get("mean_per_energy_bin", ""), bin_side_mean),
-                      "target_to_original_sideband_mean_per_cell_ratio": ratio(target.get("mean_per_cell", ""), cell_side_mean),
-                      "target_to_original_sideband_cap32767_fraction_ratio": ratio(target.get("cap32767_fraction", ""), cap_side_mean),
-
-                      "target_to_immediate_sideband_sum_ratio": ratio(target.get("window_sum", ""), sum_imm_mean),
-                      "target_to_immediate_sideband_mean_per_energy_bin_ratio": ratio(target.get("mean_per_energy_bin", ""), bin_imm_mean),
-                      "target_to_immediate_sideband_mean_per_cell_ratio": ratio(target.get("mean_per_cell", ""), cell_imm_mean),
-                      "target_to_immediate_sideband_cap32767_fraction_ratio": ratio(target.get("cap32767_fraction", ""), cap_imm_mean),
-
-                      "rank_by_sum_desc": r_sum["rank"],
-                      "higher_by_sum_count": r_sum["higher"],
-                      "percentile_by_sum": r_sum["percentile"],
-
-                      "rank_by_mean_per_energy_bin_desc": r_mean_bin["rank"],
-                      "higher_by_mean_per_energy_bin_count": r_mean_bin["higher"],
-                      "percentile_by_mean_per_energy_bin": r_mean_bin["percentile"],
-
-                      "rank_by_mean_per_cell_desc": r_mean_cell["rank"],
-                      "higher_by_mean_per_cell_count": r_mean_cell["higher"],
-                      "percentile_by_mean_per_cell": r_mean_cell["percentile"],
-
-                      "rank_by_cap32767_fraction_desc": r_cap["rank"],
-                      "higher_by_cap32767_fraction_count": r_cap["higher"],
-                      "equal_or_higher_by_cap32767_fraction_count": r_cap["equal_or_higher"],
-                      "percentile_by_cap32767_fraction": r_cap["percentile"],
-
-                      "rank_by_max_cell_value_desc": r_max_cell["rank"],
-                      "higher_by_max_cell_value_count": r_max_cell["higher"],
-                      "equal_or_higher_by_max_cell_value_count": r_max_cell["equal_or_higher"],
-                      "percentile_by_max_cell_value": r_max_cell["percentile"],
-                      "error": ""
-                  }
-
-                  target_rows.append(row)
-
-              except Exception as e:
-                  target_rows.append({
-                      "scw_id": scw,
-                      "path": str(path),
-                      "error": repr(e)[:500]
-                  })
-
-          window_fields = [
-              "scw_id", "path", "window_lo_keV", "window_hi_keV", "window_width_keV",
-              "energy_bin_count", "cell_count", "window_sum",
-              "mean_per_energy_bin", "mean_per_cell", "median_cell_value",
-              "min_cell_value", "max_cell_value", "cap32767_count",
-              "cap32767_fraction", "nonzero_count", "nonzero_fraction",
-              "max_energy_keV_by_sum", "max_energy_sum",
-              "max_energy_cap32767_fraction", "overlaps_508_514",
-              "is_target_508_514"
-          ]
-
-          target_fields = [
-              "scw_id", "path", "hdu_name", "value_col", "energy_label", "energy_mode",
-              "raw_shape_case", "raw_shape", "matrix_shape",
-              "target_window_sum", "target_energy_bin_count", "target_cell_count",
-              "target_mean_per_energy_bin", "target_mean_per_cell",
-              "target_median_cell_value", "target_max_cell_value",
-              "target_cap32767_count", "target_cap32767_fraction",
-              "target_nonzero_fraction", "target_max_energy_keV_by_sum",
-              "target_max_energy_sum", "target_max_energy_cap32767_fraction",
-              "original_sideband_mean_sum", "original_sideband_mean_per_energy_bin",
-              "original_sideband_mean_per_cell", "original_sideband_mean_cap32767_fraction",
-              "immediate_sideband_mean_sum", "immediate_sideband_mean_per_energy_bin",
-              "immediate_sideband_mean_per_cell", "immediate_sideband_mean_cap32767_fraction",
-              "target_to_original_sideband_sum_ratio",
-              "target_to_original_sideband_mean_per_energy_bin_ratio",
-              "target_to_original_sideband_mean_per_cell_ratio",
-              "target_to_original_sideband_cap32767_fraction_ratio",
-              "target_to_immediate_sideband_sum_ratio",
-              "target_to_immediate_sideband_mean_per_energy_bin_ratio",
-              "target_to_immediate_sideband_mean_per_cell_ratio",
-              "target_to_immediate_sideband_cap32767_fraction_ratio",
-              "rank_by_sum_desc", "higher_by_sum_count", "percentile_by_sum",
-              "rank_by_mean_per_energy_bin_desc", "higher_by_mean_per_energy_bin_count",
-              "percentile_by_mean_per_energy_bin",
-              "rank_by_mean_per_cell_desc", "higher_by_mean_per_cell_count",
-              "percentile_by_mean_per_cell",
-              "rank_by_cap32767_fraction_desc", "higher_by_cap32767_fraction_count",
-              "equal_or_higher_by_cap32767_fraction_count", "percentile_by_cap32767_fraction",
-              "rank_by_max_cell_value_desc", "higher_by_max_cell_value_count",
-              "equal_or_higher_by_max_cell_value_count", "percentile_by_max_cell_value",
-              "error"
-          ]
-
-          energy_fields = [
-              "scw_id", "energy_keV", "cell_count", "energy_sum",
-              "mean_per_cell", "median_cell_value", "max_cell_value",
-              "cap32767_count", "cap32767_fraction", "is_508_514", "is_500_522"
-          ]
-
-          write_csv(LIGHT / "occupancy_normalized_target_summary.csv", target_rows, target_fields)
-          write_csv(LIGHT / "window_6keV_occupancy_normalized_scan_450_570.csv", window_rows, window_fields)
-          write_csv(LIGHT / "energy_bin_cell_stats_450_570.csv", energy_bin_rows, energy_fields)
-
-          ranked_by_sum = sorted(window_rows, key=lambda r: as_float(r.get("window_sum", "")) or -1e300, reverse=True)
-          ranked_by_mean_cell = sorted(window_rows, key=lambda r: as_float(r.get("mean_per_cell", "")) or -1e300, reverse=True)
-          ranked_by_cap = sorted(window_rows, key=lambda r: as_float(r.get("cap32767_fraction", "")) or -1e300, reverse=True)
-
-          for i, r in enumerate(ranked_by_sum, start=1):
-              r["rank_by_sum_desc"] = i
-          for i, r in enumerate(ranked_by_mean_cell, start=1):
-              r["rank_by_mean_per_cell_desc"] = i
-          for i, r in enumerate(ranked_by_cap, start=1):
-              r["rank_by_cap32767_fraction_desc"] = i
-
-          write_csv(LIGHT / "ranked_windows_by_sum.csv", ranked_by_sum, window_fields + ["rank_by_sum_desc"])
-          write_csv(LIGHT / "ranked_windows_by_mean_per_cell.csv", ranked_by_mean_cell, window_fields + ["rank_by_mean_per_cell_desc"])
-          write_csv(LIGHT / "ranked_windows_by_cap32767_fraction.csv", ranked_by_cap, window_fields + ["rank_by_cap32767_fraction_desc"])
-
-          best = target_rows[0] if target_rows else {}
-
-          target_sum_rank = as_float(best.get("rank_by_sum_desc", ""))
-          target_mean_bin_rank = as_float(best.get("rank_by_mean_per_energy_bin_desc", ""))
-          target_mean_cell_rank = as_float(best.get("rank_by_mean_per_cell_desc", ""))
-          target_cap_rank = as_float(best.get("rank_by_cap32767_fraction_desc", ""))
-          target_cap_frac = as_float(best.get("target_cap32767_fraction", ""))
-          target_mean_cell_ratio_orig = as_float(best.get("target_to_original_sideband_mean_per_cell_ratio", ""))
-          target_mean_cell_ratio_imm = as_float(best.get("target_to_immediate_sideband_mean_per_cell_ratio", ""))
-          target_sum_ratio_orig = as_float(best.get("target_to_original_sideband_sum_ratio", ""))
-          target_sum_ratio_imm = as_float(best.get("target_to_immediate_sideband_sum_ratio", ""))
-
-          saturation_dominated = False
-          if target_cap_frac is not None and target_cap_frac >= 0.80:
-              saturation_dominated = True
-
-          normalized_remains_high = False
-          if target_mean_cell_rank is not None and target_mean_cell_rank <= 3:
-              normalized_remains_high = True
-          if target_mean_cell_ratio_orig is not None and target_mean_cell_ratio_orig >= 1.2:
-              normalized_remains_high = True
-
-          sum_only_warning = False
-          if target_sum_rank == 1 and target_mean_cell_rank is not None and target_mean_cell_rank > 10:
-              sum_only_warning = True
-
-          checks = {
-              "ready_flag_exists": ready_flag_exists,
-              "spi_oper_file_count_total": len(spi_oper_paths),
-              "unique_scw_count": len(unique_by_scw),
-              "target_rows_count": len(target_rows),
-              "window_rows_count": len(window_rows),
-              "energy_bin_rows_count": len(energy_bin_rows),
-              "scw_id": best.get("scw_id", ""),
-              "hdu_name": best.get("hdu_name", ""),
-              "value_col": best.get("value_col", ""),
-              "energy_label": best.get("energy_label", ""),
-              "raw_shape_case": best.get("raw_shape_case", ""),
-              "matrix_shape": best.get("matrix_shape", ""),
-
-              "target_window_sum": best.get("target_window_sum", ""),
-              "target_energy_bin_count": best.get("target_energy_bin_count", ""),
-              "target_cell_count": best.get("target_cell_count", ""),
-              "target_mean_per_energy_bin": best.get("target_mean_per_energy_bin", ""),
-              "target_mean_per_cell": best.get("target_mean_per_cell", ""),
-              "target_cap32767_fraction": best.get("target_cap32767_fraction", ""),
-              "target_max_cell_value": best.get("target_max_cell_value", ""),
-              "target_max_energy_keV_by_sum": best.get("target_max_energy_keV_by_sum", ""),
-
-              "target_to_original_sideband_sum_ratio": best.get("target_to_original_sideband_sum_ratio", ""),
-              "target_to_original_sideband_mean_per_energy_bin_ratio": best.get("target_to_original_sideband_mean_per_energy_bin_ratio", ""),
-              "target_to_original_sideband_mean_per_cell_ratio": best.get("target_to_original_sideband_mean_per_cell_ratio", ""),
-              "target_to_original_sideband_cap32767_fraction_ratio": best.get("target_to_original_sideband_cap32767_fraction_ratio", ""),
-
-              "target_to_immediate_sideband_sum_ratio": best.get("target_to_immediate_sideband_sum_ratio", ""),
-              "target_to_immediate_sideband_mean_per_energy_bin_ratio": best.get("target_to_immediate_sideband_mean_per_energy_bin_ratio", ""),
-              "target_to_immediate_sideband_mean_per_cell_ratio": best.get("target_to_immediate_sideband_mean_per_cell_ratio", ""),
-              "target_to_immediate_sideband_cap32767_fraction_ratio": best.get("target_to_immediate_sideband_cap32767_fraction_ratio", ""),
-
-              "rank_by_sum_desc": best.get("rank_by_sum_desc", ""),
-              "rank_by_mean_per_energy_bin_desc": best.get("rank_by_mean_per_energy_bin_desc", ""),
-              "rank_by_mean_per_cell_desc": best.get("rank_by_mean_per_cell_desc", ""),
-              "rank_by_cap32767_fraction_desc": best.get("rank_by_cap32767_fraction_desc", ""),
-              "equal_or_higher_by_cap32767_fraction_count": best.get("equal_or_higher_by_cap32767_fraction_count", ""),
-
-              "saturation_dominated": saturation_dominated,
-              "normalized_remains_high": normalized_remains_high,
-              "sum_only_warning": sum_only_warning,
-              "full_osa_executed": False,
-              "spi_science_analysis_executed": False
-          }
-
-          with open(LIGHT / "checks_flat.csv", "w", newline="", encoding="utf-8") as f:
-              w = csv.DictWriter(f, fieldnames=["check", "value"])
-              w.writeheader()
-              for k, v in checks.items():
-                  w.writerow({"check": k, "value": v})
-
-          if not target_rows:
-              final_status = "R21AX_R7G_R3P_R2T_NO_TARGET_OCCUPANCY_ROW_NO_511_METRIC"
-              scientific_status = "NO_511_METRIC_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
-          elif best.get("error", ""):
-              final_status = "R21AX_R7G_R3P_R2T_OCCUPANCY_AUDIT_READ_ERROR"
-              scientific_status = "NO_COMPLETE_OCCUPANCY_AUDIT_NOT_OSA_PROOF_NO_PHYSICAL_NULL"
-          elif saturation_dominated and sum_only_warning:
-              final_status = "R21AX_R7G_R3P_R2T_508_514_SUM_PEAK_IS_SATURATION_OR_OCCUPANCY_DOMINATED_NOT_INTENSITY_NOT_OSA_PROOF"
-              scientific_status = "DIRECT_RAW_OCCUPANCY_STRUCTURE_NOT_FLUX_NOT_DISCOVERY_NOT_FULL_OSA"
-          elif saturation_dominated and normalized_remains_high:
-              final_status = "R21AX_R7G_R3P_R2T_508_514_NORMALIZED_HIGH_BUT_SATURATION_DOMINATED_RAW_OCCUPANCY_SUPPORT_NOT_OSA_PROOF"
-              scientific_status = "DIRECT_RAW_SATURATED_OCCUPANCY_SUPPORT_NOT_FLUX_NOT_DISCOVERY"
-          elif normalized_remains_high:
-              final_status = "R21AX_R7G_R3P_R2T_508_514_NORMALIZED_INTENSITY_REMAINS_HIGH_RAW_SUPPORT_NOT_OSA_PROOF"
-              scientific_status = "DIRECT_RAW_NORMALIZED_SUPPORT_NOT_DISCOVERY_NOT_FULL_OSA"
-          elif sum_only_warning:
-              final_status = "R21AX_R7G_R3P_R2T_508_514_SUM_HIGH_BUT_NORMALIZED_INTENSITY_WEAK_OCCUPANCY_EFFECT"
-              scientific_status = "RAW_SUM_RATIO_WEAKENED_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
-          else:
-              final_status = "R21AX_R7G_R3P_R2T_508_514_OCCUPANCY_NORMALIZED_AUDIT_COMPLETED_NO_FLUX_CLAIM"
-              scientific_status = "DIRECT_RAW_AUDIT_ONLY_NOT_OSA_PROOF_NOT_DISCOVERY_NO_PHYSICAL_NULL"
-
-          summary = {
-              "run_id": RUN_ID,
-              "created_utc": now_utc(),
-              "final_status": final_status,
-              "scientific_status": scientific_status,
-              "checks": checks,
-              "method": "DIRECT_SPI_OPER_RAW_OCCUPANCY_NORMALIZED_INTENSITY_AUDIT_NO_FULL_OSA",
-              "target_window_keV": [508.0, 514.0],
-              "original_sidebands_keV": [[490.0, 500.0], [522.0, 532.0]],
-              "immediate_sidebands_keV": [[502.0, 508.0], [514.0, 520.0]],
-              "local_scan_keV": [450.0, 570.0],
-              "window_width_keV": 6.0,
-              "cap_value_tested": CAP_VALUE,
-              "claim_ceiling": "DIRECT_RAW_OCCUPANCY_NORMALIZED_SUPPORT_ONLY_NOT_FLUX_NOT_FULL_OSA_PROOF_NOT_DISCOVERY"
-          }
-
-          safe_text(LIGHT / "SUMMARY.json", json.dumps(summary, indent=2))
-          safe_text(
-              LIGHT / "CLAIM_BOUNDARY.txt",
-              "R2T tests whether the raw 508-514 keV signal remains high after normalizing by energy-bin count and raw cell count.\n"
-              "It also tests whether the apparent structure is dominated by PSD_DATA cap/saturation at 32767.\n"
-              "It does not execute spi_science_analysis and is not OSA proof.\n"
-              "Any support is direct raw operational support only, not calibrated flux, not detection, and not discovery.\n"
-              "No physical null is implied by this direct raw audit.\n"
-          )
-
-          phone = []
-          phone.append("ACIRM R2T DIRECT SPI OPER OCCUPANCY NORMALIZED AUDIT")
-          phone.append("final_status=" + final_status)
-          phone.append("scientific_status=" + scientific_status)
-          for k, v in checks.items():
-              phone.append(str(k) + "=" + str(v))
-          safe_text(LIGHT / "PHONE_SUMMARY.txt", "\n".join(phone) + "\n")
-
-          for logp in sorted((OUT / "logs").glob("*.log")):
-              try:
-                  txt = logp.read_text(encoding="utf-8", errors="replace")
-                  safe_text(LIGHT / "logs" / logp.name, txt[-600000:])
-              except Exception:
-                  pass
-
-          if Path(ZIP_NAME).exists():
-              Path(ZIP_NAME).unlink()
-
-          os.system("zip -r " + ZIP_NAME + " " + str(LIGHT))
-
-          if Path(ZIP_NAME).exists():
-              sha = sha256_file(ZIP_NAME)
-              safe_text(ZIP_NAME + ".sha256.txt", sha + "  " + ZIP_NAME + "\n")
-              print("R2T_OCCUPANCY_NORMALIZED_ZIP_SHA256", sha)
-
-          print(json.dumps(summary, indent=2))
+          from urllib.parse import urljoin
+          import requests
+          REV='2504'
+          SCWS=[x.strip() for x in Path('scw.list').read_text().splitlines() if x.strip()]
+          BASES=[f'https://heasarc.gsfc.nasa.gov/FTP/integral/data/scw/{REV}/',
+                 f'https://heasarc.gsfc.nasa.gov/FTP/integral/data/rev_3/scw/{REV}/']
+          OUT=Path('repo/scw')/REV
+          OUT.mkdir(parents=True, exist_ok=True)
+          MAX_FILE_MB=700
+          MAX_TOTAL_MB=9500
+          TIMEOUT=60
+          session=requests.Session()
+          session.headers.update({'User-Agent':'ACIRM-R17K-OSA-fetch/1.0'})
+          rows=[]; total=0
+          def hrefs(html):
+              return sorted(set(m.group(1) for m in re.finditer(r'href=["\\']([^"\\']+)["\\']', html, re.I)))
+          for scw in SCWS:
+              target_dir=OUT/(scw+'.001')
+              target_dir.mkdir(parents=True, exist_ok=True)
+              found_listing=False
+              for base in BASES:
+                  url=urljoin(base, scw+'.001/')
+                  row={'scw':scw,'listing_url':url,'listing_status':'','files_seen':0,'files_downloaded':0,'error':''}
+                  try:
+                      r=session.get(url,timeout=TIMEOUT,allow_redirects=True)
+                      row['listing_status']=r.status_code
+                      if r.status_code!=200:
+                          rows.append(row); continue
+                      found_listing=True
+                      links=[h for h in hrefs(r.text) if not h.startswith('?') and h not in ('../','./','/')]
+                      files=[h for h in links if not h.endswith('/')]
+                      row['files_seen']=len(files)
+                      for f in files:
+                          fu=urljoin(url,f)
+                          try:
+                              h=session.head(fu,timeout=TIMEOUT,allow_redirects=True)
+                              if h.status_code!=200:
+                                  rows.append({'scw':scw,'file_url':fu,'status':h.status_code,'download':'HEAD_NOT_200'}); continue
+                              sz=h.headers.get('Content-Length','')
+                              sz=int(sz) if sz.isdigit() else 0
+                              if sz and sz>MAX_FILE_MB*1000*1000:
+                                  rows.append({'scw':scw,'file_url':fu,'status':h.status_code,'size_bytes':sz,'download':'SKIP_TOO_LARGE'}); continue
+                              if sz and total+sz>MAX_TOTAL_MB*1000*1000:
+                                  rows.append({'scw':scw,'file_url':fu,'status':h.status_code,'size_bytes':sz,'download':'SKIP_TOTAL_LIMIT'}); continue
+                              rr=session.get(fu,timeout=TIMEOUT,stream=True,allow_redirects=True)
+                              if rr.status_code!=200:
+                                  rows.append({'scw':scw,'file_url':fu,'status':rr.status_code,'download':'GET_NOT_200'}); continue
+                              local=target_dir/f
+                              n=0
+                              with open(local,'wb') as out:
+                                  for chunk in rr.iter_content(1024*1024):
+                                      if not chunk: continue
+                                      n+=len(chunk)
+                                      if n>MAX_FILE_MB*1000*1000:
+                                          raise RuntimeError('file exceeded max')
+                                      if total+n>MAX_TOTAL_MB*1000*1000:
+                                          raise RuntimeError('total exceeded max')
+                                      out.write(chunk)
+                              total+=n
+                              row['files_downloaded']+=1
+                              rows.append({'scw':scw,'file_url':fu,'local':str(local),'size_bytes':n,'download':'DOWNLOADED'})
+                          except Exception as e:
+                              rows.append({'scw':scw,'file_url':fu,'download':'ERROR','error':repr(e)[:300]})
+                      rows.append(row)
+                      break
+                  except Exception as e:
+                      row['error']=repr(e)[:300]; rows.append(row)
+              if not found_listing:
+                  rows.append({'scw':scw,'download':'NO_LISTING_FOUND'})
+          Path('ACIRM_R17K_OSA_OUTPUTS/R17K_SCW_FETCH_AUDIT.json').write_text(json.dumps({'rows':rows,'total_bytes':total},indent=2),encoding='utf-8')
           PY
+          python3 scripts/fetch_locked_scw.py | tee logs/fetch_locked_scw_stdout.log
+          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_OSA_OUTPUTS/R17K_SCW_FILE_INVENTORY.txt
+          du -ah repo/scw/2504 | sort -h | tail -100 > ACIRM_R17K_OSA_OUTPUTS/R17K_SCW_SIZE_INVENTORY.txt
 
-      - name: Upload R2T occupancy normalized artifact always
-        if: always()
+      - name: Fetch IC/IDX/CAT/AUX repository trees when available
+        shell: bash
+        run: |
+          set +e
+          echo "Fetching IC tree by rsync; this may be several GB and is not packaged." | tee logs/rsync_notice.txt
+          rsync -Lrtvz --timeout=90 --contimeout=30 isdcarc.unige.ch::arc/FTP/arc_distr/ic_tree/prod/ repo/ > logs/rsync_ic_tree.log 2>&1
+          echo "IC_RSYNC_EXIT=$?" | tee -a logs/rsync_notice.txt
+          rsync -Lrtvz --timeout=90 --contimeout=30 isdcarc.unige.ch::arc/FTP/arc_distr/cat_tree/prod/ repo/ > logs/rsync_cat_tree.log 2>&1
+          echo "CAT_RSYNC_EXIT=$?" | tee -a logs/rsync_notice.txt
+          mkdir -p repo/ic repo/idx/ic repo/cat repo/aux
+          find repo -maxdepth 3 -type d | sort > ACIRM_R17K_OSA_OUTPUTS/R17K_REPO_DIRS_AFTER_FETCH.txt
+          du -sh repo 2>/dev/null | tee ACIRM_R17K_OSA_OUTPUTS/R17K_REPO_SIZE.txt
+          df -h | tee logs/df_after_repo_fetch.txt
+
+      - name: Fetch official OSA Docker wrapper
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git clone --depth 1 https://github.com/ISDC-integral/osa-docker.git osa-docker > logs/git_clone_osa_docker.log 2>&1
+          chmod +x osa-docker/osa-container.sh osa-docker/osa-docker.sh || true
+          docker pull integralsw/osa:latest | tee logs/docker_pull_integralsw_osa.log
+
+      - name: OSA visibility and command preflight inside Docker
+        shell: bash
+        run: |
+          set +e
+          cat > scripts/osa_preflight.sh <<'SH'
+          set +e
+          echo "PWD=$PWD"
+          echo "REP_BASE_PROD=$REP_BASE_PROD"
+          echo "CURRENT_IC=$CURRENT_IC"
+          echo "ISDC_REF_CAT=$ISDC_REF_CAT"
+          which og_create || true
+          which spi_science_analysis || true
+          which dal_list || true
+          og_create --version || true
+          spi_science_analysis --version || true
+          find /home/integral/repo -maxdepth 3 -type d | head -200 || true
+          SH
+          chmod +x scripts/osa_preflight.sh
+          export OSA_DOCKER_PULL=no
+          export REP_BASE_PROD=/home/integral/repo
+          export CURRENT_IC=/home/integral/repo
+          export ISDC_REF_CAT=/home/integral/repo/cat/hec/gnrl_refr_cat_0043.fits[1]
+          bash osa-docker/osa-container.sh docker bash -lc 'bash /home/integral/scripts/osa_preflight.sh' > logs/osa_docker_preflight.log 2>&1
+          echo "OSA_PREFLIGHT_EXIT=$?" | tee ACIRM_R17K_OSA_OUTPUTS/R17K_OSA_PREFLIGHT_EXIT.txt
+
+      - name: Run guarded OSA product generation attempts
+        shell: bash
+        run: |
+          set +e
+          cat > scripts/osa_run_guarded.sh <<'SH'
+          set +e
+          export REP_BASE_PROD=/home/integral/repo
+          export CURRENT_IC=/home/integral/repo
+          export ISDC_REF_CAT=/home/integral/repo/cat/hec/gnrl_refr_cat_0043.fits[1]
+          export HEADASNOQUERY=1
+          export HEADASPROMPT=/dev/null
+          export PFILES=/home/integral/pfiles
+          mkdir -p "$PFILES" /home/integral/osa_work /home/integral/products
+          cd /home/integral
+          echo "=== og_create attempt ==="
+          og_create scw.list SPI acirm_r17k ./
+          echo "OG_CREATE_EXIT=$?" > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_OG_CREATE_EXIT.txt
+          find /home/integral -name 'og_spi.fits' -o -name 'og_*.fits' | sort > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_OG_PRODUCTS_FOUND.txt
+          echo "=== locate obs dirs ==="
+          find /home/integral -maxdepth 4 -type d | sort | tee /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_DIRS_AFTER_OG_CREATE.txt
+          OBS_DIR=""
+          for d in /home/integral/obs/acirm_r17k /home/integral/acirm_r17k /home/integral/obs/* /home/integral/*acirm*; do
+            if [ -d "$d" ]; then OBS_DIR="$d"; break; fi
+          done
+          echo "$OBS_DIR" > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_OBS_DIR.txt
+          if [ -n "$OBS_DIR" ]; then
+            cd "$OBS_DIR"
+            echo "=== spi_science_analysis attempt default ==="
+            yes '' | spi_science_analysis
+            echo "SPI_SCIENCE_ANALYSIS_EXIT=$?" > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_SPI_SCIENCE_ANALYSIS_EXIT.txt
+          else
+            echo "NO_OBS_DIR_FOUND" > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_SPI_SCIENCE_ANALYSIS_EXIT.txt
+          fi
+          echo "=== final product search inside docker ==="
+          find /home/integral -type f \
+            \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname '*og_spi.fits*' -o -iname '*spi*spect*' -o -iname '*.log' \) \
+            | sort > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_PRODUCTS_AND_LOGS_FOUND.txt
+          SH
+          chmod +x scripts/osa_run_guarded.sh
+          export OSA_DOCKER_PULL=no
+          export REP_BASE_PROD=/home/integral/repo
+          export CURRENT_IC=/home/integral/repo
+          export ISDC_REF_CAT=/home/integral/repo/cat/hec/gnrl_refr_cat_0043.fits[1]
+          bash osa-docker/osa-container.sh docker bash -lc 'bash /home/integral/scripts/osa_run_guarded.sh' > logs/osa_run_guarded.log 2>&1
+          echo "OSA_RUN_GUARDED_EXIT=$?" | tee ACIRM_R17K_OSA_OUTPUTS/R17K_OSA_RUN_GUARDED_EXIT.txt
+
+      - name: Collect selected products and inspect FITS outputs
+        shell: bash
+        run: |
+          set +e
+          echo "Collecting selected products only; raw archive is not packaged."
+          find . -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' \) | sort > ACIRM_R17K_OSA_OUTPUTS/R17K_SELECTED_PRODUCT_PATHS.txt
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            size=$(stat -c%s "$f" 2>/dev/null || echo 0)
+            if [ "$size" -le 200000000 ]; then
+              cp -f "$f" selected_products/ || true
+            fi
+          done < ACIRM_R17K_OSA_OUTPUTS/R17K_SELECTED_PRODUCT_PATHS.txt
+          cp logs/*.log ACIRM_R17K_OSA_OUTPUTS/ 2>/dev/null || true
+          cat > scripts/inspect_r17k_products.py <<'PY'
+          import json, csv, math, zipfile, os
+          from pathlib import Path
+          import numpy as np
+          try:
+              from astropy.io import fits
+          except Exception as e:
+              fits=None
+          OUT=Path('ACIRM_R17K_OSA_OUTPUTS')
+          PROD=Path('selected_products')
+          rows=[]; meas=[]; errs=[]
+          LINE=(508.0,514.0); SB1=(490.0,500.0); SB2=(522.0,532.0)
+          E_PAIRS=[('E_MIN','E_MAX'),('ENERG_LO','ENERG_HI'),('ENERGY_LO','ENERGY_HI'),('E_LO','E_HI'),('EMIN','EMAX'),('E_LOW','E_HIGH')]
+          E_SINGLE=['ENERGY','E','E_MEAN','E_CENTER','PI','PHA','CHANNEL','CHAN']
+          C_COLS=['COUNTS','COUNT','RATE','SPECTRUM','SPEC','DATA','FLUX','VALUE','NCOUNTS']
+          def arr(x): return np.asarray(x,dtype=float)
+          def collapse(x,n):
+              a=np.nan_to_num(arr(x),nan=0.0,posinf=0.0,neginf=0.0)
+              if a.size==n: return a.reshape(-1)[:n]
+              if a.ndim>=2 and a.shape[-1]==n: return a.sum(axis=tuple(range(a.ndim-1))).reshape(-1)
+              if a.ndim>=2 and a.shape[0]==n: return a.sum(axis=tuple(range(1,a.ndim))).reshape(-1)
+              return None
+          def measure_edges(lo,hi,cnt):
+              lo=arr(lo).reshape(-1); hi=arr(hi).reshape(-1); n=min(len(lo),len(hi))
+              if n==0: return None
+              lo=lo[:n]; hi=hi[:n]; c=collapse(cnt,n)
+              if c is None: return None
+              width=np.maximum(1e-12,hi-lo)
+              def frac(w): return np.maximum(0,np.minimum(hi,w[1])-np.maximum(lo,w[0]))/width
+              line=float((c*frac(LINE)).sum()); sb1=float((c*frac(SB1)).sum()); sb2=float((c*frac(SB2)).sum()); side=sb1+sb2
+              ratio=(line/6)/(side/20) if side>0 else math.inf; exp=side/20*6 if side>0 else math.nan; z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
+              return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':n}
+          def measure_centers(e,cnt):
+              e=arr(e).reshape(-1); c=collapse(cnt,len(e))
+              if c is None or len(e)==0: return None
+              line=float(np.nansum(c[(e>=LINE[0])&(e<=LINE[1])])); sb1=float(np.nansum(c[(e>=SB1[0])&(e<=SB1[1])])); sb2=float(np.nansum(c[(e>=SB2[0])&(e<=SB2[1])])); side=sb1+sb2
+              ratio=(line/6)/(side/20) if side>0 else math.inf; exp=side/20*6 if side>0 else math.nan; z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
+              return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':len(e)}
+          if fits:
+              for p in PROD.glob('*'):
+                  if not p.name.lower().endswith(('.fits','.fit','.fits.gz','.fit.gz')): continue
+                  try:
+                      with fits.open(p,memmap=True) as hdul:
+                          for i,hdu in enumerate(hdul):
+                              cols=[]; nrows=''
+                              if hasattr(hdu,'columns') and hdu.columns is not None: cols=list(hdu.columns.names or [])
+                              try: nrows=len(hdu.data) if getattr(hdu,'data',None) is not None else ''
+                              except Exception: nrows=''
+                              rows.append({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'class':hdu.__class__.__name__,'rows':nrows,'column_count':len(cols),'columns':';'.join(cols[:120])})
+                              if not (hasattr(hdu,'columns') and hdu.columns is not None and hdu.data is not None): continue
+                              cmap={c.upper():c for c in cols}
+                              for a,b in E_PAIRS:
+                                  if a in cmap and b in cmap:
+                                      for ck in C_COLS:
+                                          if ck in cmap:
+                                              m=measure_edges(hdu.data[cmap[a]], hdu.data[cmap[b]], hdu.data[cmap[ck]])
+                                              if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_edges','energy_source':cmap[a]+'|'+cmap[b], 'count_source':cmap[ck]}); meas.append(m)
+                              for ek in E_SINGLE:
+                                  if ek in cmap:
+                                      for ck in C_COLS:
+                                          if ck in cmap and ck!=ek:
+                                              m=measure_centers(hdu.data[cmap[ek]], hdu.data[cmap[ck]])
+                                              if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_centers','energy_source':cmap[ek], 'count_source':cmap[ck]}); meas.append(m)
+                  except Exception as e: errs.append({'file':str(p),'error':repr(e)[:300]})
+          def write_csv(path, data):
+              keys=[]
+              for r in data:
+                  for k in r:
+                      if k not in keys: keys.append(k)
+              if not keys: keys=['empty']
+              with open(path,'w',newline='',encoding='utf-8') as f:
+                  w=csv.DictWriter(f,fieldnames=keys); w.writeheader(); [w.writerow({k:r.get(k,'') for k in keys}) for r in data]
+          write_csv(OUT/'R17K_SELECTED_PRODUCT_SCHEMA.csv',rows)
+          write_csv(OUT/'R17K_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
+          (OUT/'R17K_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
+          selected=list(PROD.glob('*'))
+          decision='R17K_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND_DIAGNOSTIC_NOT_PROOF' if selected else 'R17K_NO_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND'
+          if meas: decision='R17K_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          summary={'decision':decision,'proof_allowed':False,'selected_product_count':len(selected),'direct_511_measurement_rows':len(meas),'schema_rows':len(rows),'claim_ceiling':['OFFICIAL_OSA_PRODUCT_GENERATION_OR_LOCATOR_ONLY','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_LOCKED_CONTROLS_PASS']}
+          (OUT/'R17K_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          PY
+          python3 scripts/inspect_r17k_products.py | tee logs/inspect_r17k_products.log
+
+      - name: Package slim phone artifact
+        shell: bash
+        run: |
+          set +e
+          cp -r selected_products ACIRM_R17K_OSA_OUTPUTS/selected_products 2>/dev/null || true
+          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_OSA_OUTPUTS/R17K_SELECTED_PRODUCTS_MANIFEST.csv || true
+          df -h > ACIRM_R17K_OSA_OUTPUTS/R17K_DF_END.txt
+          free -h > ACIRM_R17K_OSA_OUTPUTS/R17K_FREE_END.txt
+          zip -r ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip ACIRM_R17K_OSA_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip > ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip.sha256.txt
+
+      - name: Upload slim artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R21AX_R7G_R3P_R2T_DIRECT_SPI_OPER_OCCUPANCY_NORMALIZED_LIGHT_RESULTS
+          name: ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT
           path: |
-            ACIRM_R21AX_R7G_R3P_R2T_DIRECT_SPI_OPER_OCCUPANCY_NORMALIZED_LIGHT_RESULTS.zip
-            ACIRM_R21AX_R7G_R3P_R2T_DIRECT_SPI_OPER_OCCUPANCY_NORMALIZED_LIGHT_RESULTS.zip.sha256.txt
-            ACIRM_R21AX_R7G_R3P_R2T_OCCUPANCY_NORM_RESULTS/logs/main_execution.log
-            ACIRM_R21AX_R7G_R3P_R2T_OCCUPANCY_NORM_RESULTS/logs/pip_astropy_numpy.log
-          if-no-files-found: warn
+            ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip
+            ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip.sha256.txt
+          retention-days: 7
