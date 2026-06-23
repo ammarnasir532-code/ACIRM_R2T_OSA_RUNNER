@@ -1,10 +1,10 @@
-name: ACIRM R17K R4 og_create SCW List Variant Probe
+name: ACIRM R17K R6 All Guarded OSA SPI511 Final Attempt
 
 on:
   workflow_dispatch:
 
 jobs:
-  r17k-r4-og-create-scw-list-variant-probe:
+  r17k-r6-all-guarded-osa-spi511:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -13,7 +13,8 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_R4_OUTPUTS logs scripts repo/scw/2504 selected_products og_attempts
+          mkdir -p ACIRM_R17K_R6_OUTPUTS logs scripts repo/scw/2504 selected_products og_attempts pfiles
+
           cat > scw_ids.list <<'EOF'
           250400090010
           250400020010
@@ -25,9 +26,10 @@ jobs:
           250400050010
           EOF
           sed -i 's/^ *//' scw_ids.list
-          cp scw_ids.list ACIRM_R17K_R4_OUTPUTS/LOCKED_SCW_IDS.txt
-          cat > ACIRM_R17K_R4_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R4_OG_CREATE_SCW_LIST_VARIANT_PROBE
+          cp scw_ids.list ACIRM_R17K_R6_OUTPUTS/LOCKED_SCW_IDS.txt
+
+          cat > ACIRM_R17K_R6_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R6_ALL_GUARDED_FINAL_ATTEMPT
           OFFICIAL_OSA_PRODUCT_GENERATION_OR_LOCATOR_ONLY
           NOT_DISCOVERY
           NOT_PARTICLE_PROOF
@@ -35,7 +37,7 @@ jobs:
           NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_PRODUCTS_AND_LOCKED_CONTROLS_PASS
           EOF
 
-      - name: System diagnostics and Python deps
+      - name: System diagnostics and dependencies
         shell: bash
         run: |
           set +e
@@ -44,14 +46,14 @@ jobs:
           free -h | tee logs/free_start.txt
           docker --version | tee logs/docker_version.txt
           sudo apt-get update -y > logs/apt_update.log 2>&1
-          sudo apt-get install -y curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
-          python3 -m pip install -q astropy numpy requests pyyaml > logs/pip_install.log 2>&1
+          sudo apt-get install -y curl wget zip unzip rsync python3-pip > logs/apt_install.log 2>&1
+          python3 -m pip install -q astropy numpy requests > logs/pip_install.log 2>&1
 
-      - name: Fetch SPI-focused locked SCW files from HEASARC
+      - name: Fetch locked SPI SCW files from HEASARC
         shell: bash
         run: |
-          set -Eeuo pipefail
-          cat > scripts/fetch_spi_focused.py <<'PY'
+          set +e
+          cat > scripts/fetch_spi_scw.py <<'PY'
           import re, json
           from pathlib import Path
           from urllib.parse import urljoin
@@ -59,18 +61,21 @@ jobs:
 
           REV = "2504"
           SCWS = [x.strip() for x in Path("scw_ids.list").read_text().splitlines() if x.strip()]
-          BASE = f"https://heasarc.gsfc.nasa.gov/FTP/integral/data/scw/{REV}/"
+          BASES = [
+              f"https://heasarc.gsfc.nasa.gov/FTP/integral/data/scw/{REV}/",
+              f"https://heasarc.gsfc.nasa.gov/FTP/integral/data/rev_3/scw/{REV}/",
+          ]
           OUT = Path("repo/scw") / REV
           OUT.mkdir(parents=True, exist_ok=True)
 
           KEEP_PREFIXES = ("spi_", "swg.fits", "sc_")
           KEEP_SUFFIXES = ("_scw.txt",)
-          MAX_FILE_MB = 250
-          MAX_TOTAL_MB = 3500
+          MAX_FILE_MB = 300
+          MAX_TOTAL_MB = 4200
           TIMEOUT = 60
 
           session = requests.Session()
-          session.headers.update({"User-Agent": "ACIRM-R17K-R4-fetch/1.0"})
+          session.headers.update({"User-Agent": "ACIRM-R17K-R6-fetch-scw/1.0"})
 
           rows = []
           total = 0
@@ -83,76 +88,85 @@ jobs:
               return low.startswith(KEEP_PREFIXES) or low.endswith(KEEP_SUFFIXES)
 
           for scw in SCWS:
-              url = urljoin(BASE, scw + ".001/")
-              d = OUT / (scw + ".001")
-              d.mkdir(parents=True, exist_ok=True)
+              target = OUT / (scw + ".001")
+              target.mkdir(parents=True, exist_ok=True)
+              got_listing = False
 
-              try:
-                  r = session.get(url, timeout=TIMEOUT, allow_redirects=True)
-                  rows.append({"scw": scw, "listing_url": url, "listing_status": r.status_code})
-                  if r.status_code != 200:
-                      continue
+              for base in BASES:
+                  url = urljoin(base, scw + ".001/")
+                  try:
+                      r = session.get(url, timeout=TIMEOUT, allow_redirects=True)
+                      rows.append({"scw": scw, "listing_url": url, "status": r.status_code})
+                      if r.status_code != 200:
+                          continue
 
-                  files = [h for h in hrefs(r.text) if h and not h.endswith("/") and keep(h)]
-                  rows.append({"scw": scw, "kept_file_count": len(files), "kept_files": ";".join(files)})
+                      got_listing = True
+                      files = [h for h in hrefs(r.text) if h and not h.endswith("/") and keep(h)]
+                      rows.append({"scw": scw, "kept_count": len(files), "kept_files": ";".join(files)})
 
-                  for fn in files:
-                      fu = urljoin(url, fn)
-                      try:
-                          hd = session.head(fu, timeout=TIMEOUT, allow_redirects=True)
-                          sz = hd.headers.get("Content-Length", "")
-                          sz = int(sz) if sz.isdigit() else 0
+                      for fn in files:
+                          fu = urljoin(url, fn)
+                          try:
+                              h = session.head(fu, timeout=TIMEOUT, allow_redirects=True)
+                              sz = h.headers.get("Content-Length", "")
+                              sz = int(sz) if sz.isdigit() else 0
 
-                          if hd.status_code != 200:
-                              rows.append({"scw": scw, "file": fn, "url": fu, "download": "HEAD_NOT_200", "status": hd.status_code})
-                              continue
+                              if h.status_code != 200:
+                                  rows.append({"scw": scw, "file": fn, "download": "HEAD_NOT_200", "status": h.status_code})
+                                  continue
 
-                          if sz and sz > MAX_FILE_MB * 1000 * 1000:
-                              rows.append({"scw": scw, "file": fn, "url": fu, "download": "SKIP_TOO_LARGE", "size_bytes": sz})
-                              continue
+                              if sz and sz > MAX_FILE_MB * 1000 * 1000:
+                                  rows.append({"scw": scw, "file": fn, "download": "SKIP_TOO_LARGE", "size_bytes": sz})
+                                  continue
 
-                          if sz and total + sz > MAX_TOTAL_MB * 1000 * 1000:
-                              rows.append({"scw": scw, "file": fn, "url": fu, "download": "SKIP_TOTAL_LIMIT", "size_bytes": sz})
-                              continue
+                              if sz and total + sz > MAX_TOTAL_MB * 1000 * 1000:
+                                  rows.append({"scw": scw, "file": fn, "download": "SKIP_TOTAL_LIMIT", "size_bytes": sz})
+                                  continue
 
-                          rr = session.get(fu, timeout=TIMEOUT, stream=True, allow_redirects=True)
-                          if rr.status_code != 200:
-                              rows.append({"scw": scw, "file": fn, "url": fu, "download": "GET_NOT_200", "status": rr.status_code})
-                              continue
+                              rr = session.get(fu, timeout=TIMEOUT, stream=True, allow_redirects=True)
+                              if rr.status_code != 200:
+                                  rows.append({"scw": scw, "file": fn, "download": "GET_NOT_200", "status": rr.status_code})
+                                  continue
 
-                          n = 0
-                          local = d / fn
-                          with open(local, "wb") as f:
-                              for chunk in rr.iter_content(1024 * 1024):
-                                  if not chunk:
-                                      continue
-                                  n += len(chunk)
-                                  if n > MAX_FILE_MB * 1000 * 1000:
-                                      raise RuntimeError("file exceeded max")
-                                  if total + n > MAX_TOTAL_MB * 1000 * 1000:
-                                      raise RuntimeError("total exceeded max")
-                                  f.write(chunk)
+                              local = target / fn
+                              n = 0
+                              with open(local, "wb") as f:
+                                  for chunk in rr.iter_content(1024 * 1024):
+                                      if not chunk:
+                                          continue
+                                      n += len(chunk)
+                                      if n > MAX_FILE_MB * 1000 * 1000:
+                                          raise RuntimeError("file exceeded limit")
+                                      if total + n > MAX_TOTAL_MB * 1000 * 1000:
+                                          raise RuntimeError("total exceeded limit")
+                                      f.write(chunk)
 
-                          total += n
-                          rows.append({"scw": scw, "file": fn, "url": fu, "local": str(local), "download": "DOWNLOADED", "size_bytes": n})
+                              total += n
+                              rows.append({"scw": scw, "file": fn, "url": fu, "local": str(local), "download": "DOWNLOADED", "size_bytes": n})
 
-                      except Exception as e:
-                          rows.append({"scw": scw, "file": fn, "url": fu, "download": "ERROR", "error": repr(e)[:300]})
+                          except Exception as e:
+                              rows.append({"scw": scw, "file": fn, "url": fu, "download": "ERROR", "error": repr(e)[:300]})
 
-              except Exception as e:
-                  rows.append({"scw": scw, "listing_url": url, "download": "LISTING_ERROR", "error": repr(e)[:300]})
+                      break
 
-          Path("ACIRM_R17K_R4_OUTPUTS/R17K_R4_SCW_FETCH_AUDIT.json").write_text(
+                  except Exception as e:
+                      rows.append({"scw": scw, "listing_url": url, "download": "LISTING_ERROR", "error": repr(e)[:300]})
+
+              if not got_listing:
+                  rows.append({"scw": scw, "download": "NO_LISTING_FOUND"})
+
+          Path("ACIRM_R17K_R6_OUTPUTS/R17K_R6_SCW_FETCH_AUDIT.json").write_text(
               json.dumps({"rows": rows, "total_bytes": total}, indent=2),
               encoding="utf-8"
           )
           PY
 
-          python3 scripts/fetch_spi_focused.py | tee logs/fetch_spi_focused_stdout.log
-          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_SCW_FILE_INVENTORY.txt
-          du -ah repo/scw/2504 | sort -h | tail -100 > ACIRM_R17K_R4_OUTPUTS/R17K_R4_SCW_SIZE_INVENTORY.txt
+          python3 scripts/fetch_spi_scw.py > logs/fetch_spi_scw_stdout.log 2>&1
+          echo "FETCH_SCW_EXIT=$?" | tee ACIRM_R17K_R6_OUTPUTS/R17K_R6_FETCH_SCW_EXIT.txt
+          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_R6_OUTPUTS/R17K_R6_SCW_FILE_INVENTORY.txt
+          du -sh repo/scw/2504 2>/dev/null | tee ACIRM_R17K_R6_OUTPUTS/R17K_R6_SCW_SIZE.txt
 
-      - name: Fetch lightweight IC IDX CAT AUX from HEASARC HTTP
+      - name: Fetch IC IDX CAT AUX light repository from HEASARC
         shell: bash
         run: |
           set +e
@@ -164,20 +178,26 @@ jobs:
 
           STARTS = [
               "https://heasarc.gsfc.nasa.gov/FTP/integral/data/idx/ic/",
+              "https://heasarc.gsfc.nasa.gov/FTP/integral/data/ic/",
               "https://heasarc.gsfc.nasa.gov/FTP/integral/data/ic/spi/",
+              "https://heasarc.gsfc.nasa.gov/FTP/integral/data/cat/",
               "https://heasarc.gsfc.nasa.gov/FTP/integral/data/cat/hec/",
               "https://heasarc.gsfc.nasa.gov/FTP/integral/data/aux/",
           ]
 
-          KEEP_TERMS = ("spi", "gnrl_refr_cat", "idx", "gain", "ebds", "rmf", "irf", "arf", "rsp", "time", "leap", "orbit", "aux")
-          MAX_DEPTH = 3
-          MAX_FILES = 260
-          MAX_FILE_MB = 180
-          MAX_TOTAL_MB = 4500
-          TIMEOUT = 45
+          KEEP_TERMS = (
+              "spi", "gnrl_refr_cat", "idx", "gain", "ebds", "rmf", "irf", "arf", "rsp",
+              "time", "leap", "orbit", "aux", "swg", "ic"
+          )
+
+          MAX_DEPTH = 4
+          MAX_FILES = 420
+          MAX_FILE_MB = 220
+          MAX_TOTAL_MB = 6500
+          TIMEOUT = 50
 
           session = requests.Session()
-          session.headers.update({"User-Agent": "ACIRM-R17K-R4-light-repo/1.0"})
+          session.headers.update({"User-Agent": "ACIRM-R17K-R6-light-repo/1.0"})
 
           rows = []
           q = [(u, MAX_DEPTH) for u in STARTS]
@@ -192,12 +212,11 @@ jobs:
               s = u.lower()
               return s.endswith((".fits", ".fit", ".fits.gz", ".fit.gz")) and any(t in s for t in KEEP_TERMS)
 
-          while q and len(seen) < 220 and len(files) < MAX_FILES:
+          while q and len(seen) < 500 and len(files) < MAX_FILES:
               url, depth = q.pop(0)
               if url in seen:
                   continue
               seen.add(url)
-
               try:
                   r = session.get(url, timeout=TIMEOUT, allow_redirects=True)
                   rows.append({"url": url, "depth": depth, "status": r.status_code, "bytes": len(r.content or b"")})
@@ -207,9 +226,10 @@ jobs:
                   for h in hrefs(r.text):
                       if not h or h in ("../", "./", "/") or h.startswith("?"):
                           continue
-
                       full = urljoin(url, h)
-                      if h.endswith("/") and depth > 0 and any(t in full.lower() for t in ("spi", "idx", "ic", "cat", "aux", "rsp", "cfg", "hec")):
+                      low = full.lower()
+
+                      if h.endswith("/") and depth > 0 and any(t in low for t in ("spi", "idx", "ic", "cat", "aux", "rsp", "cfg", "hec", "gnrl", "time", "orbit")):
                           q.append((full, depth - 1))
                       elif keep_file(full):
                           files.append(full)
@@ -221,12 +241,12 @@ jobs:
           downloaded = []
           for fu in sorted(set(files)):
               try:
-                  hd = session.head(fu, timeout=TIMEOUT, allow_redirects=True)
-                  sz = hd.headers.get("Content-Length", "")
+                  h = session.head(fu, timeout=TIMEOUT, allow_redirects=True)
+                  sz = h.headers.get("Content-Length", "")
                   sz = int(sz) if sz.isdigit() else 0
 
-                  if hd.status_code != 200:
-                      downloaded.append({"url": fu, "download": "HEAD_NOT_200", "status": hd.status_code})
+                  if h.status_code != 200:
+                      downloaded.append({"url": fu, "download": "HEAD_NOT_200", "status": h.status_code})
                       continue
 
                   if sz and sz > MAX_FILE_MB * 1000 * 1000:
@@ -241,21 +261,21 @@ jobs:
                   local = Path("repo") / rel
                   local.parent.mkdir(parents=True, exist_ok=True)
 
-                  rr = session.get(fu, timeout=TIMEOUT, stream=True, allow_redirects=True)
-                  if rr.status_code != 200:
-                      downloaded.append({"url": fu, "download": "GET_NOT_200", "status": rr.status_code})
+                  r = session.get(fu, timeout=TIMEOUT, stream=True, allow_redirects=True)
+                  if r.status_code != 200:
+                      downloaded.append({"url": fu, "download": "GET_NOT_200", "status": r.status_code})
                       continue
 
                   n = 0
                   with open(local, "wb") as out:
-                      for chunk in rr.iter_content(1024 * 1024):
+                      for chunk in r.iter_content(1024 * 1024):
                           if not chunk:
                               continue
                           n += len(chunk)
                           if n > MAX_FILE_MB * 1000 * 1000:
-                              raise RuntimeError("file exceeded max")
+                              raise RuntimeError("file exceeded limit")
                           if total + n > MAX_TOTAL_MB * 1000 * 1000:
-                              raise RuntimeError("total exceeded max")
+                              raise RuntimeError("total exceeded limit")
                           out.write(chunk)
 
                   total += n
@@ -264,23 +284,34 @@ jobs:
               except Exception as e:
                   downloaded.append({"url": fu, "download": "ERROR", "error": repr(e)[:300]})
 
-          Path("ACIRM_R17K_R4_OUTPUTS/R17K_R4_LIGHT_REPO_FETCH_AUDIT.json").write_text(
-              json.dumps({"crawl_rows": rows, "candidate_files": len(set(files)), "download_rows": downloaded, "total_bytes": total}, indent=2),
-              encoding="utf-8"
+          Path("ACIRM_R17K_R6_OUTPUTS/R17K_R6_LIGHT_REPO_FETCH_AUDIT.json").write_text(
+              json.dumps(
+                  {
+                      "crawl_rows": rows,
+                      "candidate_files": len(set(files)),
+                      "download_rows": downloaded,
+                      "total_bytes": total,
+                  },
+                  indent=2,
+              ),
+              encoding="utf-8",
           )
           PY
 
-          python3 scripts/fetch_light_repo.py | tee logs/fetch_light_repo_stdout.log
-          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_REPO_DIRS.txt
-          find repo -maxdepth 6 -type f | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_REPO_FILES.txt
-          du -sh repo > ACIRM_R17K_R4_OUTPUTS/R17K_R4_REPO_SIZE.txt
+          python3 scripts/fetch_light_repo.py > logs/fetch_light_repo_stdout.log 2>&1
+          echo "FETCH_LIGHT_REPO_EXIT=$?" | tee ACIRM_R17K_R6_OUTPUTS/R17K_R6_FETCH_LIGHT_REPO_EXIT.txt
 
-      - name: Pull OSA Docker and prepare runtime init script
+          mkdir -p repo/ic repo/idx repo/idx/ic repo/cat repo/cat/hec repo/aux
+          find repo -maxdepth 6 -type f | sort > ACIRM_R17K_R6_OUTPUTS/R17K_R6_REPO_FILES.txt
+          find repo -maxdepth 5 -type d | sort > ACIRM_R17K_R6_OUTPUTS/R17K_R6_REPO_DIRS.txt
+          du -sh repo 2>/dev/null | tee ACIRM_R17K_R6_OUTPUTS/R17K_R6_REPO_SIZE.txt
+
+      - name: Pull OSA Docker and create runtime init
         shell: bash
         run: |
           set +e
           docker pull integralsw/osa:latest > logs/docker_pull_integralsw_osa.log 2>&1
-          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R4_OUTPUTS/R17K_R4_DOCKER_PULL_EXIT.txt
+          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R6_OUTPUTS/R17K_R6_DOCKER_PULL_EXIT.txt
 
           cat > scripts/osa_runtime_init.sh <<'SH'
           set +e
@@ -299,7 +330,6 @@ jobs:
             /usr/local/osa/bin/osa-init.sh
           do
             if [ -f "$init" ]; then
-              echo "SOURCE_INIT=$init"
               . "$init" || true
             fi
           done
@@ -314,18 +344,19 @@ jobs:
 
           OG_PAR=$(find /opt /usr/local /usr -type f -name og_create.par 2>/dev/null | head -1)
           SP_PAR=$(find /opt /usr/local /usr -type f -name spi_science_analysis.par 2>/dev/null | head -1)
+
           SYS_PFILES=""
           if [ -n "$OG_PAR" ]; then SYS_PFILES="$(dirname "$OG_PAR")"; fi
           if [ -z "$SYS_PFILES" ] && [ -n "$SP_PAR" ]; then SYS_PFILES="$(dirname "$SP_PAR")"; fi
 
           mkdir -p /work/pfiles
           if [ -n "$SYS_PFILES" ]; then
+            cp "$SYS_PFILES"/*.par /work/pfiles/ 2>/dev/null || true
             export PFILES="/work/pfiles;$SYS_PFILES"
           else
             export PFILES="/work/pfiles"
           fi
 
-          echo "RUNTIME_INIT_REPORT_BEGIN"
           echo "REP_BASE_PROD=$REP_BASE_PROD"
           echo "CURRENT_IC=$CURRENT_IC"
           echo "ISDC_REF_CAT=$ISDC_REF_CAT"
@@ -336,12 +367,10 @@ jobs:
           echo "SP=$SP"
           echo "OG_PAR=$OG_PAR"
           echo "SP_PAR=$SP_PAR"
-          echo "SYS_PFILES=$SYS_PFILES"
-          echo "RUNTIME_INIT_REPORT_END"
           SH
           chmod +x scripts/osa_runtime_init.sh
 
-      - name: Probe og_create parameter files and SCW list variants
+      - name: All guarded OSA og_create attempts
         shell: bash
         run: |
           set +e
@@ -353,101 +382,124 @@ jobs:
               set +e
               . /work/scripts/osa_runtime_init.sh
 
-              mkdir -p /work/ACIRM_R17K_R4_OUTPUTS /work/og_attempts /work/pfiles
+              mkdir -p /work/ACIRM_R17K_R6_OUTPUTS /work/og_attempts /work/pfiles /home/integral/repo/obs
 
-              echo "=== versions ===" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt
-              which og_create >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt 2>&1
-              which spi_science_analysis >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt 2>&1
-              og_create --version >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt 2>&1
-              spi_science_analysis --version >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt 2>&1
+              {
+                echo "=== R17K_R6 OSA PREFLIGHT ==="
+                which og_create || true
+                which spi_science_analysis || true
+                og_create --version || true
+                spi_science_analysis --version || true
+                echo "REP_BASE_PROD=$REP_BASE_PROD"
+                echo "CURRENT_IC=$CURRENT_IC"
+                echo "ISDC_REF_CAT=$ISDC_REF_CAT"
+                echo "PFILES=$PFILES"
+                echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+                echo "=== repo dirs ==="
+                find /home/integral/repo -maxdepth 3 -type d | sort | head -300
+                echo "=== repo files sample ==="
+                find /home/integral/repo -maxdepth 5 -type f | sort | head -300
+              } > /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_OSA_PREFLIGHT.txt 2>&1
 
-              echo "=== og_create.par ===" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_CREATE_PAR.txt
-              find /opt /usr/local /usr -type f -name og_create.par 2>/dev/null -print -exec cat {} \; >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_CREATE_PAR.txt 2>&1
-
-              echo "=== spi_science_analysis.par ===" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_SCIENCE_ANALYSIS_PAR.txt
-              find /opt /usr/local /usr -type f -name spi_science_analysis.par 2>/dev/null -print -exec cat {} \; >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_SCIENCE_ANALYSIS_PAR.txt 2>&1
-
-              echo "=== pfiles before ===" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_PFILES_LISTING.txt
-              find /work/pfiles -maxdepth 2 -type f -print >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_PFILES_LISTING.txt 2>&1
-              find /opt/osa/pfiles -maxdepth 1 -type f -name "*.par" | sort | head -200 >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_PFILES_LISTING.txt 2>&1
-
-              # Build SCW list variants.
-              : > /work/scw_variant_ids.list
-              : > /work/scw_variant_rel_scw.list
-              : > /work/scw_variant_rel_noscw.list
-              : > /work/scw_variant_abs.list
-              : > /work/scw_variant_abs_swg.list
+              # Build robust SCW list variants.
+              : > /work/scw_ids_only.list
+              : > /work/scw_rel_dirs.list
+              : > /work/scw_rel_swg.list
+              : > /work/scw_abs_dirs.list
+              : > /work/scw_abs_swg.list
+              : > /work/scw_fits_bracket.list
 
               while read -r id; do
                 [ -n "$id" ] || continue
-                echo "$id" >> /work/scw_variant_ids.list
-                echo "scw/2504/${id}.001" >> /work/scw_variant_rel_scw.list
-                echo "2504/${id}.001" >> /work/scw_variant_rel_noscw.list
-                echo "/home/integral/repo/scw/2504/${id}.001" >> /work/scw_variant_abs.list
-                echo "/home/integral/repo/scw/2504/${id}.001/swg.fits" >> /work/scw_variant_abs_swg.list
+                echo "$id" >> /work/scw_ids_only.list
+                echo "scw/2504/${id}.001" >> /work/scw_rel_dirs.list
+                echo "scw/2504/${id}.001/swg.fits" >> /work/scw_rel_swg.list
+                echo "/home/integral/repo/scw/2504/${id}.001" >> /work/scw_abs_dirs.list
+                echo "/home/integral/repo/scw/2504/${id}.001/swg.fits" >> /work/scw_abs_swg.list
+                echo "/home/integral/repo/scw/2504/${id}.001/swg.fits[1]" >> /work/scw_fits_bracket.list
               done < /work/scw_ids.list
 
-              cp /work/scw_variant_*.list /work/ACIRM_R17K_R4_OUTPUTS/ 2>/dev/null || true
+              cp /work/scw_*.list /work/ACIRM_R17K_R6_OUTPUTS/ 2>/dev/null || true
 
-              echo "variant,syntax,exit_code,og_spi_found,attempt_dir" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_CREATE_ATTEMPT_SUMMARY.csv
+              echo "variant,syntax,base,exit_code,og_spi_found,first_og_spi,attempt_dir" > /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_OG_CREATE_ATTEMPT_SUMMARY.csv
 
               try_og() {
                 variant="$1"
                 list="$2"
                 syntax="$3"
-                outdir="/work/og_attempts/${variant}_${syntax}"
+                base="$4"
+                safe_base=$(echo "$base" | sed "s#[/:[:space:]]#_#g")
+                outdir="/work/og_attempts/${variant}_${syntax}_${safe_base}"
                 mkdir -p "$outdir"
                 cd "$outdir"
                 cp "$list" ./scw_input.list
 
-                echo "=== TRY variant=$variant syntax=$syntax list=$list outdir=$outdir ===" > "$outdir/run.log"
-                echo "PWD=$(pwd)" >> "$outdir/run.log"
-                echo "PFILES=$PFILES" >> "$outdir/run.log"
-                cat ./scw_input.list >> "$outdir/run.log"
+                {
+                  echo "=== TRY variant=$variant syntax=$syntax base=$base ==="
+                  echo "PWD=$(pwd)"
+                  echo "REP_BASE_PROD=$REP_BASE_PROD"
+                  echo "CURRENT_IC=$CURRENT_IC"
+                  echo "PFILES=$PFILES"
+                  echo "--- scw_input.list ---"
+                  cat ./scw_input.list
+                  echo "--- command output ---"
+                } > "$outdir/run.log"
 
                 if [ "$syntax" = "positional" ]; then
-                  og_create ./scw_input.list SPI "og_${variant}_${syntax}" ./ >> "$outdir/run.log" 2>&1
-                elif [ "$syntax" = "named_basic" ]; then
-                  og_create idxSwg=./scw_input.list instrument=SPI ogid="og_${variant}_${syntax}" baseDir=./ >> "$outdir/run.log" 2>&1
-                elif [ "$syntax" = "named_alt" ]; then
-                  og_create scwList=./scw_input.list instrument=SPI ogid="og_${variant}_${syntax}" baseDir=./ >> "$outdir/run.log" 2>&1
-                else
-                  echo "UNKNOWN_SYNTAX" >> "$outdir/run.log"
+                  og_create ./scw_input.list SPI "og_${variant}_${syntax}_${safe_base}" "$base" >> "$outdir/run.log" 2>&1
+                elif [ "$syntax" = "named_idxSwg" ]; then
+                  og_create idxSwg=./scw_input.list instrument=SPI ogid="og_${variant}_${syntax}_${safe_base}" baseDir="$base" >> "$outdir/run.log" 2>&1
+                elif [ "$syntax" = "named_scwList" ]; then
+                  og_create scwList=./scw_input.list instrument=SPI ogid="og_${variant}_${syntax}_${safe_base}" baseDir="$base" >> "$outdir/run.log" 2>&1
+                elif [ "$syntax" = "named_full" ]; then
+                  og_create idxSwg=./scw_input.list instrument=SPI ogid="og_${variant}_${syntax}_${safe_base}" baseDir="$base" ogDOL=og_spi.fits >> "$outdir/run.log" 2>&1
                 fi
 
                 ec=$?
-                found=$(find "$outdir" -type f -name "og_spi.fits" | head -1)
+                found=$(find "$outdir" /work /home/integral/repo -type f -name "og_spi.fits" 2>/dev/null | head -1)
                 if [ -n "$found" ]; then yesno=1; else yesno=0; fi
-                echo "${variant},${syntax},${ec},${yesno},${outdir}" >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_CREATE_ATTEMPT_SUMMARY.csv
-                find "$outdir" -maxdepth 4 -type f | sort > "$outdir/file_inventory.txt"
+                echo "${variant},${syntax},${base},${ec},${yesno},${found},${outdir}" >> /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_OG_CREATE_ATTEMPT_SUMMARY.csv
+                find "$outdir" -maxdepth 6 -type f | sort > "$outdir/file_inventory.txt"
                 cd /work
+
+                if [ "$yesno" = "1" ]; then
+                  cp "$found" /work/selected_products/og_spi.fits 2>/dev/null || true
+                  echo "$found" > /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_FIRST_OG_SPI_PATH.txt
+                  return 0
+                fi
+
+                return 1
               }
 
-              for v in ids rel_scw rel_noscw abs abs_swg; do
-                list="/work/scw_variant_${v}.list"
+              success=0
+
+              for v in ids_only rel_dirs rel_swg abs_dirs abs_swg fits_bracket; do
+                list="/work/scw_${v}.list"
                 [ -f "$list" ] || continue
-                try_og "$v" "$list" positional
-                try_og "$v" "$list" named_basic
-                try_og "$v" "$list" named_alt
+                for base in "." "./" "" "/home/integral/repo" "/home/integral/repo/"; do
+                  for syntax in positional named_idxSwg named_scwList named_full; do
+                    try_og "$v" "$list" "$syntax" "$base"
+                    if [ "$?" = "0" ]; then
+                      success=1
+                      break 3
+                    fi
+                  done
+                done
               done
 
-              find /work/og_attempts -type f \( -name "og_spi.fits" -o -name "og_*.fits" -o -name "run.log" -o -name "file_inventory.txt" \) | sort > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_ATTEMPT_FILES.txt
+              echo "$success" > /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_OG_CREATE_SUCCESS_FLAG.txt
 
-              first_og=$(find /work/og_attempts -type f -name "og_spi.fits" | head -1)
-              echo "$first_og" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_FIRST_OG_SPI_PATH.txt
+              find /work/og_attempts /home/integral/repo/obs -type f \( -name "og_spi.fits" -o -name "og_*.fits" -o -name "run.log" -o -name "file_inventory.txt" \) 2>/dev/null | sort > /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_OG_ATTEMPT_FILES.txt
+            ' > logs/r17k_r6_og_create_all_guarded.log 2>&1
 
-              if [ -n "$first_og" ]; then
-                cp "$first_og" /work/selected_products/og_spi.fits || true
-              fi
-            ' > logs/r17k_r4_og_probe.log 2>&1
-          echo "R17K_R4_OG_PROBE_EXIT=$?" | tee ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_PROBE_EXIT.txt
+          echo "R17K_R6_OG_ATTEMPT_STEP_EXIT=$?" | tee ACIRM_R17K_R6_OUTPUTS/R17K_R6_OG_ATTEMPT_STEP_EXIT.txt
 
-      - name: Optional non-GUI spi_science_analysis only if og_spi exists
+      - name: SPI science analysis only if og_spi exists
         shell: bash
         run: |
           set +e
-          if [ ! -s ACIRM_R17K_R4_OUTPUTS/R17K_R4_FIRST_OG_SPI_PATH.txt ]; then
-            echo "NO_OG_SPI_FOUND_SKIP_SPI_SCIENCE_ANALYSIS" | tee ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_SCIENCE_ANALYSIS_EXIT.txt
+          if [ ! -s ACIRM_R17K_R6_OUTPUTS/R17K_R6_FIRST_OG_SPI_PATH.txt ]; then
+            echo "NO_OG_SPI_FOUND_SKIP_SPI_SCIENCE_ANALYSIS" | tee ACIRM_R17K_R6_OUTPUTS/R17K_R6_SPI_SCIENCE_ANALYSIS_EXIT.txt
             exit 0
           fi
 
@@ -458,20 +510,31 @@ jobs:
             integralsw/osa:latest bash -lc '
               set +e
               . /work/scripts/osa_runtime_init.sh
-              first_og=$(cat /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_FIRST_OG_SPI_PATH.txt)
+
+              first_og=$(cat /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_FIRST_OG_SPI_PATH.txt)
               attempt_dir=$(dirname "$first_og")
               cd "$attempt_dir"
-              echo "RUNNING_SPI_SCIENCE_IN=$attempt_dir"
-              spi_science_analysis mode=h
-              echo "SPI_SCIENCE_ANALYSIS_MODE_H_EXIT=$?" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_SCIENCE_ANALYSIS_EXIT.txt
-              find "$attempt_dir" -type f \( -iname "*evts*det*spec*" -o -iname "*energy*bound*" -o -iname "*ebounds*" -o -iname "*spi*spect*" -o -iname "*.fits" \) | sort > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_PRODUCTS_FOUND.txt
-            ' > logs/r17k_r4_spi_science_optional.log 2>&1
 
-      - name: Collect selected products and inspect
+              {
+                echo "RUNNING_SPI_SCIENCE_IN=$attempt_dir"
+                echo "first_og=$first_og"
+                echo "PFILES=$PFILES"
+                echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+              } > /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_SPI_SCIENCE_CONTEXT.txt
+
+              # Non-interactive hidden mode first.
+              spi_science_analysis mode=h
+              ec=$?
+              echo "SPI_SCIENCE_ANALYSIS_MODE_H_EXIT=$ec" > /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_SPI_SCIENCE_ANALYSIS_EXIT.txt
+
+              find "$attempt_dir" /work /home/integral/repo -type f \( -iname "*evts*det*spec*" -o -iname "*energy*bound*" -o -iname "*ebounds*" -o -iname "*spi*spect*" -o -iname "*.fits" \) 2>/dev/null | sort > /work/ACIRM_R17K_R6_OUTPUTS/R17K_R6_SPI_PRODUCTS_FOUND.txt
+            ' > logs/r17k_r6_spi_science_if_og.log 2>&1
+
+      - name: Collect products and inspect direct 511 rows
         shell: bash
         run: |
           set +e
-          find . -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' \) | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_SELECTED_PRODUCT_PATHS.txt
+          find . -type f \( -iname 'og_spi.fits' -o -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' \) | sort > ACIRM_R17K_R6_OUTPUTS/R17K_R6_SELECTED_PRODUCT_PATHS.txt
 
           while IFS= read -r f; do
             [ -f "$f" ] || continue
@@ -479,13 +542,13 @@ jobs:
             if [ "$size" -le 200000000 ]; then
               cp -f "$f" selected_products/ || true
             fi
-          done < ACIRM_R17K_R4_OUTPUTS/R17K_R4_SELECTED_PRODUCT_PATHS.txt
+          done < ACIRM_R17K_R6_OUTPUTS/R17K_R6_SELECTED_PRODUCT_PATHS.txt
 
-          cp logs/*.log ACIRM_R17K_R4_OUTPUTS/ 2>/dev/null || true
-          cp -r og_attempts ACIRM_R17K_R4_OUTPUTS/og_attempts_light_logs 2>/dev/null || true
-          find ACIRM_R17K_R4_OUTPUTS/og_attempts_light_logs -type f ! -name 'run.log' ! -name 'file_inventory.txt' ! -name '*.txt' -delete 2>/dev/null || true
+          cp logs/*.log ACIRM_R17K_R6_OUTPUTS/ 2>/dev/null || true
+          cp -r og_attempts ACIRM_R17K_R6_OUTPUTS/og_attempts_light_logs 2>/dev/null || true
+          find ACIRM_R17K_R6_OUTPUTS/og_attempts_light_logs -type f ! -name 'run.log' ! -name 'file_inventory.txt' -delete 2>/dev/null || true
 
-          cat > scripts/inspect_products.py <<'PY'
+          cat > scripts/inspect_final.py <<'PY'
           import json, csv, math
           from pathlib import Path
           import numpy as np
@@ -495,9 +558,8 @@ jobs:
           except Exception:
               fits = None
 
-          OUT = Path("ACIRM_R17K_R4_OUTPUTS")
+          OUT = Path("ACIRM_R17K_R6_OUTPUTS")
           PROD = Path("selected_products")
-
           rows = []
           meas = []
           errs = []
@@ -554,7 +616,6 @@ jobs:
               ratio = (line / 6) / (side / 20) if side > 0 else math.inf
               exp = side / 20 * 6 if side > 0 else math.nan
               z = (line - exp) / math.sqrt(exp) if exp and exp > 0 else math.nan
-
               return {
                   "line_508_514_counts": line,
                   "side_490_500_counts": sb1,
@@ -571,7 +632,6 @@ jobs:
               c = collapse(cnt, len(e))
               if c is None or len(e) == 0:
                   return None
-
               line = float(np.nansum(c[(e >= LINE[0]) & (e <= LINE[1])]))
               sb1 = float(np.nansum(c[(e >= SB1[0]) & (e <= SB1[1])]))
               sb2 = float(np.nansum(c[(e >= SB2[0]) & (e <= SB2[1])]))
@@ -579,7 +639,6 @@ jobs:
               ratio = (line / 6) / (side / 20) if side > 0 else math.inf
               exp = side / 20 * 6 if side > 0 else math.nan
               z = (line - exp) / math.sqrt(exp) if exp and exp > 0 else math.nan
-
               return {
                   "line_508_514_counts": line,
                   "side_490_500_counts": sb1,
@@ -672,29 +731,27 @@ jobs:
                   for r in data:
                       w.writerow({k: r.get(k, "") for k in keys})
 
-          write_csv(OUT / "R17K_R4_SELECTED_PRODUCT_SCHEMA.csv", rows)
-          write_csv(OUT / "R17K_R4_DIRECT_511_MEASUREMENT_ROWS.csv", meas)
-          (OUT / "R17K_R4_PRODUCT_INSPECTION_ERRORS.json").write_text(json.dumps(errs, indent=2), encoding="utf-8")
+          write_csv(OUT / "R17K_R6_SELECTED_PRODUCT_SCHEMA.csv", rows)
+          write_csv(OUT / "R17K_R6_DIRECT_511_MEASUREMENT_ROWS.csv", meas)
+          (OUT / "R17K_R6_PRODUCT_INSPECTION_ERRORS.json").write_text(json.dumps(errs, indent=2), encoding="utf-8")
 
           selected = list(PROD.glob("*"))
-          attempt_summary = OUT / "R17K_R4_OG_CREATE_ATTEMPT_SUMMARY.csv"
-          og_found = False
-          if attempt_summary.exists():
-              text = attempt_summary.read_text(errors="replace")
-              og_found = ",1," in text or text.rstrip().endswith(",1")
+          og_flag = (OUT / "R17K_R6_OG_CREATE_SUCCESS_FLAG.txt")
+          og_success = og_flag.exists() and og_flag.read_text(errors="replace").strip() == "1"
 
-          decision = "R17K_R4_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS"
-          if og_found:
-              decision = "R17K_R4_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF"
-          if selected:
-              decision = "R17K_R4_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND_DIAGNOSTIC_NOT_PROOF"
+          decision = "R17K_R6_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS"
+          if og_success:
+              decision = "R17K_R6_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF"
+          if any(("evts" in p.name.lower() or "energy" in p.name.lower() or "ebounds" in p.name.lower()) for p in selected):
+              decision = "R17K_R6_OFFICIAL_SPI_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF"
           if meas:
-              decision = "R17K_R4_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF"
+              decision = "R17K_R6_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF"
 
           summary = {
               "decision": decision,
               "proof_allowed": False,
               "selected_product_count": len(selected),
+              "og_success": og_success,
               "direct_511_measurement_rows": len(meas),
               "schema_rows": len(rows),
               "claim_ceiling": [
@@ -706,28 +763,28 @@ jobs:
               ]
           }
 
-          (OUT / "R17K_R4_DECISION.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+          (OUT / "R17K_R6_DECISION.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
           PY
 
-          python3 scripts/inspect_products.py | tee logs/inspect_products.log
+          python3 scripts/inspect_final.py > logs/inspect_final.log 2>&1
 
       - name: Package slim artifact
         shell: bash
         run: |
           set +e
-          cp -r selected_products ACIRM_R17K_R4_OUTPUTS/selected_products 2>/dev/null || true
-          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_SELECTED_PRODUCTS_MANIFEST.csv || true
-          df -h > ACIRM_R17K_R4_OUTPUTS/R17K_R4_DF_END.txt
-          free -h > ACIRM_R17K_R4_OUTPUTS/R17K_R4_FREE_END.txt
-          zip -r ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip ACIRM_R17K_R4_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip > ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip.sha256.txt
+          cp -r selected_products ACIRM_R17K_R6_OUTPUTS/selected_products 2>/dev/null || true
+          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R6_OUTPUTS/R17K_R6_SELECTED_PRODUCTS_MANIFEST.csv || true
+          df -h > ACIRM_R17K_R6_OUTPUTS/R17K_R6_DF_END.txt
+          free -h > ACIRM_R17K_R6_OUTPUTS/R17K_R6_FREE_END.txt
+          zip -r ACIRM_R17K_R6_ALL_GUARDED_FINAL_OUTPUT.zip ACIRM_R17K_R6_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R6_ALL_GUARDED_FINAL_OUTPUT.zip > ACIRM_R17K_R6_ALL_GUARDED_FINAL_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R6_ALL_GUARDED_FINAL_OUTPUT.zip ACIRM_R17K_R6_ALL_GUARDED_FINAL_OUTPUT.zip.sha256.txt
 
       - name: Upload slim artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT
+          name: ACIRM_R17K_R6_ALL_GUARDED_FINAL_OUTPUT
           path: |
-            ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip
-            ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R6_ALL_GUARDED_FINAL_OUTPUT.zip
+            ACIRM_R17K_R6_ALL_GUARDED_FINAL_OUTPUT.zip.sha256.txt
           retention-days: 7
