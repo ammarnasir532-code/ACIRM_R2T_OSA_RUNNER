@@ -1,20 +1,20 @@
-name: ACIRM R17K OSA SPI511 Official Product Generator
+name: ACIRM R17K R2 Direct Docker Mount OSA SPI511
 
 on:
   workflow_dispatch:
 
 jobs:
-  r17k-osa-spi511-official-products:
+  r17k-r2-direct-docker-mount-osa-spi511:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
     steps:
-      - name: Prepare folders and locked inputs
+      - name: Prepare locked inputs
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_OSA_OUTPUTS repo/scw/2504 logs scripts products selected_products
-          cat > ACIRM_R17K_OSA_OUTPUTS/LOCKED_SCW_LIST.txt <<'EOF'
+          mkdir -p ACIRM_R17K_R2_OUTPUTS logs scripts repo/scw/2504 selected_products
+          cat > scw.list <<'EOF'
           250400090010
           250400020010
           250400080010
@@ -24,21 +24,18 @@ jobs:
           250400060010
           250400050010
           EOF
-          sed -i 's/^ *//' ACIRM_R17K_OSA_OUTPUTS/LOCKED_SCW_LIST.txt
-          cp ACIRM_R17K_OSA_OUTPUTS/LOCKED_SCW_LIST.txt scw.list
-          cat > ACIRM_R17K_OSA_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_CLAIM_CEILING:
+          sed -i 's/^ *//' scw.list
+          cp scw.list ACIRM_R17K_R2_OUTPUTS/LOCKED_SCW_LIST.txt
+          cat > ACIRM_R17K_R2_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R2_DIRECT_DOCKER_MOUNT_OSA
           OFFICIAL_OSA_PRODUCT_GENERATION_OR_LOCATOR_ONLY
           NOT_DISCOVERY
           NOT_PARTICLE_PROOF
           NOT_SOURCE_ATTRIBUTION
           NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_PRODUCTS_AND_LOCKED_CONTROLS_PASS
           EOF
-          cat > ACIRM_R17K_OSA_OUTPUTS/R17K_STATUS.txt <<'EOF'
-          R17K_R1_FIXED_REGEX_STARTED
-          EOF
 
-      - name: System diagnostics
+      - name: System diagnostics and Python deps
         shell: bash
         run: |
           set +e
@@ -46,557 +43,337 @@ jobs:
           df -h | tee logs/df_start.txt
           free -h | tee logs/free_start.txt
           docker --version | tee logs/docker_version.txt
-          python3 --version | tee logs/python_version.txt
           sudo apt-get update -y > logs/apt_update.log 2>&1
-          sudo apt-get install -y rsync curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
+          sudo apt-get install -y curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
           python3 -m pip install -q astropy numpy requests > logs/pip_install.log 2>&1
 
-      - name: Fetch locked Rev 2504 SCW directories from HEASARC
+      - name: Fetch SPI-focused locked SCW files from HEASARC
         shell: bash
         run: |
           set -Eeuo pipefail
-          cat > scripts/fetch_locked_scw.py <<'PY'
-          import re
-          import json
+          cat > scripts/fetch_spi_focused.py <<'PY'
+          import re, json
           from pathlib import Path
           from urllib.parse import urljoin
           import requests
-
-          REV = "2504"
-          SCWS = [x.strip() for x in Path("scw.list").read_text().splitlines() if x.strip()]
-          BASES = [
-              f"https://heasarc.gsfc.nasa.gov/FTP/integral/data/scw/{REV}/",
-              f"https://heasarc.gsfc.nasa.gov/FTP/integral/data/rev_3/scw/{REV}/",
-          ]
-
-          OUT = Path("repo/scw") / REV
+          REV='2504'
+          SCWS=[x.strip() for x in Path('scw.list').read_text().splitlines() if x.strip()]
+          BASE=f'https://heasarc.gsfc.nasa.gov/FTP/integral/data/scw/{REV}/'
+          OUT=Path('repo/scw')/REV
           OUT.mkdir(parents=True, exist_ok=True)
-
-          MAX_FILE_MB = 700
-          MAX_TOTAL_MB = 9500
-          TIMEOUT = 60
-
-          session = requests.Session()
-          session.headers.update({"User-Agent": "ACIRM-R17K-R1-fixed-fetch/1.0"})
-
-          rows = []
-          total = 0
-
+          KEEP_PREFIXES=('spi_', 'swg.fits', 'sc_',)
+          KEEP_SUFFIXES=('_scw.txt',)
+          MAX_FILE_MB=250
+          MAX_TOTAL_MB=3500
+          TIMEOUT=60
+          session=requests.Session(); session.headers.update({'User-Agent':'ACIRM-R17K-R2-fetch/1.0'})
+          rows=[]; total=0
           def hrefs(html):
-              return sorted(set(
-                  m.group(1)
-                  for m in re.finditer(r"href=[\"']([^\"']+)[\"']", html, re.I)
-              ))
-
+              return sorted(set(m.group(1) for m in re.finditer(r"href=[\"']([^\"']+)[\"']", html, re.I)))
+          def keep(fn):
+              low=fn.lower()
+              return low.startswith(KEEP_PREFIXES) or low.endswith(KEEP_SUFFIXES)
           for scw in SCWS:
-              target_dir = OUT / (scw + ".001")
-              target_dir.mkdir(parents=True, exist_ok=True)
-              found_listing = False
-
-              for base in BASES:
-                  url = urljoin(base, scw + ".001/")
-                  row = {
-                      "scw": scw,
-                      "listing_url": url,
-                      "listing_status": "",
-                      "files_seen": 0,
-                      "files_downloaded": 0,
-                      "error": ""
-                  }
-
-                  try:
-                      r = session.get(url, timeout=TIMEOUT, allow_redirects=True)
-                      row["listing_status"] = r.status_code
-
-                      if r.status_code != 200:
-                          rows.append(row)
-                          continue
-
-                      found_listing = True
-                      links = [
-                          h for h in hrefs(r.text)
-                          if h and not h.startswith("?") and h not in ("../", "./", "/")
-                      ]
-                      files = [h for h in links if not h.endswith("/")]
-                      row["files_seen"] = len(files)
-
-                      for f in files:
-                          fu = urljoin(url, f)
-                          try:
-                              h = session.head(fu, timeout=TIMEOUT, allow_redirects=True)
-                              if h.status_code != 200:
-                                  rows.append({
-                                      "scw": scw,
-                                      "file_url": fu,
-                                      "status": h.status_code,
-                                      "download": "HEAD_NOT_200"
-                                  })
-                                  continue
-
-                              sz = h.headers.get("Content-Length", "")
-                              sz = int(sz) if sz.isdigit() else 0
-
-                              if sz and sz > MAX_FILE_MB * 1000 * 1000:
-                                  rows.append({
-                                      "scw": scw,
-                                      "file_url": fu,
-                                      "status": h.status_code,
-                                      "size_bytes": sz,
-                                      "download": "SKIP_TOO_LARGE"
-                                  })
-                                  continue
-
-                              if sz and total + sz > MAX_TOTAL_MB * 1000 * 1000:
-                                  rows.append({
-                                      "scw": scw,
-                                      "file_url": fu,
-                                      "status": h.status_code,
-                                      "size_bytes": sz,
-                                      "download": "SKIP_TOTAL_LIMIT"
-                                  })
-                                  continue
-
-                              rr = session.get(fu, timeout=TIMEOUT, stream=True, allow_redirects=True)
-                              if rr.status_code != 200:
-                                  rows.append({
-                                      "scw": scw,
-                                      "file_url": fu,
-                                      "status": rr.status_code,
-                                      "download": "GET_NOT_200"
-                                  })
-                                  continue
-
-                              local = target_dir / f
-                              n = 0
-                              with open(local, "wb") as out:
-                                  for chunk in rr.iter_content(1024 * 1024):
-                                      if not chunk:
-                                          continue
-                                      n += len(chunk)
-                                      if n > MAX_FILE_MB * 1000 * 1000:
-                                          raise RuntimeError("file exceeded max")
-                                      if total + n > MAX_TOTAL_MB * 1000 * 1000:
-                                          raise RuntimeError("total exceeded max")
-                                      out.write(chunk)
-
-                              total += n
-                              row["files_downloaded"] += 1
-                              rows.append({
-                                  "scw": scw,
-                                  "file_url": fu,
-                                  "local": str(local),
-                                  "size_bytes": n,
-                                  "download": "DOWNLOADED"
-                              })
-
-                          except Exception as e:
-                              rows.append({
-                                  "scw": scw,
-                                  "file_url": fu,
-                                  "download": "ERROR",
-                                  "error": repr(e)[:300]
-                              })
-
-                      rows.append(row)
-                      break
-
-                  except Exception as e:
-                      row["error"] = repr(e)[:300]
-                      rows.append(row)
-
-              if not found_listing:
-                  rows.append({"scw": scw, "download": "NO_LISTING_FOUND"})
-
-          Path("ACIRM_R17K_OSA_OUTPUTS/R17K_SCW_FETCH_AUDIT.json").write_text(
-              json.dumps({"rows": rows, "total_bytes": total}, indent=2),
-              encoding="utf-8"
-          )
+              url=urljoin(BASE, scw+'.001/')
+              d=OUT/(scw+'.001'); d.mkdir(parents=True, exist_ok=True)
+              try:
+                  r=session.get(url, timeout=TIMEOUT, allow_redirects=True)
+                  rows.append({'scw':scw,'listing_url':url,'listing_status':r.status_code})
+                  if r.status_code != 200: continue
+                  files=[h for h in hrefs(r.text) if h and not h.endswith('/') and keep(h)]
+                  rows.append({'scw':scw,'kept_file_count':len(files),'kept_files':';'.join(files)})
+                  for fn in files:
+                      fu=urljoin(url, fn)
+                      try:
+                          hd=session.head(fu, timeout=TIMEOUT, allow_redirects=True)
+                          sz=hd.headers.get('Content-Length','')
+                          sz=int(sz) if sz.isdigit() else 0
+                          if hd.status_code != 200:
+                              rows.append({'scw':scw,'file':fn,'url':fu,'download':'HEAD_NOT_200','status':hd.status_code}); continue
+                          if sz and sz > MAX_FILE_MB*1000*1000:
+                              rows.append({'scw':scw,'file':fn,'url':fu,'download':'SKIP_TOO_LARGE','size_bytes':sz}); continue
+                          if sz and total+sz > MAX_TOTAL_MB*1000*1000:
+                              rows.append({'scw':scw,'file':fn,'url':fu,'download':'SKIP_TOTAL_LIMIT','size_bytes':sz}); continue
+                          rr=session.get(fu, timeout=TIMEOUT, stream=True, allow_redirects=True)
+                          if rr.status_code != 200:
+                              rows.append({'scw':scw,'file':fn,'url':fu,'download':'GET_NOT_200','status':rr.status_code}); continue
+                          n=0; local=d/fn
+                          with open(local,'wb') as f:
+                              for chunk in rr.iter_content(1024*1024):
+                                  if not chunk: continue
+                                  n += len(chunk)
+                                  if n > MAX_FILE_MB*1000*1000: raise RuntimeError('file exceeded max')
+                                  if total+n > MAX_TOTAL_MB*1000*1000: raise RuntimeError('total exceeded max')
+                                  f.write(chunk)
+                          total += n
+                          rows.append({'scw':scw,'file':fn,'url':fu,'local':str(local),'download':'DOWNLOADED','size_bytes':n})
+                      except Exception as e:
+                          rows.append({'scw':scw,'file':fn,'url':fu,'download':'ERROR','error':repr(e)[:300]})
+              except Exception as e:
+                  rows.append({'scw':scw,'listing_url':url,'download':'LISTING_ERROR','error':repr(e)[:300]})
+          Path('ACIRM_R17K_R2_OUTPUTS/R17K_R2_SCW_FETCH_AUDIT.json').write_text(json.dumps({'rows':rows,'total_bytes':total}, indent=2), encoding='utf-8')
           PY
+          python3 scripts/fetch_spi_focused.py | tee logs/fetch_spi_focused_stdout.log
+          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_R2_OUTPUTS/R17K_R2_SCW_FILE_INVENTORY.txt
+          du -ah repo/scw/2504 | sort -h | tail -100 > ACIRM_R17K_R2_OUTPUTS/R17K_R2_SCW_SIZE_INVENTORY.txt
 
-          python3 scripts/fetch_locked_scw.py | tee logs/fetch_locked_scw_stdout.log
-          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_OSA_OUTPUTS/R17K_SCW_FILE_INVENTORY.txt
-          du -ah repo/scw/2504 | sort -h | tail -100 > ACIRM_R17K_OSA_OUTPUTS/R17K_SCW_SIZE_INVENTORY.txt
-
-      - name: Fetch IC and CAT repository trees when available
+      - name: Fetch lightweight IC IDX CAT AUX from HEASARC HTTP
         shell: bash
         run: |
           set +e
-          echo "Fetching IC/CAT repository trees. Raw files are not packaged." | tee logs/rsync_notice.txt
+          cat > scripts/fetch_light_repo.py <<'PY'
+          import re, json
+          from pathlib import Path
+          from urllib.parse import urljoin
+          import requests
+          STARTS=[
+            'https://heasarc.gsfc.nasa.gov/FTP/integral/data/idx/ic/',
+            'https://heasarc.gsfc.nasa.gov/FTP/integral/data/ic/spi/',
+            'https://heasarc.gsfc.nasa.gov/FTP/integral/data/cat/hec/',
+            'https://heasarc.gsfc.nasa.gov/FTP/integral/data/aux/',
+          ]
+          KEEP_TERMS=('spi','gnrl_refr_cat','idx','gain','ebds','rmf','irf','arf','rsp','time','leap','orbit','aux')
+          MAX_DEPTH=3; MAX_FILES=260; MAX_FILE_MB=180; MAX_TOTAL_MB=4500; TIMEOUT=45
+          session=requests.Session(); session.headers.update({'User-Agent':'ACIRM-R17K-R2-light-repo/1.0'})
+          rows=[]; q=[(u,MAX_DEPTH) for u in STARTS]; seen=set(); files=[]; total=0
+          def hrefs(html): return sorted(set(m.group(1) for m in re.finditer(r"href=[\"']([^\"']+)[\"']", html, re.I)))
+          def keep_file(u):
+              s=u.lower()
+              return s.endswith(('.fits','.fit','.fits.gz','.fit.gz')) and any(t in s for t in KEEP_TERMS)
+          while q and len(seen)<220 and len(files)<MAX_FILES:
+              url,depth=q.pop(0)
+              if url in seen: continue
+              seen.add(url)
+              try:
+                  r=session.get(url,timeout=TIMEOUT,allow_redirects=True)
+                  rows.append({'url':url,'depth':depth,'status':r.status_code,'bytes':len(r.content or b'')})
+                  if r.status_code!=200: continue
+                  for h in hrefs(r.text):
+                      if not h or h in ('../','./','/') or h.startswith('?'): continue
+                      full=urljoin(url,h)
+                      if h.endswith('/') and depth>0 and any(t in full.lower() for t in ('spi','idx','ic','cat','aux','rsp','cfg','hec')):
+                          q.append((full,depth-1))
+                      elif keep_file(full):
+                          files.append(full)
+                          if len(files)>=MAX_FILES: break
+              except Exception as e:
+                  rows.append({'url':url,'error':repr(e)[:300]})
+          downloaded=[]
+          for fu in sorted(set(files)):
+              try:
+                  hd=session.head(fu,timeout=TIMEOUT,allow_redirects=True)
+                  sz=hd.headers.get('Content-Length',''); sz=int(sz) if sz.isdigit() else 0
+                  if hd.status_code!=200:
+                      downloaded.append({'url':fu,'download':'HEAD_NOT_200','status':hd.status_code}); continue
+                  if sz and sz>MAX_FILE_MB*1000*1000:
+                      downloaded.append({'url':fu,'download':'SKIP_TOO_LARGE','size_bytes':sz}); continue
+                  if sz and total+sz>MAX_TOTAL_MB*1000*1000:
+                      downloaded.append({'url':fu,'download':'SKIP_TOTAL_LIMIT','size_bytes':sz}); continue
+                  rel=fu.split('/integral/data/',1)[-1]
+                  local=Path('repo')/rel
+                  local.parent.mkdir(parents=True, exist_ok=True)
+                  rr=session.get(fu,timeout=TIMEOUT,stream=True,allow_redirects=True)
+                  if rr.status_code!=200:
+                      downloaded.append({'url':fu,'download':'GET_NOT_200','status':rr.status_code}); continue
+                  n=0
+                  with open(local,'wb') as out:
+                      for chunk in rr.iter_content(1024*1024):
+                          if not chunk: continue
+                          n+=len(chunk)
+                          if n>MAX_FILE_MB*1000*1000: raise RuntimeError('file exceeded max')
+                          if total+n>MAX_TOTAL_MB*1000*1000: raise RuntimeError('total exceeded max')
+                          out.write(chunk)
+                  total += n
+                  downloaded.append({'url':fu,'local':str(local),'download':'DOWNLOADED','size_bytes':n})
+              except Exception as e:
+                  downloaded.append({'url':fu,'download':'ERROR','error':repr(e)[:300]})
+          Path('ACIRM_R17K_R2_OUTPUTS/R17K_R2_LIGHT_REPO_FETCH_AUDIT.json').write_text(json.dumps({'crawl_rows':rows,'candidate_files':len(set(files)),'download_rows':downloaded,'total_bytes':total}, indent=2), encoding='utf-8')
+          PY
+          python3 scripts/fetch_light_repo.py | tee logs/fetch_light_repo_stdout.log
+          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R2_OUTPUTS/R17K_R2_REPO_DIRS.txt
+          find repo -maxdepth 6 -type f | sort > ACIRM_R17K_R2_OUTPUTS/R17K_R2_REPO_FILES.txt
+          du -sh repo > ACIRM_R17K_R2_OUTPUTS/R17K_R2_REPO_SIZE.txt
 
-          rsync -Lrtvz --timeout=90 --contimeout=30 isdcarc.unige.ch::arc/FTP/arc_distr/ic_tree/prod/ repo/ > logs/rsync_ic_tree.log 2>&1
-          echo "IC_RSYNC_EXIT=$?" | tee -a logs/rsync_notice.txt
-
-          rsync -Lrtvz --timeout=90 --contimeout=30 isdcarc.unige.ch::arc/FTP/arc_distr/cat_tree/prod/ repo/ > logs/rsync_cat_tree.log 2>&1
-          echo "CAT_RSYNC_EXIT=$?" | tee -a logs/rsync_notice.txt
-
-          mkdir -p repo/ic repo/idx/ic repo/cat repo/aux
-          find repo -maxdepth 3 -type d | sort > ACIRM_R17K_OSA_OUTPUTS/R17K_REPO_DIRS_AFTER_FETCH.txt
-          du -sh repo 2>/dev/null | tee ACIRM_R17K_OSA_OUTPUTS/R17K_REPO_SIZE.txt
-          df -h | tee logs/df_after_repo_fetch.txt
-
-      - name: Fetch official OSA Docker wrapper
+      - name: Pull OSA Docker image and direct mount preflight
         shell: bash
         run: |
           set +e
-          git clone --depth 1 https://github.com/ISDC-integral/osa-docker.git osa-docker > logs/git_clone_osa_docker.log 2>&1
-          echo "GIT_CLONE_EXIT=$?" | tee ACIRM_R17K_OSA_OUTPUTS/R17K_GIT_CLONE_OSA_DOCKER_EXIT.txt
-
-          chmod +x osa-docker/osa-container.sh osa-docker/osa-docker.sh 2>/dev/null || true
-
           docker pull integralsw/osa:latest > logs/docker_pull_integralsw_osa.log 2>&1
-          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_OSA_OUTPUTS/R17K_DOCKER_PULL_EXIT.txt
+          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R2_OUTPUTS/R17K_R2_DOCKER_PULL_EXIT.txt
+          docker run --rm \
+            -v "$PWD:/work" \
+            -v "$PWD/repo:/home/integral/repo" \
+            -w /work \
+            -e REP_BASE_PROD=/home/integral/repo \
+            -e CURRENT_IC=/home/integral/repo \
+            -e ISDC_REF_CAT=/home/integral/repo/cat/hec/gnrl_refr_cat_0043.fits[1] \
+            integralsw/osa:latest bash -lc '
+              set +e
+              echo PWD=$PWD
+              echo REP_BASE_PROD=$REP_BASE_PROD
+              ls -la /home/integral/repo || true
+              ls -la /home/integral/repo/scw || true
+              find / -type f -name og_create 2>/dev/null | head -20
+              find / -type f -name spi_science_analysis 2>/dev/null | head -20
+              OG=$(find / -type f -name og_create 2>/dev/null | head -1); [ -n "$OG" ] && export PATH=$(dirname "$OG"):$PATH
+              SP=$(find / -type f -name spi_science_analysis 2>/dev/null | head -1); [ -n "$SP" ] && export PATH=$(dirname "$SP"):$PATH
+              which og_create || true
+              which spi_science_analysis || true
+              og_create --version || true
+              spi_science_analysis --version || true
+            ' > logs/direct_docker_preflight.log 2>&1
+          echo "DIRECT_DOCKER_PREFLIGHT_EXIT=$?" | tee ACIRM_R17K_R2_OUTPUTS/R17K_R2_DIRECT_DOCKER_PREFLIGHT_EXIT.txt
 
-      - name: OSA visibility and command preflight inside Docker
+      - name: Direct Docker guarded OSA generation
         shell: bash
         run: |
           set +e
-          cat > scripts/osa_preflight.sh <<'SH'
-          set +e
-          echo "PWD=$PWD"
-          echo "REP_BASE_PROD=$REP_BASE_PROD"
-          echo "CURRENT_IC=$CURRENT_IC"
-          echo "ISDC_REF_CAT=$ISDC_REF_CAT"
-          which og_create || true
-          which spi_science_analysis || true
-          which dal_list || true
-          og_create --version || true
-          spi_science_analysis --version || true
-          find /home/integral/repo -maxdepth 3 -type d | head -200 || true
-          SH
+          docker run --rm \
+            -v "$PWD:/work" \
+            -v "$PWD/repo:/home/integral/repo" \
+            -w /work \
+            -e REP_BASE_PROD=/home/integral/repo \
+            -e CURRENT_IC=/home/integral/repo \
+            -e ISDC_REF_CAT=/home/integral/repo/cat/hec/gnrl_refr_cat_0043.fits[1] \
+            -e HEADASNOQUERY=1 \
+            -e HEADASPROMPT=/dev/null \
+            integralsw/osa:latest bash -lc '
+              set +e
+              OG=$(find / -type f -name og_create 2>/dev/null | head -1); [ -n "$OG" ] && export PATH=$(dirname "$OG"):$PATH
+              SP=$(find / -type f -name spi_science_analysis 2>/dev/null | head -1); [ -n "$SP" ] && export PATH=$(dirname "$SP"):$PATH
+              export PFILES=/work/pfiles
+              mkdir -p "$PFILES" /work/osa_work /work/products /work/ACIRM_R17K_R2_OUTPUTS
+              echo "=== og_create direct mount ==="
+              og_create scw.list SPI acirm_r17k_r2 ./
+              echo "OG_CREATE_EXIT=$?" > /work/ACIRM_R17K_R2_OUTPUTS/R17K_R2_OG_CREATE_EXIT.txt
+              find /work -name "og_spi.fits" -o -name "og_*.fits" | sort > /work/ACIRM_R17K_R2_OUTPUTS/R17K_R2_OG_PRODUCTS_FOUND.txt
+              OBS_DIR=""
+              for d in /work/obs/acirm_r17k_r2 /work/acirm_r17k_r2 /work/obs/* /work/*acirm*; do
+                if [ -d "$d" ]; then OBS_DIR="$d"; break; fi
+              done
+              echo "$OBS_DIR" > /work/ACIRM_R17K_R2_OUTPUTS/R17K_R2_OBS_DIR.txt
+              if [ -n "$OBS_DIR" ]; then
+                cd "$OBS_DIR"
+                yes "" | spi_science_analysis
+                echo "SPI_SCIENCE_ANALYSIS_EXIT=$?" > /work/ACIRM_R17K_R2_OUTPUTS/R17K_R2_SPI_SCIENCE_ANALYSIS_EXIT.txt
+              else
+                echo "NO_OBS_DIR_FOUND" > /work/ACIRM_R17K_R2_OUTPUTS/R17K_R2_SPI_SCIENCE_ANALYSIS_EXIT.txt
+              fi
+              find /work -type f \( -iname "*evts*det*spec*" -o -iname "*energy*bound*" -o -iname "*ebounds*" -o -iname "og_spi.fits" -o -iname "*spi*spect*" -o -iname "*.log" \) | sort > /work/ACIRM_R17K_R2_OUTPUTS/R17K_R2_PRODUCTS_AND_LOGS_FOUND.txt
+            ' > logs/direct_docker_osa_run.log 2>&1
+          echo "DIRECT_DOCKER_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R2_OUTPUTS/R17K_R2_DIRECT_DOCKER_OSA_RUN_EXIT.txt
 
-          chmod +x scripts/osa_preflight.sh
-          export OSA_DOCKER_PULL=no
-          export REP_BASE_PROD=/home/integral/repo
-          export CURRENT_IC=/home/integral/repo
-          export ISDC_REF_CAT=/home/integral/repo/cat/hec/gnrl_refr_cat_0043.fits[1]
-
-          if [ -x osa-docker/osa-container.sh ]; then
-            bash osa-docker/osa-container.sh docker bash -lc 'bash /home/integral/scripts/osa_preflight.sh' > logs/osa_docker_preflight.log 2>&1
-            echo "OSA_PREFLIGHT_EXIT=$?" | tee ACIRM_R17K_OSA_OUTPUTS/R17K_OSA_PREFLIGHT_EXIT.txt
-          else
-            echo "OSA_DOCKER_WRAPPER_NOT_FOUND" | tee ACIRM_R17K_OSA_OUTPUTS/R17K_OSA_PREFLIGHT_EXIT.txt
-          fi
-
-      - name: Run guarded OSA product generation attempts
+      - name: Collect selected products and inspect
         shell: bash
         run: |
           set +e
-          cat > scripts/osa_run_guarded.sh <<'SH'
-          set +e
-
-          export REP_BASE_PROD=/home/integral/repo
-          export CURRENT_IC=/home/integral/repo
-          export ISDC_REF_CAT=/home/integral/repo/cat/hec/gnrl_refr_cat_0043.fits[1]
-          export HEADASNOQUERY=1
-          export HEADASPROMPT=/dev/null
-          export PFILES=/home/integral/pfiles
-
-          mkdir -p "$PFILES" /home/integral/osa_work /home/integral/products
-          cd /home/integral
-
-          echo "=== og_create attempt ==="
-          og_create scw.list SPI acirm_r17k ./
-          echo "OG_CREATE_EXIT=$?" > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_OG_CREATE_EXIT.txt
-
-          find /home/integral -name 'og_spi.fits' -o -name 'og_*.fits' | sort > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_OG_PRODUCTS_FOUND.txt
-
-          echo "=== locate obs dirs ==="
-          find /home/integral -maxdepth 4 -type d | sort | tee /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_DIRS_AFTER_OG_CREATE.txt
-
-          OBS_DIR=""
-          for d in /home/integral/obs/acirm_r17k /home/integral/acirm_r17k /home/integral/obs/* /home/integral/*acirm*; do
-            if [ -d "$d" ]; then
-              OBS_DIR="$d"
-              break
-            fi
-          done
-
-          echo "$OBS_DIR" > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_OBS_DIR.txt
-
-          if [ -n "$OBS_DIR" ]; then
-            cd "$OBS_DIR"
-            echo "=== spi_science_analysis attempt default ==="
-            yes '' | spi_science_analysis
-            echo "SPI_SCIENCE_ANALYSIS_EXIT=$?" > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_SPI_SCIENCE_ANALYSIS_EXIT.txt
-          else
-            echo "NO_OBS_DIR_FOUND" > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_SPI_SCIENCE_ANALYSIS_EXIT.txt
-          fi
-
-          echo "=== final product search inside docker ==="
-          find /home/integral -type f \
-            \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname '*og_spi.fits*' -o -iname '*spi*spect*' -o -iname '*.log' \) \
-            | sort > /home/integral/ACIRM_R17K_OSA_OUTPUTS/R17K_PRODUCTS_AND_LOGS_FOUND.txt
-          SH
-
-          chmod +x scripts/osa_run_guarded.sh
-          export OSA_DOCKER_PULL=no
-          export REP_BASE_PROD=/home/integral/repo
-          export CURRENT_IC=/home/integral/repo
-          export ISDC_REF_CAT=/home/integral/repo/cat/hec/gnrl_refr_cat_0043.fits[1]
-
-          if [ -x osa-docker/osa-container.sh ]; then
-            bash osa-docker/osa-container.sh docker bash -lc 'bash /home/integral/scripts/osa_run_guarded.sh' > logs/osa_run_guarded.log 2>&1
-            echo "OSA_RUN_GUARDED_EXIT=$?" | tee ACIRM_R17K_OSA_OUTPUTS/R17K_OSA_RUN_GUARDED_EXIT.txt
-          else
-            echo "OSA_DOCKER_WRAPPER_NOT_FOUND" | tee ACIRM_R17K_OSA_OUTPUTS/R17K_OSA_RUN_GUARDED_EXIT.txt
-          fi
-
-      - name: Collect selected products and inspect FITS outputs
-        shell: bash
-        run: |
-          set +e
-          echo "Collecting selected products only; raw archive is not packaged."
-
-          find . -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' \) | sort > ACIRM_R17K_OSA_OUTPUTS/R17K_SELECTED_PRODUCT_PATHS.txt
-
+          find . -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' \) | sort > ACIRM_R17K_R2_OUTPUTS/R17K_R2_SELECTED_PRODUCT_PATHS.txt
           while IFS= read -r f; do
             [ -f "$f" ] || continue
             size=$(stat -c%s "$f" 2>/dev/null || echo 0)
-            if [ "$size" -le 200000000 ]; then
-              cp -f "$f" selected_products/ || true
-            fi
-          done < ACIRM_R17K_OSA_OUTPUTS/R17K_SELECTED_PRODUCT_PATHS.txt
-
-          cp logs/*.log ACIRM_R17K_OSA_OUTPUTS/ 2>/dev/null || true
-
-          cat > scripts/inspect_r17k_products.py <<'PY'
-          import json
-          import csv
-          import math
+            if [ "$size" -le 200000000 ]; then cp -f "$f" selected_products/ || true; fi
+          done < ACIRM_R17K_R2_OUTPUTS/R17K_R2_SELECTED_PRODUCT_PATHS.txt
+          cp logs/*.log ACIRM_R17K_R2_OUTPUTS/ 2>/dev/null || true
+          cat > scripts/inspect_products.py <<'PY'
+          import json, csv, math
           from pathlib import Path
           import numpy as np
-
           try:
               from astropy.io import fits
           except Exception:
-              fits = None
-
-          OUT = Path("ACIRM_R17K_OSA_OUTPUTS")
-          PROD = Path("selected_products")
-
-          rows = []
-          meas = []
-          errs = []
-
-          LINE = (508.0, 514.0)
-          SB1 = (490.0, 500.0)
-          SB2 = (522.0, 532.0)
-
-          E_PAIRS = [
-              ("E_MIN", "E_MAX"),
-              ("ENERG_LO", "ENERG_HI"),
-              ("ENERGY_LO", "ENERGY_HI"),
-              ("E_LO", "E_HI"),
-              ("EMIN", "EMAX"),
-              ("E_LOW", "E_HIGH"),
-          ]
-
-          E_SINGLE = ["ENERGY", "E", "E_MEAN", "E_CENTER", "PI", "PHA", "CHANNEL", "CHAN"]
-          C_COLS = ["COUNTS", "COUNT", "RATE", "SPECTRUM", "SPEC", "DATA", "FLUX", "VALUE", "NCOUNTS"]
-
-          def arr(x):
-              return np.asarray(x, dtype=float)
-
-          def collapse(x, n):
-              a = np.nan_to_num(arr(x), nan=0.0, posinf=0.0, neginf=0.0)
-              if a.size == n:
-                  return a.reshape(-1)[:n]
-              if a.ndim >= 2 and a.shape[-1] == n:
-                  return a.sum(axis=tuple(range(a.ndim - 1))).reshape(-1)
-              if a.ndim >= 2 and a.shape[0] == n:
-                  return a.sum(axis=tuple(range(1, a.ndim))).reshape(-1)
+              fits=None
+          OUT=Path('ACIRM_R17K_R2_OUTPUTS'); PROD=Path('selected_products')
+          rows=[]; meas=[]; errs=[]
+          LINE=(508.0,514.0); SB1=(490.0,500.0); SB2=(522.0,532.0)
+          E_PAIRS=[('E_MIN','E_MAX'),('ENERG_LO','ENERG_HI'),('ENERGY_LO','ENERGY_HI'),('E_LO','E_HI'),('EMIN','EMAX'),('E_LOW','E_HIGH')]
+          E_SINGLE=['ENERGY','E','E_MEAN','E_CENTER','PI','PHA','CHANNEL','CHAN']
+          C_COLS=['COUNTS','COUNT','RATE','SPECTRUM','SPEC','DATA','FLUX','VALUE','NCOUNTS']
+          def arr(x): return np.asarray(x,dtype=float)
+          def collapse(x,n):
+              a=np.nan_to_num(arr(x),nan=0.0,posinf=0.0,neginf=0.0)
+              if a.size==n: return a.reshape(-1)[:n]
+              if a.ndim>=2 and a.shape[-1]==n: return a.sum(axis=tuple(range(a.ndim-1))).reshape(-1)
+              if a.ndim>=2 and a.shape[0]==n: return a.sum(axis=tuple(range(1,a.ndim))).reshape(-1)
               return None
-
-          def measure_edges(lo, hi, cnt):
-              lo = arr(lo).reshape(-1)
-              hi = arr(hi).reshape(-1)
-              n = min(len(lo), len(hi))
-              if n == 0:
-                  return None
-              lo = lo[:n]
-              hi = hi[:n]
-              c = collapse(cnt, n)
-              if c is None:
-                  return None
-
-              width = np.maximum(1e-12, hi - lo)
-
-              def frac(w):
-                  return np.maximum(0, np.minimum(hi, w[1]) - np.maximum(lo, w[0])) / width
-
-              line = float((c * frac(LINE)).sum())
-              sb1 = float((c * frac(SB1)).sum())
-              sb2 = float((c * frac(SB2)).sum())
-              side = sb1 + sb2
-              ratio = (line / 6) / (side / 20) if side > 0 else math.inf
-              exp = side / 20 * 6 if side > 0 else math.nan
-              z = (line - exp) / math.sqrt(exp) if exp and exp > 0 else math.nan
-
-              return {
-                  "line_508_514_counts": line,
-                  "side_490_500_counts": sb1,
-                  "side_522_532_counts": sb2,
-                  "side_total_counts": side,
-                  "line_to_side_density_ratio": ratio,
-                  "expected_line_from_side_density": exp,
-                  "z_vs_side_density": z,
-                  "energy_bins": n,
-              }
-
-          def measure_centers(e, cnt):
-              e = arr(e).reshape(-1)
-              c = collapse(cnt, len(e))
-              if c is None or len(e) == 0:
-                  return None
-
-              line = float(np.nansum(c[(e >= LINE[0]) & (e <= LINE[1])]))
-              sb1 = float(np.nansum(c[(e >= SB1[0]) & (e <= SB1[1])]))
-              sb2 = float(np.nansum(c[(e >= SB2[0]) & (e <= SB2[1])]))
-              side = sb1 + sb2
-              ratio = (line / 6) / (side / 20) if side > 0 else math.inf
-              exp = side / 20 * 6 if side > 0 else math.nan
-              z = (line - exp) / math.sqrt(exp) if exp and exp > 0 else math.nan
-
-              return {
-                  "line_508_514_counts": line,
-                  "side_490_500_counts": sb1,
-                  "side_522_532_counts": sb2,
-                  "side_total_counts": side,
-                  "line_to_side_density_ratio": ratio,
-                  "expected_line_from_side_density": exp,
-                  "z_vs_side_density": z,
-                  "energy_bins": len(e),
-              }
-
+          def measure_edges(lo,hi,cnt):
+              lo=arr(lo).reshape(-1); hi=arr(hi).reshape(-1); n=min(len(lo),len(hi))
+              if n==0: return None
+              lo=lo[:n]; hi=hi[:n]; c=collapse(cnt,n)
+              if c is None: return None
+              width=np.maximum(1e-12,hi-lo)
+              def frac(w): return np.maximum(0,np.minimum(hi,w[1])-np.maximum(lo,w[0]))/width
+              line=float((c*frac(LINE)).sum()); sb1=float((c*frac(SB1)).sum()); sb2=float((c*frac(SB2)).sum()); side=sb1+sb2
+              ratio=(line/6)/(side/20) if side>0 else math.inf; exp=side/20*6 if side>0 else math.nan; z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
+              return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':n}
+          def measure_centers(e,cnt):
+              e=arr(e).reshape(-1); c=collapse(cnt,len(e))
+              if c is None or len(e)==0: return None
+              line=float(np.nansum(c[(e>=LINE[0])&(e<=LINE[1])])); sb1=float(np.nansum(c[(e>=SB1[0])&(e<=SB1[1])])); sb2=float(np.nansum(c[(e>=SB2[0])&(e<=SB2[1])])); side=sb1+sb2
+              ratio=(line/6)/(side/20) if side>0 else math.inf; exp=side/20*6 if side>0 else math.nan; z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
+              return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':len(e)}
           if fits:
-              for p in PROD.glob("*"):
-                  if not p.name.lower().endswith((".fits", ".fit", ".fits.gz", ".fit.gz")):
-                      continue
+              for p in PROD.glob('*'):
+                  if not p.name.lower().endswith(('.fits','.fit','.fits.gz','.fit.gz')): continue
                   try:
-                      with fits.open(p, memmap=True) as hdul:
-                          for i, hdu in enumerate(hdul):
-                              cols = []
-                              nrows = ""
-                              if hasattr(hdu, "columns") and hdu.columns is not None:
-                                  cols = list(hdu.columns.names or [])
-                              try:
-                                  nrows = len(hdu.data) if getattr(hdu, "data", None) is not None else ""
-                              except Exception:
-                                  nrows = ""
-
-                              rows.append({
-                                  "file": p.name,
-                                  "hdu_index": i,
-                                  "hdu_name": hdu.name or "",
-                                  "class": hdu.__class__.__name__,
-                                  "rows": nrows,
-                                  "column_count": len(cols),
-                                  "columns": ";".join(cols[:120]),
-                              })
-
-                              if not (hasattr(hdu, "columns") and hdu.columns is not None and hdu.data is not None):
-                                  continue
-
-                              cmap = {c.upper(): c for c in cols}
-
-                              for a, b in E_PAIRS:
+                      with fits.open(p,memmap=True) as hdul:
+                          for i,hdu in enumerate(hdul):
+                              cols=[]; nrows=''
+                              if hasattr(hdu,'columns') and hdu.columns is not None: cols=list(hdu.columns.names or [])
+                              try: nrows=len(hdu.data) if getattr(hdu,'data',None) is not None else ''
+                              except Exception: nrows=''
+                              rows.append({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'class':hdu.__class__.__name__,'rows':nrows,'column_count':len(cols),'columns':';'.join(cols[:120])})
+                              if not (hasattr(hdu,'columns') and hdu.columns is not None and hdu.data is not None): continue
+                              cmap={c.upper():c for c in cols}
+                              for a,b in E_PAIRS:
                                   if a in cmap and b in cmap:
                                       for ck in C_COLS:
                                           if ck in cmap:
-                                              m = measure_edges(hdu.data[cmap[a]], hdu.data[cmap[b]], hdu.data[cmap[ck]])
-                                              if m:
-                                                  m.update({
-                                                      "file": p.name,
-                                                      "hdu_index": i,
-                                                      "hdu_name": hdu.name or "",
-                                                      "method": "same_hdu_edges",
-                                                      "energy_source": cmap[a] + "|" + cmap[b],
-                                                      "count_source": cmap[ck],
-                                                  })
-                                                  meas.append(m)
-
+                                              m=measure_edges(hdu.data[cmap[a]], hdu.data[cmap[b]], hdu.data[cmap[ck]])
+                                              if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_edges','energy_source':cmap[a]+'|'+cmap[b], 'count_source':cmap[ck]}); meas.append(m)
                               for ek in E_SINGLE:
                                   if ek in cmap:
                                       for ck in C_COLS:
-                                          if ck in cmap and ck != ek:
-                                              m = measure_centers(hdu.data[cmap[ek]], hdu.data[cmap[ck]])
-                                              if m:
-                                                  m.update({
-                                                      "file": p.name,
-                                                      "hdu_index": i,
-                                                      "hdu_name": hdu.name or "",
-                                                      "method": "same_hdu_centers",
-                                                      "energy_source": cmap[ek],
-                                                      "count_source": cmap[ck],
-                                                  })
-                                                  meas.append(m)
-
-                  except Exception as e:
-                      errs.append({"file": str(p), "error": repr(e)[:300]})
-
+                                          if ck in cmap and ck!=ek:
+                                              m=measure_centers(hdu.data[cmap[ek]], hdu.data[cmap[ck]])
+                                              if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_centers','energy_source':cmap[ek], 'count_source':cmap[ck]}); meas.append(m)
+                  except Exception as e: errs.append({'file':str(p),'error':repr(e)[:300]})
           def write_csv(path, data):
-              keys = []
+              keys=[]
               for r in data:
                   for k in r:
-                      if k not in keys:
-                          keys.append(k)
-              if not keys:
-                  keys = ["empty"]
-
-              with open(path, "w", newline="", encoding="utf-8") as f:
-                  w = csv.DictWriter(f, fieldnames=keys)
-                  w.writeheader()
-                  for r in data:
-                      w.writerow({k: r.get(k, "") for k in keys})
-
-          write_csv(OUT / "R17K_SELECTED_PRODUCT_SCHEMA.csv", rows)
-          write_csv(OUT / "R17K_DIRECT_511_MEASUREMENT_ROWS.csv", meas)
-          (OUT / "R17K_PRODUCT_INSPECTION_ERRORS.json").write_text(json.dumps(errs, indent=2), encoding="utf-8")
-
-          selected = list(PROD.glob("*"))
-          decision = "R17K_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND_DIAGNOSTIC_NOT_PROOF" if selected else "R17K_NO_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND"
-          if meas:
-              decision = "R17K_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF"
-
-          summary = {
-              "decision": decision,
-              "proof_allowed": False,
-              "selected_product_count": len(selected),
-              "direct_511_measurement_rows": len(meas),
-              "schema_rows": len(rows),
-              "claim_ceiling": [
-                  "OFFICIAL_OSA_PRODUCT_GENERATION_OR_LOCATOR_ONLY",
-                  "NOT_DISCOVERY",
-                  "NOT_PARTICLE_PROOF",
-                  "NOT_SOURCE_ATTRIBUTION",
-                  "NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_LOCKED_CONTROLS_PASS"
-              ]
-          }
-
-          (OUT / "R17K_DECISION.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+                      if k not in keys: keys.append(k)
+              if not keys: keys=['empty']
+              with open(path,'w',newline='',encoding='utf-8') as f:
+                  w=csv.DictWriter(f,fieldnames=keys); w.writeheader()
+                  for r in data: w.writerow({k:r.get(k,'') for k in keys})
+          write_csv(OUT/'R17K_R2_SELECTED_PRODUCT_SCHEMA.csv',rows)
+          write_csv(OUT/'R17K_R2_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
+          (OUT/'R17K_R2_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
+          selected=list(PROD.glob('*'))
+          decision='R17K_R2_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND_DIAGNOSTIC_NOT_PROOF' if selected else 'R17K_R2_NO_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND'
+          if meas: decision='R17K_R2_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          summary={'decision':decision,'proof_allowed':False,'selected_product_count':len(selected),'direct_511_measurement_rows':len(meas),'schema_rows':len(rows),'claim_ceiling':['OFFICIAL_OSA_PRODUCT_GENERATION_OR_LOCATOR_ONLY','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_LOCKED_CONTROLS_PASS']}
+          (OUT/'R17K_R2_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
           PY
+          python3 scripts/inspect_products.py | tee logs/inspect_products.log
 
-          python3 scripts/inspect_r17k_products.py | tee logs/inspect_r17k_products.log
-
-      - name: Package slim phone artifact
+      - name: Package slim artifact
         shell: bash
         run: |
           set +e
-          cp -r selected_products ACIRM_R17K_OSA_OUTPUTS/selected_products 2>/dev/null || true
-          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_OSA_OUTPUTS/R17K_SELECTED_PRODUCTS_MANIFEST.csv || true
-          df -h > ACIRM_R17K_OSA_OUTPUTS/R17K_DF_END.txt
-          free -h > ACIRM_R17K_OSA_OUTPUTS/R17K_FREE_END.txt
-
-          zip -r ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip ACIRM_R17K_OSA_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip > ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip.sha256.txt
-
-          ls -lh ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip.sha256.txt
+          cp -r selected_products ACIRM_R17K_R2_OUTPUTS/selected_products 2>/dev/null || true
+          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R2_OUTPUTS/R17K_R2_SELECTED_PRODUCTS_MANIFEST.csv || true
+          df -h > ACIRM_R17K_R2_OUTPUTS/R17K_R2_DF_END.txt
+          free -h > ACIRM_R17K_R2_OUTPUTS/R17K_R2_FREE_END.txt
+          zip -r ACIRM_R17K_R2_DIRECT_DOCKER_MOUNT_OUTPUT.zip ACIRM_R17K_R2_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R2_DIRECT_DOCKER_MOUNT_OUTPUT.zip > ACIRM_R17K_R2_DIRECT_DOCKER_MOUNT_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R2_DIRECT_DOCKER_MOUNT_OUTPUT.zip ACIRM_R17K_R2_DIRECT_DOCKER_MOUNT_OUTPUT.zip.sha256.txt
 
       - name: Upload slim artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT
+          name: ACIRM_R17K_R2_DIRECT_DOCKER_MOUNT_OUTPUT
           path: |
-            ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip
-            ACIRM_R17K_OSA_SPI511_OFFICIAL_PRODUCT_GENERATOR_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R2_DIRECT_DOCKER_MOUNT_OUTPUT.zip
+            ACIRM_R17K_R2_DIRECT_DOCKER_MOUNT_OUTPUT.zip.sha256.txt
           retention-days: 7
