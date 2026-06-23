@@ -1,10 +1,10 @@
-name: ACIRM R17K R3 OSA Runtime Init Fixed SPI511
+name: ACIRM R17K R4 og_create SCW List Variant Probe
 
 on:
   workflow_dispatch:
 
 jobs:
-  r17k-r3-osa-runtime-init-fixed-spi511:
+  r17k-r4-og-create-scw-list-variant-probe:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -13,8 +13,8 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_R3_OUTPUTS logs scripts repo/scw/2504 selected_products
-          cat > scw.list <<'EOF'
+          mkdir -p ACIRM_R17K_R4_OUTPUTS logs scripts repo/scw/2504 selected_products og_attempts
+          cat > scw_ids.list <<'EOF'
           250400090010
           250400020010
           250400080010
@@ -24,10 +24,10 @@ jobs:
           250400060010
           250400050010
           EOF
-          sed -i 's/^ *//' scw.list
-          cp scw.list ACIRM_R17K_R3_OUTPUTS/LOCKED_SCW_LIST.txt
-          cat > ACIRM_R17K_R3_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R3_OSA_RUNTIME_INIT_FIXED_SPI511
+          sed -i 's/^ *//' scw_ids.list
+          cp scw_ids.list ACIRM_R17K_R4_OUTPUTS/LOCKED_SCW_IDS.txt
+          cat > ACIRM_R17K_R4_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R4_OG_CREATE_SCW_LIST_VARIANT_PROBE
           OFFICIAL_OSA_PRODUCT_GENERATION_OR_LOCATOR_ONLY
           NOT_DISCOVERY
           NOT_PARTICLE_PROOF
@@ -45,7 +45,7 @@ jobs:
           docker --version | tee logs/docker_version.txt
           sudo apt-get update -y > logs/apt_update.log 2>&1
           sudo apt-get install -y curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
-          python3 -m pip install -q astropy numpy requests > logs/pip_install.log 2>&1
+          python3 -m pip install -q astropy numpy requests pyyaml > logs/pip_install.log 2>&1
 
       - name: Fetch SPI-focused locked SCW files from HEASARC
         shell: bash
@@ -58,7 +58,7 @@ jobs:
           import requests
 
           REV = "2504"
-          SCWS = [x.strip() for x in Path("scw.list").read_text().splitlines() if x.strip()]
+          SCWS = [x.strip() for x in Path("scw_ids.list").read_text().splitlines() if x.strip()]
           BASE = f"https://heasarc.gsfc.nasa.gov/FTP/integral/data/scw/{REV}/"
           OUT = Path("repo/scw") / REV
           OUT.mkdir(parents=True, exist_ok=True)
@@ -70,7 +70,7 @@ jobs:
           TIMEOUT = 60
 
           session = requests.Session()
-          session.headers.update({"User-Agent": "ACIRM-R17K-R3-fetch/1.0"})
+          session.headers.update({"User-Agent": "ACIRM-R17K-R4-fetch/1.0"})
 
           rows = []
           total = 0
@@ -142,15 +142,15 @@ jobs:
               except Exception as e:
                   rows.append({"scw": scw, "listing_url": url, "download": "LISTING_ERROR", "error": repr(e)[:300]})
 
-          Path("ACIRM_R17K_R3_OUTPUTS/R17K_R3_SCW_FETCH_AUDIT.json").write_text(
+          Path("ACIRM_R17K_R4_OUTPUTS/R17K_R4_SCW_FETCH_AUDIT.json").write_text(
               json.dumps({"rows": rows, "total_bytes": total}, indent=2),
               encoding="utf-8"
           )
           PY
 
           python3 scripts/fetch_spi_focused.py | tee logs/fetch_spi_focused_stdout.log
-          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_R3_OUTPUTS/R17K_R3_SCW_FILE_INVENTORY.txt
-          du -ah repo/scw/2504 | sort -h | tail -100 > ACIRM_R17K_R3_OUTPUTS/R17K_R3_SCW_SIZE_INVENTORY.txt
+          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_SCW_FILE_INVENTORY.txt
+          du -ah repo/scw/2504 | sort -h | tail -100 > ACIRM_R17K_R4_OUTPUTS/R17K_R4_SCW_SIZE_INVENTORY.txt
 
       - name: Fetch lightweight IC IDX CAT AUX from HEASARC HTTP
         shell: bash
@@ -177,7 +177,7 @@ jobs:
           TIMEOUT = 45
 
           session = requests.Session()
-          session.headers.update({"User-Agent": "ACIRM-R17K-R3-light-repo/1.0"})
+          session.headers.update({"User-Agent": "ACIRM-R17K-R4-light-repo/1.0"})
 
           rows = []
           q = [(u, MAX_DEPTH) for u in STARTS]
@@ -264,23 +264,23 @@ jobs:
               except Exception as e:
                   downloaded.append({"url": fu, "download": "ERROR", "error": repr(e)[:300]})
 
-          Path("ACIRM_R17K_R3_OUTPUTS/R17K_R3_LIGHT_REPO_FETCH_AUDIT.json").write_text(
+          Path("ACIRM_R17K_R4_OUTPUTS/R17K_R4_LIGHT_REPO_FETCH_AUDIT.json").write_text(
               json.dumps({"crawl_rows": rows, "candidate_files": len(set(files)), "download_rows": downloaded, "total_bytes": total}, indent=2),
               encoding="utf-8"
           )
           PY
 
           python3 scripts/fetch_light_repo.py | tee logs/fetch_light_repo_stdout.log
-          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R3_OUTPUTS/R17K_R3_REPO_DIRS.txt
-          find repo -maxdepth 6 -type f | sort > ACIRM_R17K_R3_OUTPUTS/R17K_R3_REPO_FILES.txt
-          du -sh repo > ACIRM_R17K_R3_OUTPUTS/R17K_R3_REPO_SIZE.txt
+          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_REPO_DIRS.txt
+          find repo -maxdepth 6 -type f | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_REPO_FILES.txt
+          du -sh repo > ACIRM_R17K_R4_OUTPUTS/R17K_R4_REPO_SIZE.txt
 
-      - name: Pull OSA Docker image and runtime-init preflight
+      - name: Pull OSA Docker and prepare runtime init script
         shell: bash
         run: |
           set +e
           docker pull integralsw/osa:latest > logs/docker_pull_integralsw_osa.log 2>&1
-          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R3_OUTPUTS/R17K_R3_DOCKER_PULL_EXIT.txt
+          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R4_OUTPUTS/R17K_R4_DOCKER_PULL_EXIT.txt
 
           cat > scripts/osa_runtime_init.sh <<'SH'
           set +e
@@ -291,7 +291,6 @@ jobs:
           export HEADASNOQUERY=1
           export HEADASPROMPT=/dev/null
 
-          # Source any OSA init script if present.
           for init in \
             /opt/osa/bin/osa-init.sh \
             /opt/osa/osa-init.sh \
@@ -305,11 +304,9 @@ jobs:
             fi
           done
 
-          # Build LD_LIBRARY_PATH from actual OSA library locations.
           LIB_DIRS=$(find /opt /usr/local /usr -type f \( -name 'libGui.so' -o -name 'libdal*.so*' -o -name 'libisdc*.so*' -o -name 'libspi*.so*' \) 2>/dev/null | xargs -r -n1 dirname | sort -u | tr '\n' ':')
           export LD_LIBRARY_PATH="${LIB_DIRS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-          # Locate OSA binaries and parameter files.
           OG=$(find /opt /usr/local /usr -type f -name og_create 2>/dev/null | head -1)
           SP=$(find /opt /usr/local /usr -type f -name spi_science_analysis 2>/dev/null | head -1)
           [ -n "$OG" ] && export PATH="$(dirname "$OG"):$PATH"
@@ -340,30 +337,11 @@ jobs:
           echo "OG_PAR=$OG_PAR"
           echo "SP_PAR=$SP_PAR"
           echo "SYS_PFILES=$SYS_PFILES"
-          echo "LIBGUI=$(find /opt /usr/local /usr -type f -name libGui.so 2>/dev/null | head -5 | tr '\n' ';')"
-          echo "REPO_LIST="
-          ls -la /home/integral/repo || true
-          ls -la /home/integral/repo/scw || true
           echo "RUNTIME_INIT_REPORT_END"
           SH
           chmod +x scripts/osa_runtime_init.sh
 
-          docker run --rm \
-            -v "$PWD:/work" \
-            -v "$PWD/repo:/home/integral/repo" \
-            -w /work \
-            integralsw/osa:latest bash -lc '
-              set +e
-              . /work/scripts/osa_runtime_init.sh
-              which og_create || true
-              which spi_science_analysis || true
-              og_create --version || true
-              spi_science_analysis --version || true
-            ' > logs/r17k_r3_runtime_preflight.log 2>&1
-
-          echo "RUNTIME_PREFLIGHT_EXIT=$?" | tee ACIRM_R17K_R3_OUTPUTS/R17K_R3_RUNTIME_PREFLIGHT_EXIT.txt
-
-      - name: Runtime-init fixed OSA guarded generation
+      - name: Probe og_create parameter files and SCW list variants
         shell: bash
         run: |
           set +e
@@ -375,45 +353,125 @@ jobs:
               set +e
               . /work/scripts/osa_runtime_init.sh
 
-              mkdir -p /work/osa_work /work/products /work/ACIRM_R17K_R3_OUTPUTS
-              cd /work
+              mkdir -p /work/ACIRM_R17K_R4_OUTPUTS /work/og_attempts /work/pfiles
 
-              echo "=== og_create R17K_R3 runtime-init ==="
-              og_create scw.list SPI acirm_r17k_r3 ./
-              echo "OG_CREATE_EXIT=$?" > /work/ACIRM_R17K_R3_OUTPUTS/R17K_R3_OG_CREATE_EXIT.txt
+              echo "=== versions ===" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt
+              which og_create >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt 2>&1
+              which spi_science_analysis >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt 2>&1
+              og_create --version >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt 2>&1
+              spi_science_analysis --version >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OSA_PREFLIGHT_FULL.txt 2>&1
 
-              find /work -name "og_spi.fits" -o -name "og_*.fits" | sort > /work/ACIRM_R17K_R3_OUTPUTS/R17K_R3_OG_PRODUCTS_FOUND.txt
-              find /work -maxdepth 5 -type d | sort > /work/ACIRM_R17K_R3_OUTPUTS/R17K_R3_DIRS_AFTER_OG_CREATE.txt
+              echo "=== og_create.par ===" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_CREATE_PAR.txt
+              find /opt /usr/local /usr -type f -name og_create.par 2>/dev/null -print -exec cat {} \; >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_CREATE_PAR.txt 2>&1
 
-              OBS_DIR=""
-              for d in /work/obs/acirm_r17k_r3 /work/acirm_r17k_r3 /work/obs/* /work/*acirm*; do
-                if [ -d "$d" ]; then
-                  OBS_DIR="$d"
-                  break
+              echo "=== spi_science_analysis.par ===" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_SCIENCE_ANALYSIS_PAR.txt
+              find /opt /usr/local /usr -type f -name spi_science_analysis.par 2>/dev/null -print -exec cat {} \; >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_SCIENCE_ANALYSIS_PAR.txt 2>&1
+
+              echo "=== pfiles before ===" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_PFILES_LISTING.txt
+              find /work/pfiles -maxdepth 2 -type f -print >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_PFILES_LISTING.txt 2>&1
+              find /opt/osa/pfiles -maxdepth 1 -type f -name "*.par" | sort | head -200 >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_PFILES_LISTING.txt 2>&1
+
+              # Build SCW list variants.
+              : > /work/scw_variant_ids.list
+              : > /work/scw_variant_rel_scw.list
+              : > /work/scw_variant_rel_noscw.list
+              : > /work/scw_variant_abs.list
+              : > /work/scw_variant_abs_swg.list
+
+              while read -r id; do
+                [ -n "$id" ] || continue
+                echo "$id" >> /work/scw_variant_ids.list
+                echo "scw/2504/${id}.001" >> /work/scw_variant_rel_scw.list
+                echo "2504/${id}.001" >> /work/scw_variant_rel_noscw.list
+                echo "/home/integral/repo/scw/2504/${id}.001" >> /work/scw_variant_abs.list
+                echo "/home/integral/repo/scw/2504/${id}.001/swg.fits" >> /work/scw_variant_abs_swg.list
+              done < /work/scw_ids.list
+
+              cp /work/scw_variant_*.list /work/ACIRM_R17K_R4_OUTPUTS/ 2>/dev/null || true
+
+              echo "variant,syntax,exit_code,og_spi_found,attempt_dir" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_CREATE_ATTEMPT_SUMMARY.csv
+
+              try_og() {
+                variant="$1"
+                list="$2"
+                syntax="$3"
+                outdir="/work/og_attempts/${variant}_${syntax}"
+                mkdir -p "$outdir"
+                cd "$outdir"
+                cp "$list" ./scw_input.list
+
+                echo "=== TRY variant=$variant syntax=$syntax list=$list outdir=$outdir ===" > "$outdir/run.log"
+                echo "PWD=$(pwd)" >> "$outdir/run.log"
+                echo "PFILES=$PFILES" >> "$outdir/run.log"
+                cat ./scw_input.list >> "$outdir/run.log"
+
+                if [ "$syntax" = "positional" ]; then
+                  og_create ./scw_input.list SPI "og_${variant}_${syntax}" ./ >> "$outdir/run.log" 2>&1
+                elif [ "$syntax" = "named_basic" ]; then
+                  og_create idxSwg=./scw_input.list instrument=SPI ogid="og_${variant}_${syntax}" baseDir=./ >> "$outdir/run.log" 2>&1
+                elif [ "$syntax" = "named_alt" ]; then
+                  og_create scwList=./scw_input.list instrument=SPI ogid="og_${variant}_${syntax}" baseDir=./ >> "$outdir/run.log" 2>&1
+                else
+                  echo "UNKNOWN_SYNTAX" >> "$outdir/run.log"
                 fi
+
+                ec=$?
+                found=$(find "$outdir" -type f -name "og_spi.fits" | head -1)
+                if [ -n "$found" ]; then yesno=1; else yesno=0; fi
+                echo "${variant},${syntax},${ec},${yesno},${outdir}" >> /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_CREATE_ATTEMPT_SUMMARY.csv
+                find "$outdir" -maxdepth 4 -type f | sort > "$outdir/file_inventory.txt"
+                cd /work
+              }
+
+              for v in ids rel_scw rel_noscw abs abs_swg; do
+                list="/work/scw_variant_${v}.list"
+                [ -f "$list" ] || continue
+                try_og "$v" "$list" positional
+                try_og "$v" "$list" named_basic
+                try_og "$v" "$list" named_alt
               done
 
-              echo "$OBS_DIR" > /work/ACIRM_R17K_R3_OUTPUTS/R17K_R3_OBS_DIR.txt
+              find /work/og_attempts -type f \( -name "og_spi.fits" -o -name "og_*.fits" -o -name "run.log" -o -name "file_inventory.txt" \) | sort > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_ATTEMPT_FILES.txt
 
-              if [ -n "$OBS_DIR" ]; then
-                cd "$OBS_DIR"
-                echo "=== spi_science_analysis R17K_R3 runtime-init ==="
-                yes "" | spi_science_analysis
-                echo "SPI_SCIENCE_ANALYSIS_EXIT=$?" > /work/ACIRM_R17K_R3_OUTPUTS/R17K_R3_SPI_SCIENCE_ANALYSIS_EXIT.txt
-              else
-                echo "NO_OBS_DIR_FOUND" > /work/ACIRM_R17K_R3_OUTPUTS/R17K_R3_SPI_SCIENCE_ANALYSIS_EXIT.txt
+              first_og=$(find /work/og_attempts -type f -name "og_spi.fits" | head -1)
+              echo "$first_og" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_FIRST_OG_SPI_PATH.txt
+
+              if [ -n "$first_og" ]; then
+                cp "$first_og" /work/selected_products/og_spi.fits || true
               fi
+            ' > logs/r17k_r4_og_probe.log 2>&1
+          echo "R17K_R4_OG_PROBE_EXIT=$?" | tee ACIRM_R17K_R4_OUTPUTS/R17K_R4_OG_PROBE_EXIT.txt
 
-              find /work -type f \( -iname "*evts*det*spec*" -o -iname "*energy*bound*" -o -iname "*ebounds*" -o -iname "og_spi.fits" -o -iname "*spi*spect*" -o -iname "*.log" \) | sort > /work/ACIRM_R17K_R3_OUTPUTS/R17K_R3_PRODUCTS_AND_LOGS_FOUND.txt
-            ' > logs/r17k_r3_osa_run.log 2>&1
+      - name: Optional non-GUI spi_science_analysis only if og_spi exists
+        shell: bash
+        run: |
+          set +e
+          if [ ! -s ACIRM_R17K_R4_OUTPUTS/R17K_R4_FIRST_OG_SPI_PATH.txt ]; then
+            echo "NO_OG_SPI_FOUND_SKIP_SPI_SCIENCE_ANALYSIS" | tee ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_SCIENCE_ANALYSIS_EXIT.txt
+            exit 0
+          fi
 
-          echo "R17K_R3_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R3_OUTPUTS/R17K_R3_OSA_RUN_EXIT.txt
+          docker run --rm \
+            -v "$PWD:/work" \
+            -v "$PWD/repo:/home/integral/repo" \
+            -w /work \
+            integralsw/osa:latest bash -lc '
+              set +e
+              . /work/scripts/osa_runtime_init.sh
+              first_og=$(cat /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_FIRST_OG_SPI_PATH.txt)
+              attempt_dir=$(dirname "$first_og")
+              cd "$attempt_dir"
+              echo "RUNNING_SPI_SCIENCE_IN=$attempt_dir"
+              spi_science_analysis mode=h
+              echo "SPI_SCIENCE_ANALYSIS_MODE_H_EXIT=$?" > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_SCIENCE_ANALYSIS_EXIT.txt
+              find "$attempt_dir" -type f \( -iname "*evts*det*spec*" -o -iname "*energy*bound*" -o -iname "*ebounds*" -o -iname "*spi*spect*" -o -iname "*.fits" \) | sort > /work/ACIRM_R17K_R4_OUTPUTS/R17K_R4_SPI_PRODUCTS_FOUND.txt
+            ' > logs/r17k_r4_spi_science_optional.log 2>&1
 
       - name: Collect selected products and inspect
         shell: bash
         run: |
           set +e
-          find . -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' \) | sort > ACIRM_R17K_R3_OUTPUTS/R17K_R3_SELECTED_PRODUCT_PATHS.txt
+          find . -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' \) | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_SELECTED_PRODUCT_PATHS.txt
 
           while IFS= read -r f; do
             [ -f "$f" ] || continue
@@ -421,9 +479,11 @@ jobs:
             if [ "$size" -le 200000000 ]; then
               cp -f "$f" selected_products/ || true
             fi
-          done < ACIRM_R17K_R3_OUTPUTS/R17K_R3_SELECTED_PRODUCT_PATHS.txt
+          done < ACIRM_R17K_R4_OUTPUTS/R17K_R4_SELECTED_PRODUCT_PATHS.txt
 
-          cp logs/*.log ACIRM_R17K_R3_OUTPUTS/ 2>/dev/null || true
+          cp logs/*.log ACIRM_R17K_R4_OUTPUTS/ 2>/dev/null || true
+          cp -r og_attempts ACIRM_R17K_R4_OUTPUTS/og_attempts_light_logs 2>/dev/null || true
+          find ACIRM_R17K_R4_OUTPUTS/og_attempts_light_logs -type f ! -name 'run.log' ! -name 'file_inventory.txt' ! -name '*.txt' -delete 2>/dev/null || true
 
           cat > scripts/inspect_products.py <<'PY'
           import json, csv, math
@@ -435,7 +495,7 @@ jobs:
           except Exception:
               fits = None
 
-          OUT = Path("ACIRM_R17K_R3_OUTPUTS")
+          OUT = Path("ACIRM_R17K_R4_OUTPUTS")
           PROD = Path("selected_products")
 
           rows = []
@@ -612,14 +672,24 @@ jobs:
                   for r in data:
                       w.writerow({k: r.get(k, "") for k in keys})
 
-          write_csv(OUT / "R17K_R3_SELECTED_PRODUCT_SCHEMA.csv", rows)
-          write_csv(OUT / "R17K_R3_DIRECT_511_MEASUREMENT_ROWS.csv", meas)
-          (OUT / "R17K_R3_PRODUCT_INSPECTION_ERRORS.json").write_text(json.dumps(errs, indent=2), encoding="utf-8")
+          write_csv(OUT / "R17K_R4_SELECTED_PRODUCT_SCHEMA.csv", rows)
+          write_csv(OUT / "R17K_R4_DIRECT_511_MEASUREMENT_ROWS.csv", meas)
+          (OUT / "R17K_R4_PRODUCT_INSPECTION_ERRORS.json").write_text(json.dumps(errs, indent=2), encoding="utf-8")
 
           selected = list(PROD.glob("*"))
-          decision = "R17K_R3_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND_DIAGNOSTIC_NOT_PROOF" if selected else "R17K_R3_NO_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND"
+          attempt_summary = OUT / "R17K_R4_OG_CREATE_ATTEMPT_SUMMARY.csv"
+          og_found = False
+          if attempt_summary.exists():
+              text = attempt_summary.read_text(errors="replace")
+              og_found = ",1," in text or text.rstrip().endswith(",1")
+
+          decision = "R17K_R4_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS"
+          if og_found:
+              decision = "R17K_R4_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF"
+          if selected:
+              decision = "R17K_R4_OFFICIAL_PRODUCTS_GENERATED_OR_FOUND_DIAGNOSTIC_NOT_PROOF"
           if meas:
-              decision = "R17K_R3_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF"
+              decision = "R17K_R4_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF"
 
           summary = {
               "decision": decision,
@@ -636,7 +706,7 @@ jobs:
               ]
           }
 
-          (OUT / "R17K_R3_DECISION.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+          (OUT / "R17K_R4_DECISION.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
           PY
 
           python3 scripts/inspect_products.py | tee logs/inspect_products.log
@@ -645,19 +715,19 @@ jobs:
         shell: bash
         run: |
           set +e
-          cp -r selected_products ACIRM_R17K_R3_OUTPUTS/selected_products 2>/dev/null || true
-          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R3_OUTPUTS/R17K_R3_SELECTED_PRODUCTS_MANIFEST.csv || true
-          df -h > ACIRM_R17K_R3_OUTPUTS/R17K_R3_DF_END.txt
-          free -h > ACIRM_R17K_R3_OUTPUTS/R17K_R3_FREE_END.txt
-          zip -r ACIRM_R17K_R3_OSA_RUNTIME_INIT_FIXED_OUTPUT.zip ACIRM_R17K_R3_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R3_OSA_RUNTIME_INIT_FIXED_OUTPUT.zip > ACIRM_R17K_R3_OSA_RUNTIME_INIT_FIXED_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R3_OSA_RUNTIME_INIT_FIXED_OUTPUT.zip ACIRM_R17K_R3_OSA_RUNTIME_INIT_FIXED_OUTPUT.zip.sha256.txt
+          cp -r selected_products ACIRM_R17K_R4_OUTPUTS/selected_products 2>/dev/null || true
+          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R4_OUTPUTS/R17K_R4_SELECTED_PRODUCTS_MANIFEST.csv || true
+          df -h > ACIRM_R17K_R4_OUTPUTS/R17K_R4_DF_END.txt
+          free -h > ACIRM_R17K_R4_OUTPUTS/R17K_R4_FREE_END.txt
+          zip -r ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip ACIRM_R17K_R4_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip > ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip.sha256.txt
 
       - name: Upload slim artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R3_OSA_RUNTIME_INIT_FIXED_OUTPUT
+          name: ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT
           path: |
-            ACIRM_R17K_R3_OSA_RUNTIME_INIT_FIXED_OUTPUT.zip
-            ACIRM_R17K_R3_OSA_RUNTIME_INIT_FIXED_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip
+            ACIRM_R17K_R4_OG_CREATE_VARIANT_PROBE_OUTPUT.zip.sha256.txt
           retention-days: 7
