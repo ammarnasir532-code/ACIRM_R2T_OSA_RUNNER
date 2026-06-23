@@ -1,10 +1,10 @@
-name: ACIRM R17K R7 Official OSA Docker Mount Tree Fixed SPI511
+name: ACIRM R17K R8 SPI Science No Bogus Mode
 
 on:
   workflow_dispatch:
 
 jobs:
-  r17k-r7-official-osa-docker-mount-tree-fixed-spi511:
+  r17k-r8-spi-science-no-bogus-mode:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -13,7 +13,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_R7_OUTPUTS logs scripts repo/scw/2504 repo/aux repo/ic repo/idx repo/cat selected_products pfiles
+          mkdir -p ACIRM_R17K_R8_OUTPUTS logs scripts repo/scw/2504 repo/aux repo/ic repo/idx repo/cat selected_products pfiles
           cat > scw_ids.list <<'EOF'
           250400090010
           250400020010
@@ -25,10 +25,10 @@ jobs:
           250400050010
           EOF
           sed -i 's/^ *//' scw_ids.list
-          cp scw_ids.list ACIRM_R17K_R7_OUTPUTS/LOCKED_SCW_IDS.txt
-          cat > ACIRM_R17K_R7_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R7_OFFICIAL_OSA_DOCKER_MOUNT_TREE_FIXED_SPI511
-          OFFICIAL_OSA_PRODUCT_GENERATION_OR_LOCATOR_ONLY
+          cp scw_ids.list ACIRM_R17K_R8_OUTPUTS/LOCKED_SCW_IDS.txt
+          cat > ACIRM_R17K_R8_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R8_SPI_SCIENCE_NO_BOGUS_MODE
+          OFFICIAL_OSA_SPI_SCIENCE_ATTEMPT_AFTER_SUCCESSFUL_OG_CREATE
           NOT_DISCOVERY
           NOT_PARTICLE_PROOF
           NOT_SOURCE_ATTRIBUTION
@@ -52,7 +52,7 @@ jobs:
         run: |
           set +e
           cd repo
-          echo "R17K_R7 official tree fetch started" > ../logs/official_tree_fetch.log
+          echo "R17K_R8 official tree fetch started" > ../logs/official_tree_fetch.log
           fetch_tree() {
             label="$1"
             url="$2"
@@ -69,9 +69,9 @@ jobs:
           fetch_tree cat_hec https://heasarc.gsfc.nasa.gov/FTP/integral/data/cat/hec/
           fetch_tree aux     https://heasarc.gsfc.nasa.gov/FTP/integral/data/aux/
           cd ..
-          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R7_OUTPUTS/R17K_R7_REPO_DIRS_AFTER_TREE_FETCH.txt
-          find repo/ic repo/idx repo/cat repo/aux -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R7_OUTPUTS/R17K_R7_IC_IDX_CAT_AUX_FILES.txt
-          du -sh repo 2>/dev/null | tee ACIRM_R17K_R7_OUTPUTS/R17K_R7_REPO_SIZE_AFTER_TREE_FETCH.txt
+          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R8_OUTPUTS/R17K_R8_REPO_DIRS_AFTER_TREE_FETCH.txt
+          find repo/ic repo/idx repo/cat repo/aux -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8_OUTPUTS/R17K_R8_IC_IDX_CAT_AUX_FILES.txt
+          du -sh repo 2>/dev/null | tee ACIRM_R17K_R8_OUTPUTS/R17K_R8_REPO_SIZE_AFTER_TREE_FETCH.txt
           df -h | tee logs/df_after_tree_fetch.txt
 
       - name: Fetch full locked SCW directories
@@ -88,48 +88,42 @@ jobs:
             echo "SCW_FETCH_EXIT $id $ec" | tee -a ../logs/scw_full_fetch.log
           done < ../scw_ids.list
           cd ..
-          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_R7_OUTPUTS/R17K_R7_SCW_FILE_INVENTORY.txt
-          du -sh repo/scw/2504 2>/dev/null | tee ACIRM_R17K_R7_OUTPUTS/R17K_R7_SCW_SIZE.txt
+          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_R8_OUTPUTS/R17K_R8_SCW_FILE_INVENTORY.txt
+          du -sh repo/scw/2504 2>/dev/null | tee ACIRM_R17K_R8_OUTPUTS/R17K_R8_SCW_SIZE.txt
           df -h | tee logs/df_after_scw_fetch.txt
 
-      - name: Pull OSA Docker and build official Docker run script
+      - name: Pull OSA Docker and build inside script
         shell: bash
         run: |
           set +e
           docker pull integralsw/osa:latest > logs/docker_pull_integralsw_osa.log 2>&1
-          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R7_OUTPUTS/R17K_R7_DOCKER_PULL_EXIT.txt
-          cat > scripts/r17k_r7_inside_osa.sh <<'SH'
+          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R8_OUTPUTS/R17K_R8_DOCKER_PULL_EXIT.txt
+
+          cat > scripts/r17k_r8_inside_osa.sh <<'SH'
           set +e
-          export HOME_OVERRRIDE=/home/integral
           export REP_BASE_PROD=/data
           export CURRENT_IC=/data
           export ISDC_REF_CAT=/home/integral/cat/hec/gnrl_refr_cat_0043.fits[1]
-          export ISDC_OMC_CAT=/home/integral/cat/omc/omc_refr_cat_0005.fits[1]
           export HEADASNOQUERY=1
           export HEADASPROMPT=/dev/null
           export DISPLAY=${DISPLAY:-:99}
 
-          if [ -f /init.sh ]; then
-            . /init.sh || true
-          fi
+          if [ -f /init.sh ]; then . /init.sh || true; fi
           for init in /opt/osa/bin/osa-init.sh /opt/osa/osa-init.sh /opt/osa/init.sh /usr/local/osa/bin/osa-init.sh; do
             if [ -f "$init" ]; then . "$init" || true; fi
           done
 
           LIB_DIRS=$(find /opt /usr/local /usr -type f \( -name 'libGui.so' -o -name 'libdal*.so*' -o -name 'libisdc*.so*' -o -name 'libspi*.so*' \) 2>/dev/null | xargs -r -n1 dirname | sort -u | tr '\n' ':')
           export LD_LIBRARY_PATH="${LIB_DIRS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
           OG=$(find /opt /usr/local /usr -type f -name og_create 2>/dev/null | head -1)
           SP=$(find /opt /usr/local /usr -type f -name spi_science_analysis 2>/dev/null | head -1)
           [ -n "$OG" ] && export PATH="$(dirname "$OG"):$PATH"
           [ -n "$SP" ] && export PATH="$(dirname "$SP"):$PATH"
 
-          mkdir -p /home/integral/pfiles /home/integral/ACIRM_R17K_R7_OUTPUTS /home/integral/selected_products /home/integral/og_attempts
-          SYS_PFILES=""
-          OG_PAR=$(find /opt /usr/local /usr -type f -name og_create.par 2>/dev/null | head -1)
-          SP_PAR=$(find /opt /usr/local /usr -type f -name spi_science_analysis.par 2>/dev/null | head -1)
-          if [ -n "$OG_PAR" ]; then SYS_PFILES=$(dirname "$OG_PAR"); fi
-          if [ -z "$SYS_PFILES" ] && [ -n "$SP_PAR" ]; then SYS_PFILES=$(dirname "$SP_PAR"); fi
-          if [ -n "$SYS_PFILES" ]; then
+          mkdir -p /home/integral/pfiles /home/integral/ACIRM_R17K_R8_OUTPUTS /home/integral/selected_products /home/integral/obswork
+          SYS_PFILES="/opt/osa/pfiles"
+          if [ -d "$SYS_PFILES" ]; then
             cp "$SYS_PFILES"/*.par /home/integral/pfiles/ 2>/dev/null || true
             export PFILES="/home/integral/pfiles;$SYS_PFILES"
           else
@@ -139,123 +133,80 @@ jobs:
           cd /home/integral
 
           {
-            echo "=== R17K_R7 official docker preflight ==="
-            echo "HOME=$HOME"
-            echo "HOME_OVERRRIDE=$HOME_OVERRRIDE"
+            echo "=== R17K_R8 preflight ==="
             echo "REP_BASE_PROD=$REP_BASE_PROD"
             echo "CURRENT_IC=$CURRENT_IC"
             echo "ISDC_REF_CAT=$ISDC_REF_CAT"
             echo "PFILES=$PFILES"
-            echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
             echo "DISPLAY=$DISPLAY"
             which og_create || true
             which spi_science_analysis || true
             og_create --version || true
             spi_science_analysis --version || true
-            echo "=== /data dirs ==="
-            find /data -maxdepth 3 -type d | sort | head -400
-            echo "=== cat sample ==="
-            find /home/integral/cat -maxdepth 4 -type f 2>/dev/null | sort | head -80
-          } > /home/integral/ACIRM_R17K_R7_OUTPUTS/R17K_R7_OSA_PREFLIGHT.txt 2>&1
+            echo "=== spi_science_analysis.par ==="
+            find /home/integral/pfiles /opt/osa/pfiles -type f -name 'spi_science_analysis.par' -print -exec cat {} \; 2>/dev/null
+          } > ACIRM_R17K_R8_OUTPUTS/R17K_R8_OSA_PREFLIGHT.txt 2>&1
 
+          # Use the exact og_create pattern that succeeded in R17K_R7.
           : > list_ids.txt
-          : > list_rel_swg.txt
-          : > list_rel_swg_grouping.txt
-          : > list_data_swg.txt
-          : > list_data_swg_grouping.txt
           while read -r id; do
             [ -n "$id" ] || continue
             echo "$id" >> list_ids.txt
-            echo "scw/2504/${id}.001/swg.fits" >> list_rel_swg.txt
-            echo "scw/2504/${id}.001/swg.fits[GROUPING]" >> list_rel_swg_grouping.txt
-            echo "/data/scw/2504/${id}.001/swg.fits" >> list_data_swg.txt
-            echo "/data/scw/2504/${id}.001/swg.fits[GROUPING]" >> list_data_swg_grouping.txt
           done < scw_ids.list
-          cp list_*.txt ACIRM_R17K_R7_OUTPUTS/ 2>/dev/null || true
 
-          echo "variant,syntax,base,exit_code,og_spi_found,first_og_spi,attempt_dir" > ACIRM_R17K_R7_OUTPUTS/R17K_R7_OG_CREATE_ATTEMPT_SUMMARY.csv
+          mkdir -p obswork
+          cd obswork
+          cp /home/integral/list_ids.txt ./scw_input.list
 
-          try_og() {
-            variant="$1"
-            list="$2"
-            syntax="$3"
-            base="$4"
-            safe=$(echo "${variant}_${syntax}_${base}" | sed 's#[/:[:space:]]#_#g')
-            outdir="/home/integral/og_attempts/$safe"
-            mkdir -p "$outdir"
-            cd "$outdir"
-            cp "/home/integral/$list" ./scw_input.list
-            {
-              echo "=== TRY variant=$variant syntax=$syntax base=$base ==="
-              echo "PWD=$(pwd)"
-              echo "REP_BASE_PROD=$REP_BASE_PROD"
-              echo "CURRENT_IC=$CURRENT_IC"
-              echo "PFILES=$PFILES"
-              echo "--- scw_input.list ---"
-              cat ./scw_input.list
-              echo "--- command output ---"
-            } > run.log
+          {
+            echo "=== og_create exact R7 successful pattern ==="
+            echo "COMMAND: og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8 baseDir=. instrument=SPI"
+            cat ./scw_input.list
+          } > /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_OG_CREATE.log
 
-            if [ "$syntax" = "named" ]; then
-              og_create idxSwg=./scw_input.list ogid=acirm_r17k_r7 baseDir="$base" instrument=SPI >> run.log 2>&1
-            elif [ "$syntax" = "positional" ]; then
-              og_create ./scw_input.list SPI acirm_r17k_r7 "$base" >> run.log 2>&1
-            fi
-            ec=$?
-            found=$(find "$outdir" /home/integral/obs /home/integral -type f -name 'og_spi.fits' 2>/dev/null | head -1)
-            if [ -n "$found" ]; then yesno=1; else yesno=0; fi
-            echo "${variant},${syntax},${base},${ec},${yesno},${found},${outdir}" >> /home/integral/ACIRM_R17K_R7_OUTPUTS/R17K_R7_OG_CREATE_ATTEMPT_SUMMARY.csv
-            find "$outdir" -maxdepth 6 -type f | sort > file_inventory.txt
-            cd /home/integral
-            if [ "$yesno" = "1" ]; then
-              echo "$found" > ACIRM_R17K_R7_OUTPUTS/R17K_R7_FIRST_OG_SPI_PATH.txt
-              cp "$found" selected_products/og_spi.fits 2>/dev/null || true
-              return 0
-            fi
-            return 1
-          }
+          og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8 baseDir=. instrument=SPI >> /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_OG_CREATE.log 2>&1
+          og_ec=$?
+          echo "OG_CREATE_EXIT=$og_ec" > /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_OG_CREATE_EXIT.txt
 
-          success=0
-          for item in "ids:list_ids.txt" "rel_swg:list_rel_swg.txt" "rel_swg_grouping:list_rel_swg_grouping.txt" "data_swg:list_data_swg.txt" "data_swg_grouping:list_data_swg_grouping.txt"; do
-            variant=${item%%:*}
-            list=${item#*:}
-            for base in "$REP_BASE_PROD" /data . ./ ""; do
-              for syntax in named positional; do
-                try_og "$variant" "$list" "$syntax" "$base"
-                if [ "$?" = "0" ]; then success=1; break 3; fi
-              done
-            done
-          done
-          echo "$success" > ACIRM_R17K_R7_OUTPUTS/R17K_R7_OG_CREATE_SUCCESS_FLAG.txt
-          find /home/integral/og_attempts /home/integral/obs -type f \( -name 'og_spi.fits' -o -name 'og_*.fits' -o -name 'run.log' -o -name 'file_inventory.txt' \) 2>/dev/null | sort > ACIRM_R17K_R7_OUTPUTS/R17K_R7_OG_ATTEMPT_FILES.txt
-
-          if [ "$success" = "1" ]; then
-            first_og=$(cat ACIRM_R17K_R7_OUTPUTS/R17K_R7_FIRST_OG_SPI_PATH.txt)
-            og_dir=$(dirname "$first_og")
-            cd "$og_dir"
-            echo "RUNNING_SPI_SCIENCE_IN=$og_dir" > /home/integral/ACIRM_R17K_R7_OUTPUTS/R17K_R7_SPI_SCIENCE_CONTEXT.txt
-            spi_science_analysis mode=h > /home/integral/ACIRM_R17K_R7_OUTPUTS/R17K_R7_SPI_SCIENCE_STDOUT.log 2>&1
-            ec=$?
-            echo "SPI_SCIENCE_ANALYSIS_MODE_H_EXIT=$ec" > /home/integral/ACIRM_R17K_R7_OUTPUTS/R17K_R7_SPI_SCIENCE_ANALYSIS_EXIT.txt
+          first_og=$(find /home/integral/obswork /home/integral -type f -name 'og_spi.fits' 2>/dev/null | head -1)
+          echo "$first_og" > /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_FIRST_OG_SPI_PATH.txt
+          if [ -n "$first_og" ]; then
+            cp "$first_og" /home/integral/selected_products/og_spi.fits 2>/dev/null || true
           else
-            echo "NO_OG_SPI_FOUND_SKIP_SPI_SCIENCE_ANALYSIS" > /home/integral/ACIRM_R17K_R7_OUTPUTS/R17K_R7_SPI_SCIENCE_ANALYSIS_EXIT.txt
+            echo "NO_OG_SPI_CREATED_SKIP_SPI_SCIENCE" > /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_SPI_SCIENCE_ANALYSIS_EXIT.txt
+            exit 0
           fi
 
-          find /home/integral -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' -o -iname '*spi*spect*' \) 2>/dev/null | sort > /home/integral/ACIRM_R17K_R7_OUTPUTS/R17K_R7_PRODUCTS_FOUND.txt
+          og_dir=$(dirname "$first_og")
+          cd "$og_dir"
+
+          {
+            echo "=== SPI science attempt A: no bogus mode, defaults answered ==="
+            echo "PWD=$(pwd)"
+            echo "OG=$first_og"
+            echo "PFILES=$PFILES"
+          } > /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_SPI_SCIENCE_CONTEXT.txt
+
+          # Corrected run: no mode=h, no bogus parameter.
+          timeout 80m bash -lc 'yes "" | spi_science_analysis' > /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_SPI_SCIENCE_STDOUT.log 2>&1
+          spi_ec=$?
+          echo "SPI_SCIENCE_ANALYSIS_NO_MODE_EXIT=$spi_ec" > /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_SPI_SCIENCE_ANALYSIS_EXIT.txt
+
+          find /home/integral -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' -o -iname '*spi*spect*' \) 2>/dev/null | sort > /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_PRODUCTS_FOUND.txt
+
           while read -r f; do
             [ -f "$f" ] || continue
             size=$(stat -c%s "$f" 2>/dev/null || echo 0)
             if [ "$size" -le 200000000 ]; then cp -f "$f" /home/integral/selected_products/ 2>/dev/null || true; fi
-          done < /home/integral/ACIRM_R17K_R7_OUTPUTS/R17K_R7_PRODUCTS_FOUND.txt
+          done < /home/integral/ACIRM_R17K_R8_OUTPUTS/R17K_R8_PRODUCTS_FOUND.txt
           SH
-          chmod +x scripts/r17k_r7_inside_osa.sh
+          chmod +x scripts/r17k_r8_inside_osa.sh
 
-      - name: Run OSA using official Docker mount layout
+      - name: Run OSA R8 no bogus mode
         shell: bash
         run: |
           set +e
           Xvfb :99 -screen 0 1280x1024x24 > logs/xvfb.log 2>&1 &
-          echo $! > logs/xvfb.pid
           docker run --rm \
             -e DISPLAY=:99 \
             -v /tmp/.X11-unix:/tmp/.X11-unix \
@@ -266,38 +217,46 @@ jobs:
             -v "$PWD/repo/idx:/data/idx:ro" \
             -v "$PWD/repo/cat:/home/integral/cat:ro" \
             --entrypoint="" \
-            integralsw/osa:latest bash -lc 'bash /home/integral/scripts/r17k_r7_inside_osa.sh' > logs/r17k_r7_official_mount_osa_run.log 2>&1
-          echo "R17K_R7_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R7_OUTPUTS/R17K_R7_OSA_RUN_EXIT.txt
+            integralsw/osa:latest bash -lc 'bash /home/integral/scripts/r17k_r8_inside_osa.sh' > logs/r17k_r8_osa_run.log 2>&1
+          echo "R17K_R8_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R8_OUTPUTS/R17K_R8_OSA_RUN_EXIT.txt
 
-      - name: Inspect selected products and direct 511 rows
+      - name: Inspect selected products and 511 rows
         shell: bash
         run: |
           set +e
-          cp logs/*.log ACIRM_R17K_R7_OUTPUTS/ 2>/dev/null || true
-          cp -r og_attempts ACIRM_R17K_R7_OUTPUTS/og_attempts_light_logs 2>/dev/null || true
-          find ACIRM_R17K_R7_OUTPUTS/og_attempts_light_logs -type f ! -name 'run.log' ! -name 'file_inventory.txt' -delete 2>/dev/null || true
-          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R7_OUTPUTS/R17K_R7_SELECTED_PRODUCTS_MANIFEST.csv || true
+          cp logs/*.log ACIRM_R17K_R8_OUTPUTS/ 2>/dev/null || true
+          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R8_OUTPUTS/R17K_R8_SELECTED_PRODUCTS_MANIFEST.csv || true
           cat > scripts/inspect_final.py <<'PY'
           import json, csv, math
           from pathlib import Path
           import numpy as np
-          try:
-              from astropy.io import fits
-          except Exception:
-              fits = None
-          OUT=Path('ACIRM_R17K_R7_OUTPUTS'); PROD=Path('selected_products')
-          rows=[]; meas=[]; errs=[]
-          LINE=(508.0,514.0); SB1=(490.0,500.0); SB2=(522.0,532.0)
+          from astropy.io import fits
+
+          OUT=Path('ACIRM_R17K_R8_OUTPUTS')
+          PROD=Path('selected_products')
+          rows=[]
+          meas=[]
+          errs=[]
+          LINE=(508.0,514.0)
+          SB1=(490.0,500.0)
+          SB2=(522.0,532.0)
           E_PAIRS=[('E_MIN','E_MAX'),('ENERG_LO','ENERG_HI'),('ENERGY_LO','ENERGY_HI'),('E_LO','E_HI'),('EMIN','EMAX'),('E_LOW','E_HIGH')]
           E_SINGLE=['ENERGY','E','E_MEAN','E_CENTER','PI','PHA','CHANNEL','CHAN']
           C_COLS=['COUNTS','COUNT','RATE','SPECTRUM','SPEC','DATA','FLUX','VALUE','NCOUNTS']
-          def arr(x): return np.asarray(x,dtype=float)
+
+          def arr(x):
+              return np.asarray(x,dtype=float)
+
           def collapse(x,n):
               a=np.nan_to_num(arr(x),nan=0.0,posinf=0.0,neginf=0.0)
-              if a.size==n: return a.reshape(-1)[:n]
-              if a.ndim>=2 and a.shape[-1]==n: return a.sum(axis=tuple(range(a.ndim-1))).reshape(-1)
-              if a.ndim>=2 and a.shape[0]==n: return a.sum(axis=tuple(range(1,a.ndim))).reshape(-1)
+              if a.size==n:
+                  return a.reshape(-1)[:n]
+              if a.ndim>=2 and a.shape[-1]==n:
+                  return a.sum(axis=tuple(range(a.ndim-1))).reshape(-1)
+              if a.ndim>=2 and a.shape[0]==n:
+                  return a.sum(axis=tuple(range(1,a.ndim))).reshape(-1)
               return None
+
           def measure_edges(lo,hi,cnt):
               lo=arr(lo).reshape(-1); hi=arr(hi).reshape(-1); n=min(len(lo),len(hi))
               if n==0: return None
@@ -305,44 +264,64 @@ jobs:
               if c is None: return None
               width=np.maximum(1e-12,hi-lo)
               def frac(w): return np.maximum(0,np.minimum(hi,w[1])-np.maximum(lo,w[0]))/width
-              line=float((c*frac(LINE)).sum()); sb1=float((c*frac(SB1)).sum()); sb2=float((c*frac(SB2)).sum()); side=sb1+sb2
-              ratio=(line/6)/(side/20) if side>0 else math.inf; exp=side/20*6 if side>0 else math.nan; z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
+              line=float((c*frac(LINE)).sum())
+              sb1=float((c*frac(SB1)).sum())
+              sb2=float((c*frac(SB2)).sum())
+              side=sb1+sb2
+              ratio=(line/6)/(side/20) if side>0 else math.inf
+              exp=side/20*6 if side>0 else math.nan
+              z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
               return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':n}
+
           def measure_centers(e,cnt):
-              e=arr(e).reshape(-1); c=collapse(cnt,len(e))
+              e=arr(e).reshape(-1)
+              c=collapse(cnt,len(e))
               if c is None or len(e)==0: return None
               line=float(np.nansum(c[(e>=LINE[0])&(e<=LINE[1])]))
               sb1=float(np.nansum(c[(e>=SB1[0])&(e<=SB1[1])]))
               sb2=float(np.nansum(c[(e>=SB2[0])&(e<=SB2[1])]))
-              side=sb1+sb2; ratio=(line/6)/(side/20) if side>0 else math.inf; exp=side/20*6 if side>0 else math.nan; z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
+              side=sb1+sb2
+              ratio=(line/6)/(side/20) if side>0 else math.inf
+              exp=side/20*6 if side>0 else math.nan
+              z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
               return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':len(e)}
-          if fits:
-              for p in PROD.glob('*'):
-                  if not p.name.lower().endswith(('.fits','.fit','.fits.gz','.fit.gz')): continue
-                  try:
-                      with fits.open(p,memmap=True) as hdul:
-                          for i,hdu in enumerate(hdul):
-                              cols=[]; nrows=''
-                              if hasattr(hdu,'columns') and hdu.columns is not None: cols=list(hdu.columns.names or [])
-                              try: nrows=len(hdu.data) if getattr(hdu,'data',None) is not None else ''
-                              except Exception: nrows=''
-                              rows.append({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'class':hdu.__class__.__name__,'rows':nrows,'column_count':len(cols),'columns':';'.join(cols[:120])})
-                              if not (hasattr(hdu,'columns') and hdu.columns is not None and hdu.data is not None): continue
-                              cmap={c.upper():c for c in cols}
-                              for a,b in E_PAIRS:
-                                  if a in cmap and b in cmap:
-                                      for ck in C_COLS:
-                                          if ck in cmap:
-                                              m=measure_edges(hdu.data[cmap[a]],hdu.data[cmap[b]],hdu.data[cmap[ck]])
-                                              if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_edges','energy_source':cmap[a]+'|'+cmap[b], 'count_source':cmap[ck]}); meas.append(m)
-                              for ek in E_SINGLE:
-                                  if ek in cmap:
-                                      for ck in C_COLS:
-                                          if ck in cmap and ck!=ek:
-                                              m=measure_centers(hdu.data[cmap[ek]],hdu.data[cmap[ck]])
-                                              if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_centers','energy_source':cmap[ek], 'count_source':cmap[ck]}); meas.append(m)
-                  except Exception as e:
-                      errs.append({'file':str(p),'error':repr(e)[:300]})
+
+          for p in PROD.glob('*'):
+              if not p.name.lower().endswith(('.fits','.fit','.fits.gz','.fit.gz')): continue
+              try:
+                  with fits.open(p,memmap=True) as hdul:
+                      for i,hdu in enumerate(hdul):
+                          cols=[]
+                          nrows=''
+                          if hasattr(hdu,'columns') and hdu.columns is not None:
+                              cols=list(hdu.columns.names or [])
+                          try:
+                              nrows=len(hdu.data) if getattr(hdu,'data',None) is not None else ''
+                          except Exception:
+                              nrows=''
+                          rows.append({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'class':hdu.__class__.__name__,'rows':nrows,'column_count':len(cols),'columns':';'.join(cols[:120])})
+                          if not (hasattr(hdu,'columns') and hdu.columns is not None and hdu.data is not None):
+                              continue
+                          cmap={c.upper():c for c in cols}
+                          for a,b in E_PAIRS:
+                              if a in cmap and b in cmap:
+                                  for ck in C_COLS:
+                                      if ck in cmap:
+                                          m=measure_edges(hdu.data[cmap[a]],hdu.data[cmap[b]],hdu.data[cmap[ck]])
+                                          if m:
+                                              m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_edges','energy_source':cmap[a]+'|'+cmap[b], 'count_source':cmap[ck]})
+                                              meas.append(m)
+                          for ek in E_SINGLE:
+                              if ek in cmap:
+                                  for ck in C_COLS:
+                                      if ck in cmap and ck!=ek:
+                                          m=measure_centers(hdu.data[cmap[ek]],hdu.data[cmap[ck]])
+                                          if m:
+                                              m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_centers','energy_source':cmap[ek], 'count_source':cmap[ck]})
+                                              meas.append(m)
+              except Exception as e:
+                  errs.append({'file':str(p),'error':repr(e)[:300]})
+
           def write_csv(path,data):
               keys=[]
               for r in data:
@@ -352,18 +331,22 @@ jobs:
               with open(path,'w',newline='',encoding='utf-8') as f:
                   w=csv.DictWriter(f,fieldnames=keys); w.writeheader()
                   for r in data: w.writerow({k:r.get(k,'') for k in keys})
-          write_csv(OUT/'R17K_R7_SELECTED_PRODUCT_SCHEMA.csv',rows)
-          write_csv(OUT/'R17K_R7_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
-          (OUT/'R17K_R7_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
+
+          write_csv(OUT/'R17K_R8_SELECTED_PRODUCT_SCHEMA.csv',rows)
+          write_csv(OUT/'R17K_R8_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
+          (OUT/'R17K_R8_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
+
           selected=list(PROD.glob('*'))
-          og_flag=(OUT/'R17K_R7_OG_CREATE_SUCCESS_FLAG.txt')
-          og_success=og_flag.exists() and og_flag.read_text(errors='replace').strip()=='1'
-          decision='R17K_R7_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS'
-          if og_success: decision='R17K_R7_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF'
-          if any(('evts' in p.name.lower() or 'energy' in p.name.lower() or 'ebounds' in p.name.lower()) for p in selected): decision='R17K_R7_OFFICIAL_SPI_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
-          if meas: decision='R17K_R7_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
-          summary={'decision':decision,'proof_allowed':False,'selected_product_count':len(selected),'og_success':og_success,'direct_511_measurement_rows':len(meas),'schema_rows':len(rows),'claim_ceiling':['OFFICIAL_OSA_PRODUCT_GENERATION_OR_LOCATOR_ONLY','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_LOCKED_CONTROLS_PASS']}
-          (OUT/'R17K_R7_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          og_path=(OUT/'R17K_R8_FIRST_OG_SPI_PATH.txt')
+          og_success=og_path.exists() and bool(og_path.read_text(errors='replace').strip())
+          decision='R17K_R8_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS'
+          if og_success: decision='R17K_R8_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF'
+          if any(('evts' in p.name.lower() or 'energy' in p.name.lower() or 'ebounds' in p.name.lower()) for p in selected):
+              decision='R17K_R8_OFFICIAL_SPI_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          if meas:
+              decision='R17K_R8_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          summary={'decision':decision,'proof_allowed':False,'selected_product_count':len(selected),'og_success':og_success,'direct_511_measurement_rows':len(meas),'schema_rows':len(rows),'claim_ceiling':['OFFICIAL_OSA_SPI_SCIENCE_ATTEMPT_AFTER_SUCCESSFUL_OG_CREATE','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_LOCKED_CONTROLS_PASS']}
+          (OUT/'R17K_R8_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
           PY
           python3 scripts/inspect_final.py > logs/inspect_final.log 2>&1
 
@@ -371,19 +354,19 @@ jobs:
         shell: bash
         run: |
           set +e
-          cp logs/*.log ACIRM_R17K_R7_OUTPUTS/ 2>/dev/null || true
-          cp -r selected_products ACIRM_R17K_R7_OUTPUTS/selected_products 2>/dev/null || true
-          df -h > ACIRM_R17K_R7_OUTPUTS/R17K_R7_DF_END.txt
-          free -h > ACIRM_R17K_R7_OUTPUTS/R17K_R7_FREE_END.txt
-          zip -r ACIRM_R17K_R7_OFFICIAL_OSA_DOCKER_MOUNT_TREE_FIXED_OUTPUT.zip ACIRM_R17K_R7_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R7_OFFICIAL_OSA_DOCKER_MOUNT_TREE_FIXED_OUTPUT.zip > ACIRM_R17K_R7_OFFICIAL_OSA_DOCKER_MOUNT_TREE_FIXED_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R7_OFFICIAL_OSA_DOCKER_MOUNT_TREE_FIXED_OUTPUT.zip ACIRM_R17K_R7_OFFICIAL_OSA_DOCKER_MOUNT_TREE_FIXED_OUTPUT.zip.sha256.txt
+          cp logs/*.log ACIRM_R17K_R8_OUTPUTS/ 2>/dev/null || true
+          cp -r selected_products ACIRM_R17K_R8_OUTPUTS/selected_products 2>/dev/null || true
+          df -h > ACIRM_R17K_R8_OUTPUTS/R17K_R8_DF_END.txt
+          free -h > ACIRM_R17K_R8_OUTPUTS/R17K_R8_FREE_END.txt
+          zip -r ACIRM_R17K_R8_SPI_SCIENCE_NO_BOGUS_MODE_OUTPUT.zip ACIRM_R17K_R8_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R8_SPI_SCIENCE_NO_BOGUS_MODE_OUTPUT.zip > ACIRM_R17K_R8_SPI_SCIENCE_NO_BOGUS_MODE_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R8_SPI_SCIENCE_NO_BOGUS_MODE_OUTPUT.zip ACIRM_R17K_R8_SPI_SCIENCE_NO_BOGUS_MODE_OUTPUT.zip.sha256.txt
 
       - name: Upload slim artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R7_OFFICIAL_OSA_DOCKER_MOUNT_TREE_FIXED_OUTPUT
+          name: ACIRM_R17K_R8_SPI_SCIENCE_NO_BOGUS_MODE_OUTPUT
           path: |
-            ACIRM_R17K_R7_OFFICIAL_OSA_DOCKER_MOUNT_TREE_FIXED_OUTPUT.zip
-            ACIRM_R17K_R7_OFFICIAL_OSA_DOCKER_MOUNT_TREE_FIXED_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R8_SPI_SCIENCE_NO_BOGUS_MODE_OUTPUT.zip
+            ACIRM_R17K_R8_SPI_SCIENCE_NO_BOGUS_MODE_OUTPUT.zip.sha256.txt
           retention-days: 7
