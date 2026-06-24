@@ -1,33 +1,41 @@
-name: ACIRM R17K R8U Continue Wide Product First SPI511 Search
+name: ACIRM R17K R8V Targeted Rev2446 SPI511 Validation
 
 on:
   workflow_dispatch:
     inputs:
-      rev_start:
+      target_start:
         required: false
-        default: '2443'
-      rev_end:
+        default: '244600170010'
+      target_end:
         required: false
-        default: '2560'
-      max_files:
+        default: '244600210010'
+      rev_center:
         required: false
-        default: '500'
+        default: '2446'
+      rev_pad:
+        required: false
+        default: '1'
+      max_new_files:
+        required: false
+        default: '220'
       download_mb_cap:
         required: false
-        default: '700'
+        default: '350'
 
 permissions:
   contents: read
   actions: write
 
 jobs:
-  r17k-r8u-continue-wide-product-first-spi511:
+  r17k-r8v-targeted-rev2446-spi511-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 150
     env:
-      REV_START: ${{ inputs.rev_start }}
-      REV_END: ${{ inputs.rev_end }}
-      MAX_FILES: ${{ inputs.max_files }}
+      TARGET_START: ${{ inputs.target_start }}
+      TARGET_END: ${{ inputs.target_end }}
+      REV_CENTER: ${{ inputs.rev_center }}
+      REV_PAD: ${{ inputs.rev_pad }}
+      MAX_NEW_FILES: ${{ inputs.max_new_files }}
       DOWNLOAD_MB_CAP: ${{ inputs.download_mb_cap }}
 
     steps:
@@ -35,32 +43,33 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_R8U_OUTPUTS logs scripts repo/scw repo/ic repo/idx repo/cat repo/aux
-          cat > ACIRM_R17K_R8U_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH
-          CONTINUES R8T FROM LATER REVS / WIDER CACHE
-          PRODUCT_FIRST_WIDE_SEARCH_FOR_CALIBRATED_508_514_EXCESS
-          LIGHT HEASARC spi_spectra.fits.gz ONLY WHEN CACHE IS MISSING
-          USES SPI CHAN_KEV / KEV_CHAN CALIBRATION CANDIDATES
-          NO CHANNEL_APPROXIMATION AS PROOF
-          BACKTRACE ALLOWED ONLY AFTER MODERATE_OR_STRONG_511_CANDIDATE
+          mkdir -p ACIRM_R17K_R8V_OUTPUTS logs scripts repo/scw repo/ic repo/idx repo/cat repo/aux
+          cat > ACIRM_R17K_R8V_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R8V_TARGETED_REV2446_WEAK_511_CANDIDATE_VALIDATION
+          VALIDATES R8U WEAK PRODUCT-FIRST 511 HINT
+          TARGET DEFAULT: 244600170010-244600210010
+          USES CALIBRATED SPI CHAN_KEV / KEV_CHAN MAPPING ONLY
+          NO CHANNEL APPROXIMATION AS PROOF
+          TESTS LINE WIDTHS / SIDEBANDS / SCW LEAVE-ONE-OUT / DETECTOR JACKKNIFE / ADJACENT CONTROLS
+          BACKTRACE ALLOWED ONLY IF MODERATE_VALIDATED_OR_STRONG_VALIDATED
           DIAGNOSTIC_NOT_PROOF
           NOT_DISCOVERY
           NOT_PARTICLE_PROOF
           NOT_SOURCE_ATTRIBUTION
           NOT_OFFICIAL_SPI_511_LINE_PROOF
           EOF
-          printf 'REV_START=%s\nREV_END=%s\nMAX_FILES=%s\nDOWNLOAD_MB_CAP=%s\n' "$REV_START" "$REV_END" "$MAX_FILES" "$DOWNLOAD_MB_CAP" > ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_INPUTS.txt
+          printf 'TARGET_START=%s\nTARGET_END=%s\nREV_CENTER=%s\nREV_PAD=%s\nMAX_NEW_FILES=%s\nDOWNLOAD_MB_CAP=%s\n' "$TARGET_START" "$TARGET_END" "$REV_CENTER" "$REV_PAD" "$MAX_NEW_FILES" "$DOWNLOAD_MB_CAP" > ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_INPUTS.txt
 
-      - name: Restore cumulative spectra cache
+      - name: Restore spectra cache
         id: restore-wide
         uses: actions/cache/restore@v4
         with:
           path: repo/scw
-          key: acirm-r17k-r8u-wide-spi-spectra-${{ inputs.rev_start }}-${{ inputs.rev_end }}-max${{ inputs.max_files }}-v1
+          key: acirm-r17k-r8v-targeted-rev${{ inputs.rev_center }}-${{ inputs.target_start }}-${{ inputs.target_end }}-v1
           restore-keys: |
             acirm-r17k-r8u-wide-spi-spectra-
             acirm-r17k-r8t-wide-spi-spectra-
+            acirm-r17k-r8v-targeted-
             acirm-r17k-r8t-
 
       - name: Restore calibration tree cache
@@ -81,387 +90,517 @@ jobs:
         shell: bash
         run: |
           set +e
-          echo "WIDE_CACHE_HIT=${{ steps.restore-wide.outputs.cache-hit }}" | tee ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_WIDE_CACHE_HIT.txt
-          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_TREE_CACHE_HIT.txt
+          echo "SPECTRA_CACHE_HIT=${{ steps.restore-wide.outputs.cache-hit }}" | tee ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_SPECTRA_CACHE_HIT.txt
+          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_TREE_CACHE_HIT.txt
           if [ "${{ steps.restore-tree.outputs.cache-hit }}" != "true" ]; then
-            echo "TREE_CACHE_MISS_NO_CALIBRATION_NO_R8U_SEARCH" | tee ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_CACHE_STATUS.txt
-            zip -r ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip ACIRM_R17K_R8U_OUTPUTS
-            sha256sum ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip > ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip.sha256.txt
+            echo "TREE_CACHE_MISS_NO_CALIBRATION_NO_R8V_VALIDATION" | tee ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_CACHE_STATUS.txt
+            zip -r ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip ACIRM_R17K_R8V_OUTPUTS
+            sha256sum ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip > ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip.sha256.txt
             exit 0
           fi
-          echo "CACHE_OK_OR_FETCH_NEEDED" | tee ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_CACHE_STATUS.txt
+          echo "CACHE_OK_OR_TARGET_FETCH_NEEDED" | tee ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_CACHE_STATUS.txt
           sudo apt-get update -y > logs/apt_update.log 2>&1
           sudo apt-get install -y zip unzip python3-pip ca-certificates > logs/apt_install.log 2>&1
           python3 -m pip install -q astropy numpy > logs/pip_install.log 2>&1
-          find repo/scw -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_INITIAL_SCW_INVENTORY.txt
-          find repo/ic repo/idx repo/cat repo/aux -maxdepth 10 -type f 2>/dev/null | sort > ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_CAL_TREE_INVENTORY.txt
-          df -h > ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_DF_START.txt
+          find repo/scw -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_INITIAL_SCW_INVENTORY.txt
+          find repo/ic repo/idx repo/cat repo/aux -maxdepth 10 -type f 2>/dev/null | sort > ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_CAL_TREE_INVENTORY.txt
+          df -h > ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_DF_START.txt
 
-      - name: Fetch more spectra and run product-first 511 search
+      - name: Targeted validation
         shell: bash
         run: |
           set +e
-          cat > scripts/r8u.py <<'PY'
-          import csv,json,math,os,re,time,urllib.request,warnings
+          cat > scripts/r8v.py <<'PY'
+          import csv, json, math, os, re, time, urllib.request, warnings
           from pathlib import Path
           import numpy as np
           from astropy.io import fits
 
-          OUT=Path('ACIRM_R17K_R8U_OUTPUTS'); SCW=Path('repo/scw'); IC=Path('repo/ic')
-          REV_START=int(os.environ.get('REV_START','2443')); REV_END=int(os.environ.get('REV_END','2560'))
-          MAX_FILES=int(os.environ.get('MAX_FILES','500')); CAP=int(float(os.environ.get('DOWNLOAD_MB_CAP','700'))*1024*1024)
-          LINE=(508.,514.); SB1=(490.,500.); SB2=(522.,532.)
-          ERR=[]; FETCH=[]; CAL=[]; ROW=[]; CAND=[]
-          PB=[]
-          for st in np.arange(430.,590.1,2.):
-              b=(float(st),float(st+6.))
-              if max(b[0],488.)<min(b[1],516.) or max(b[0],520.)<min(b[1],534.): continue
-              PB.append((b,(b[0]-18.,b[0]-8.),(b[1]+8.,b[1]+18.)))
+          OUT = Path('ACIRM_R17K_R8V_OUTPUTS')
+          SCW_ROOT = Path('repo/scw')
+          IC_ROOT = Path('repo/ic')
+          TARGET_START = os.environ.get('TARGET_START','244600170010')
+          TARGET_END = os.environ.get('TARGET_END','244600210010')
+          REV_CENTER = int(os.environ.get('REV_CENTER','2446'))
+          REV_PAD = int(os.environ.get('REV_PAD','1'))
+          MAX_NEW_FILES = int(os.environ.get('MAX_NEW_FILES','220'))
+          CAP = int(float(os.environ.get('DOWNLOAD_MB_CAP','350')) * 1024 * 1024)
+          DEFAULT_LINE = (508.0, 514.0)
+          DEFAULT_LEFT = (490.0, 500.0)
+          DEFAULT_RIGHT = (522.0, 532.0)
+          LINE_VARIANTS = [
+              ('LINE_508_514_LOCKED', (508.0, 514.0)),
+              ('LINE_507_515_WIDE', (507.0, 515.0)),
+              ('LINE_507p5_514p5_WIDE', (507.5, 514.5)),
+              ('LINE_509_513_NARROW', (509.0, 513.0)),
+              ('LINE_510_512_CORE', (510.0, 512.0)),
+          ]
+          SIDEBAND_VARIANTS = [
+              ('SB_LOCKED_490_500_522_532', (490.0, 500.0), (522.0, 532.0)),
+              ('SB_WIDE_488_500_522_534', (488.0, 500.0), (522.0, 534.0)),
+              ('SB_FAR_480_500_522_542', (480.0, 500.0), (522.0, 542.0)),
+              ('SB_NEAR_496_504_518_526', (496.0, 504.0), (518.0, 526.0)),
+          ]
+          ERR, FETCH, CAL, ROW, METRICS, LOO, JACK, CONTRIB, CONTROL, PLACEBO = [], [], [], [], [], [], [], [], [], []
 
-          def wcsv(p,rows):
-              ks=[]
+          def write_csv(path, rows):
+              keys = []
               for r in rows:
                   for k in r:
-                      if k not in ks: ks.append(k)
-              if not ks: ks=['empty']
-              with open(p,'w',newline='',encoding='utf-8') as f:
-                  w=csv.DictWriter(f,fieldnames=ks); w.writeheader()
-                  for r in rows: w.writerow({k:r.get(k,'') for k in ks})
+                      if k not in keys:
+                          keys.append(k)
+              if not keys:
+                  keys = ['empty']
+              with open(path, 'w', newline='', encoding='utf-8') as f:
+                  w = csv.DictWriter(f, fieldnames=keys)
+                  w.writeheader()
+                  for r in rows:
+                      w.writerow({k: r.get(k, '') for k in keys})
 
           def sf(x):
               try:
-                  y=float(x); return y if math.isfinite(y) else float('nan')
+                  y = float(x)
+                  return y if math.isfinite(y) else float('nan')
               except Exception:
                   return float('nan')
 
-          def cm(cols,n):
-              return {c.upper():c for c in cols}.get(n.upper())
+          def cm(cols, name):
+              return {c.upper(): c for c in cols}.get(name.upper())
 
-          def poly(c,x,order):
-              c=np.asarray(c,float).reshape(-1)
+          def scw_from_path(p):
+              m = re.search(r'(\d{12})\.001', str(p))
+              return m.group(1) if m else ''
+
+          def poly(c, x, order):
+              c = np.asarray(c, dtype=float).reshape(-1)
               with warnings.catch_warnings():
                   warnings.simplefilter('ignore')
-                  return np.polynomial.polynomial.polyval(x,c) if order=='asc' else np.polyval(c,x)
+                  return np.polynomial.polynomial.polyval(x, c) if order == 'asc' else np.polyval(c, x)
 
-          def invpoly(c,n,order):
-              e=np.linspace(0,12000,60001)
-              ch=poly(c,e,order)
-              ok=np.isfinite(ch)
-              if ok.sum()<20: return None
-              ch=ch[ok]; e=e[ok]
-              ix=np.argsort(ch)
-              ch=ch[ix]; e=e[ix]
-              ch,u=np.unique(ch,return_index=True)
-              e=e[u]
-              if len(ch)<20: return None
-              return np.interp(np.arange(n,dtype=float),ch,e,left=np.nan,right=np.nan)
+          def invpoly(c, n, order):
+              e = np.linspace(0, 12000, 60001)
+              ch = poly(c, e, order)
+              ok = np.isfinite(ch)
+              if ok.sum() < 20:
+                  return None
+              ch = ch[ok]
+              e = e[ok]
+              ix = np.argsort(ch)
+              ch = ch[ix]
+              e = e[ix]
+              ch, u = np.unique(ch, return_index=True)
+              e = e[u]
+              if len(ch) < 20:
+                  return None
+              return np.interp(np.arange(n, dtype=float), ch, e, left=np.nan, right=np.nan)
 
-          def models(ck,kc,n):
-              x=np.arange(n,dtype=float); out=[]
+          def models(ck, kc, n):
+              x = np.arange(n, dtype=float)
+              out = []
               if ck is not None:
-                  c=np.asarray(ck,float).reshape(-1)
-                  if c.size==n: out.append(('CHAN_KEV_VECTOR',c))
-                  if 0<c.size<=16:
-                      out.append(('CHAN_KEV_ASC_POLY',poly(c,x,'asc')))
-                      out.append(('CHAN_KEV_DESC_POLY',poly(c,x,'desc')))
+                  c = np.asarray(ck, dtype=float).reshape(-1)
+                  if c.size == n:
+                      out.append(('CHAN_KEV_VECTOR', c))
+                  if 0 < c.size <= 16:
+                      out.append(('CHAN_KEV_ASC_POLY', poly(c, x, 'asc')))
+                      out.append(('CHAN_KEV_DESC_POLY', poly(c, x, 'desc')))
               if kc is not None:
-                  c=np.asarray(kc,float).reshape(-1)
-                  if c.size==n: out.append(('KEV_CHAN_VECTOR_AS_ENERGY_DIAGNOSTIC',c))
-                  if 0<c.size<=16:
-                      a=invpoly(c,n,'asc'); d=invpoly(c,n,'desc')
-                      if a is not None: out.append(('KEV_CHAN_ASC_INVERTED',a))
-                      if d is not None: out.append(('KEV_CHAN_DESC_INVERTED',d))
+                  c = np.asarray(kc, dtype=float).reshape(-1)
+                  if c.size == n:
+                      out.append(('KEV_CHAN_VECTOR_AS_ENERGY_DIAGNOSTIC', c))
+                  if 0 < c.size <= 16:
+                      a = invpoly(c, n, 'asc')
+                      d = invpoly(c, n, 'desc')
+                      if a is not None:
+                          out.append(('KEV_CHAN_ASC_INVERTED', a))
+                      if d is not None:
+                          out.append(('KEV_CHAN_DESC_INVERTED', d))
               return out
 
-          def qmodel(e,c):
-              e=np.asarray(e,float).reshape(-1)
-              ok=np.isfinite(e)
-              if ok.sum()<20: return None
-              ee=e[ok]
-              d=np.diff(ee)
-              inc=float(np.mean(d>0)) if len(d) else 0.
-              if inc<.95 or np.nanmin(ee)>490 or np.nanmax(ee)<532:
+          def qmodel(e, counts):
+              e = np.asarray(e, dtype=float).reshape(-1)
+              ok = np.isfinite(e)
+              if ok.sum() < 20:
+                  return None
+              ee = e[ok]
+              d = np.diff(ee)
+              inc = float(np.mean(d > 0)) if len(d) else 0.0
+              if inc < 0.95 or np.nanmin(ee) > 490 or np.nanmax(ee) < 532:
                   return None
               try:
-                  ch511=float(np.interp(511.,e,np.arange(len(e),dtype=float)))
+                  ch511 = float(np.interp(511.0, e, np.arange(len(e), dtype=float)))
               except Exception:
-                  ch511=float('nan')
-              return dict(score=100*inc+40+(10 if np.nansum(c)>0 else 0),channel_at_511=ch511,emin=float(np.nanmin(ee)),emax=float(np.nanmax(ee)))
+                  ch511 = float('nan')
+              return dict(score=100.0 * inc + 40.0 + (10.0 if np.nansum(counts) > 0 else 0.0), channel_at_511=ch511, emin=float(np.nanmin(ee)), emax=float(np.nanmax(ee)))
 
           def edges(e):
-              e=np.asarray(e,float).reshape(-1)
-              if len(e)<3 or not np.all(np.isfinite(e)):
-                  return None,None
-              m=(e[:-1]+e[1:])/2.
-              b=np.r_[e[0]-(m[0]-e[0]),m,e[-1]+(e[-1]-m[-1])]
-              return np.minimum(b[:-1],b[1:]),np.maximum(b[:-1],b[1:])
+              e = np.asarray(e, dtype=float).reshape(-1)
+              if len(e) < 3 or not np.all(np.isfinite(e)):
+                  return None, None
+              m = (e[:-1] + e[1:]) / 2.0
+              b = np.r_[e[0] - (m[0] - e[0]), m, e[-1] + (e[-1] - m[-1])]
+              return np.minimum(b[:-1], b[1:]), np.maximum(b[:-1], b[1:])
 
-          def bc(c,lo,hi,band):
-              if lo is None:
-                  return 0.
-              n=min(len(c),len(lo),len(hi))
-              c=np.nan_to_num(np.asarray(c[:n],float),nan=0,posinf=0,neginf=0)
-              lo=np.asarray(lo[:n],float); hi=np.asarray(hi[:n],float)
-              f=np.maximum(0,np.minimum(hi,band[1])-np.maximum(lo,band[0]))/np.maximum(1e-12,hi-lo)
-              return float((c*f).sum())
+          def band_counts(counts, lo, hi, band):
+              if lo is None or hi is None:
+                  return 0.0
+              n = min(len(counts), len(lo), len(hi))
+              c = np.nan_to_num(np.asarray(counts[:n], dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
+              lo = np.asarray(lo[:n], dtype=float)
+              hi = np.asarray(hi[:n], dtype=float)
+              frac = np.maximum(0.0, np.minimum(hi, band[1]) - np.maximum(lo, band[0])) / np.maximum(1e-12, hi - lo)
+              return float((c * frac).sum())
 
-          def zr(line,side):
-              exp=side/20*6 if side>0 else float('nan')
-              ratio=(line/6)/(side/20) if side>0 else float('inf')
-              z=(line-exp)/math.sqrt(exp) if exp and exp>0 else float('nan')
-              return exp,ratio,z
+          def metric_items(items, line_band, left_band, right_band):
+              line = s1 = s2 = raw = 0.0
+              det_line = {}
+              scw_line = {}
+              rows = 0
+              for it in items:
+                  rows += 1
+                  raw += float(np.nansum(it['counts']))
+                  l = band_counts(it['counts'], it['lo'], it['hi'], line_band)
+                  a = band_counts(it['counts'], it['lo'], it['hi'], left_band)
+                  b = band_counts(it['counts'], it['lo'], it['hi'], right_band)
+                  line += l
+                  s1 += a
+                  s2 += b
+                  det_line[it['det_id']] = det_line.get(it['det_id'], 0.0) + l
+                  scw_line[it['scw']] = scw_line.get(it['scw'], 0.0) + l
+              side = s1 + s2
+              lw = line_band[1] - line_band[0]
+              sw = (left_band[1] - left_band[0]) + (right_band[1] - right_band[0])
+              exp = side / sw * lw if side > 0 and sw > 0 else float('nan')
+              ratio = (line / lw) / (side / sw) if side > 0 and sw > 0 else float('inf')
+              z = (line - exp) / math.sqrt(exp) if exp and exp > 0 else float('nan')
+              max_det_share = max(det_line.values()) / line if line > 0 and det_line else float('nan')
+              max_scw_share = max(scw_line.values()) / line if line > 0 and scw_line else float('nan')
+              return dict(rows=rows, raw_total_counts=raw, line_counts=line, side_left_counts=s1, side_right_counts=s2, side_total_counts=side, expected_from_side_density=exp, ratio=ratio, z=z, max_detector_line_share=max_det_share, max_scw_line_share=max_scw_share)
 
-          def ids(p):
-              m=re.search(r'(\d{12})\.001',str(p))
-              scw=m.group(1) if m else ''
-              return scw[:4],scw
+          def placebo_rank(items, target_z, line_width):
+              scans = []
+              for st in np.arange(430.0, 590.1, 2.0):
+                  band = (float(st), float(st + line_width))
+                  if max(band[0], 488.0) < min(band[1], 516.0) or max(band[0], 520.0) < min(band[1], 534.0):
+                      continue
+                  left = (band[0] - 18.0, band[0] - 8.0)
+                  right = (band[1] + 8.0, band[1] + 18.0)
+                  m = metric_items(items, band, left, right)
+                  scans.append(dict(placebo_band_min=band[0], placebo_band_max=band[1], placebo_z=m['z'], placebo_ratio=m['ratio'], placebo_line_counts=m['line_counts'], placebo_side_total=m['side_total_counts']))
+              zs = [s['placebo_z'] for s in scans if math.isfinite(float(s['placebo_z']))]
+              rank = 1 + sum(1 for z in zs if math.isfinite(target_z) and z > target_z) if math.isfinite(target_z) else ''
+              return rank, len(zs), scans
 
-          existing_before=sorted(SCW.glob('**/spi_spectra.fits.gz'))
-          FETCH.append(dict(stage='initial_cache',existing_spectra_files=len(existing_before),status='OK'))
-
-          bases=[
+          bases = [
               'https://heasarc.gsfc.nasa.gov/FTP/integral/data/scw/{rev}/',
               'https://heasarc.gsfc.nasa.gov/FTP/integral/data/rev_3/scw/{rev}/'
           ]
 
-          def get(url):
-              req=urllib.request.Request(url,headers={'User-Agent':'ACIRM-R8U/1.0'})
-              with urllib.request.urlopen(req,timeout=25) as r:
+          def get_listing(url):
+              req = urllib.request.Request(url, headers={'User-Agent':'ACIRM-R8V/1.0'})
+              with urllib.request.urlopen(req, timeout=25) as r:
                   return r.read(2000000).decode('utf-8','replace')
 
-          cand=[]
-          for rev in range(REV_START,REV_END+1):
-              rs=f'{rev:04d}'
+          current = sorted(SCW_ROOT.glob('**/spi_spectra.fits.gz'))
+          FETCH.append(dict(stage='initial_cache', existing_spectra_files=len(current), status='OK'))
+          downloaded = 0
+          downloaded_bytes = 0
+          wanted_revs = range(REV_CENTER - REV_PAD, REV_CENTER + REV_PAD + 1)
+          for rev in wanted_revs:
+              rs = f'{rev:04d}'
+              links = []
               for base in bases:
-                  u=base.format(rev=rs)
+                  u = base.format(rev=rs)
                   try:
-                      txt=get(u)
-                      fs=sorted(set(re.findall(r'href=["\']?(\d{12}\.001)/?["\']?',txt)))
-                      FETCH.append(dict(stage='list',rev=rs,url=u,status='OK',links=len(fs)))
-                      for d in fs:
-                          cand.append((rs,d.split('.')[0],u.rstrip('/')+'/'+d+'/spi_spectra.fits.gz'))
-                      if fs:
+                      txt = get_listing(u)
+                      links = sorted(set(re.findall(r'href=["\']?(\d{12}\.001)/?["\']?', txt)))
+                      FETCH.append(dict(stage='list', rev=rs, url=u, status='OK', links=len(links)))
+                      if links:
+                          base_url = u.rstrip('/')
                           break
                   except Exception as e:
-                      FETCH.append(dict(stage='list',rev=rs,url=u,status='FAIL',error=repr(e)[:220]))
-
-          seen=set(); total=0; got=0
-          for rev,scw,url in cand:
-              current_count=len(list(SCW.glob('**/spi_spectra.fits.gz')))
-              if current_count>=MAX_FILES:
-                  break
-              if scw in seen:
-                  continue
-              seen.add(scw)
-              dest=SCW/rev/(scw+'.001')/'spi_spectra.fits.gz'
-              if dest.exists() and dest.stat().st_size>0:
-                  continue
-              if total>=CAP:
-                  break
-              try:
-                  req=urllib.request.Request(url,headers={'User-Agent':'ACIRM-R8U/1.0'})
-                  with urllib.request.urlopen(req,timeout=30) as r:
-                      data=r.read()
-                  if not data or data[:1]==b'<':
-                      FETCH.append(dict(stage='download',scw=scw,status='BAD_CONTENT'))
+                      FETCH.append(dict(stage='list', rev=rs, url=u, status='FAIL', error=repr(e)[:220]))
+              for d in links:
+                  if downloaded >= MAX_NEW_FILES or downloaded_bytes >= CAP:
+                      break
+                  scw = d.split('.')[0]
+                  dest = SCW_ROOT / rs / d / 'spi_spectra.fits.gz'
+                  if dest.exists() and dest.stat().st_size > 0:
                       continue
-                  if total+len(data)>CAP:
-                      FETCH.append(dict(stage='download',scw=scw,status='SKIP_CAP',bytes=len(data)))
-                      continue
-                  dest.parent.mkdir(parents=True,exist_ok=True)
-                  dest.write_bytes(data)
-                  total+=len(data); got+=1
-                  FETCH.append(dict(stage='download',rev=rev,scw=scw,url=url,status='OK',bytes=len(data),local_path=str(dest)))
-                  time.sleep(.04)
-              except Exception as e:
-                  FETCH.append(dict(stage='download',rev=rev,scw=scw,url=url,status='FAIL',error=repr(e)[:220]))
+                  url = base_url + '/' + d + '/spi_spectra.fits.gz'
+                  try:
+                      req = urllib.request.Request(url, headers={'User-Agent':'ACIRM-R8V/1.0'})
+                      with urllib.request.urlopen(req, timeout=30) as r:
+                          data = r.read()
+                      if not data or data[:1] == b'<':
+                          FETCH.append(dict(stage='download', rev=rs, scw=scw, status='BAD_CONTENT'))
+                          continue
+                      if downloaded_bytes + len(data) > CAP:
+                          FETCH.append(dict(stage='download', rev=rs, scw=scw, status='SKIP_CAP', bytes=len(data)))
+                          continue
+                      dest.parent.mkdir(parents=True, exist_ok=True)
+                      dest.write_bytes(data)
+                      downloaded += 1
+                      downloaded_bytes += len(data)
+                      FETCH.append(dict(stage='download', rev=rs, scw=scw, status='OK', bytes=len(data), local_path=str(dest)))
+                      time.sleep(0.04)
+                  except Exception as e:
+                      FETCH.append(dict(stage='download', rev=rs, scw=scw, status='FAIL', error=repr(e)[:220]))
 
-          for p in sorted(set(list(IC.glob('**/spi_coef_cal_*.fits'))+list(IC.glob('**/*coef*cal*.fits')))):
+          for p in sorted(set(list(IC_ROOT.glob('**/spi_coef_cal_*.fits')) + list(IC_ROOT.glob('**/*coef*cal*.fits')))):
               try:
-                  with fits.open(p,memmap=True) as hd:
-                      for h in hd:
-                          cols=list(h.columns.names or []) if hasattr(h,'columns') and h.columns is not None else []
+                  with fits.open(p, memmap=True) as hdul:
+                      for h in hdul:
+                          cols = list(h.columns.names or []) if hasattr(h, 'columns') and h.columns is not None else []
                           if h.data is None:
                               continue
-                          dc=cm(cols,'DET_ID'); ec=cm(cols,'E_RANGE'); ck=cm(cols,'CHAN_KEV'); kc=cm(cols,'KEV_CHAN'); os=cm(cols,'OBT_START'); oe=cm(cols,'OBT_END')
+                          dc = cm(cols,'DET_ID'); ec = cm(cols,'E_RANGE'); ck = cm(cols,'CHAN_KEV'); kc = cm(cols,'KEV_CHAN'); os0 = cm(cols,'OBT_START'); oe0 = cm(cols,'OBT_END')
                           if not (dc and ec and (ck or kc)):
                               continue
                           for i in range(len(h.data)):
-                              CAL.append(dict(
-                                  file=str(p),
-                                  det=int(h.data[dc][i]),
-                                  er=int(h.data[ec][i]),
-                                  os=sf(h.data[os][i]) if os else float('nan'),
-                                  oe=sf(h.data[oe][i]) if oe else float('nan'),
-                                  ck=np.asarray(h.data[ck][i],float).reshape(-1) if ck else None,
-                                  kc=np.asarray(h.data[kc][i],float).reshape(-1) if kc else None
-                              ))
+                              CAL.append(dict(file=str(p), det_id=int(h.data[dc][i]), e_range=int(h.data[ec][i]), obt_start=sf(h.data[os0][i]) if os0 else float('nan'), obt_end=sf(h.data[oe0][i]) if oe0 else float('nan'), chan_kev=np.asarray(h.data[ck][i], dtype=float).reshape(-1) if ck else None, kev_chan=np.asarray(h.data[kc][i], dtype=float).reshape(-1) if kc else None))
               except Exception as e:
-                  ERR.append(dict(stage='cal',file=str(p),error=repr(e)[:300]))
+                  ERR.append(dict(stage='calibration_read', file=str(p), error=repr(e)[:500]))
 
-          def mcal(det,er,mid):
-              r=[x for x in CAL if x['det']==det and x['er']==er]
-              if not r:
+          def match_cal(det, er, obt_mid):
+              rows = [r for r in CAL if r['det_id'] == det and r['e_range'] == er]
+              if not rows:
                   return None
-              inn=[x for x in r if math.isfinite(mid) and math.isfinite(x['os']) and math.isfinite(x['oe']) and x['os']<=mid<=x['oe']]
-              return inn[0] if inn else sorted(r,key=lambda x:(x['file'],x['os']))[-1]
+              inside = [r for r in rows if math.isfinite(obt_mid) and math.isfinite(r['obt_start']) and math.isfinite(r['obt_end']) and r['obt_start'] <= obt_mid <= r['obt_end']]
+              return inside[0] if inside else sorted(rows, key=lambda r: (r['file'], r['obt_start']))[-1]
 
-          items=[]; raw_seen=0; spectra=sorted(SCW.glob('**/spi_spectra.fits.gz'))
+          items = []
+          spectra = sorted(SCW_ROOT.glob('**/spi_spectra.fits.gz'))
           for p in spectra:
-              rev,scw=ids(p)
+              scw = scw_from_path(p)
+              rev = scw[:4]
               try:
-                  with fits.open(p,memmap=True) as hd:
-                      for h in hd:
-                          if h.name!='SPI.-ACOF-RAW' or h.data is None:
+                  with fits.open(p, memmap=True) as hdul:
+                      for h in hdul:
+                          if h.name != 'SPI.-ACOF-RAW' or h.data is None:
                               continue
-                          cols=list(h.columns.names or [])
-                          dc=cm(cols,'DET_ID'); ec=cm(cols,'E_RANGE'); cc=cm(cols,'COUNTS'); ls=cm(cols,'LOBT_START'); le=cm(cols,'LOBT_END')
+                          cols = list(h.columns.names or [])
+                          dc = cm(cols,'DET_ID'); ec = cm(cols,'E_RANGE'); cc = cm(cols,'COUNTS'); ls = cm(cols,'LOBT_START'); le = cm(cols,'LOBT_END')
                           if not (dc and ec and cc):
                               continue
                           for i in range(len(h.data)):
-                              raw_seen+=1
-                              det=int(h.data[dc][i]); er=int(h.data[ec][i])
-                              c=np.asarray(h.data[cc][i],float).reshape(-1)
-                              a=sf(h.data[ls][i]) if ls else float('nan')
-                              b=sf(h.data[le][i]) if le else float('nan')
-                              mid=(a+b)/2 if math.isfinite(a) and math.isfinite(b) else float('nan')
-                              cal=mcal(det,er,mid)
-                              base=dict(rev=rev,scw=scw,row=i,det_id=det,e_range=er,raw_total_counts=float(np.nansum(c)),nonzero_channels=int(np.count_nonzero(c)))
+                              det = int(h.data[dc][i]); er = int(h.data[ec][i]); counts = np.asarray(h.data[cc][i], dtype=float).reshape(-1)
+                              a = sf(h.data[ls][i]) if ls else float('nan')
+                              b = sf(h.data[le][i]) if le else float('nan')
+                              mid = (a + b) / 2.0 if math.isfinite(a) and math.isfinite(b) else float('nan')
+                              base = dict(rev=rev, scw=scw, row_index=i, det_id=det, e_range=er, raw_total_counts=float(np.nansum(counts)), nonzero_channels=int(np.count_nonzero(counts)))
+                              cal = match_cal(det, er, mid)
                               if cal is None:
-                                  ROW.append({**base,'status':'NO_CAL'})
+                                  ROW.append({**base, 'status':'NO_CAL'})
                                   continue
-                              ranked=[]
-                              for midn,e in models(cal['ck'],cal['kc'],len(c)):
-                                  q=qmodel(e,c)
+                              ranked = []
+                              for model_id, e in models(cal['chan_kev'], cal['kev_chan'], len(counts)):
+                                  q = qmodel(e, counts)
                                   if q:
-                                      ranked.append((q['score'],midn,e,q))
+                                      ranked.append((q['score'], model_id, e, q))
                               if not ranked:
-                                  ROW.append({**base,'status':'NO_MODEL','cal_file':cal['file']})
+                                  ROW.append({**base, 'status':'NO_MODEL', 'cal_file':cal['file']})
                                   continue
-                              ranked.sort(key=lambda x:x[0],reverse=True)
-                              score,midn,e,q=ranked[0]
-                              lo,hi=edges(e)
-                              line=bc(c,lo,hi,LINE)
-                              side=bc(c,lo,hi,SB1)+bc(c,lo,hi,SB2)
-                              exp,ratio,z=zr(line,side)
-                              pl=[]; ps=[]
-                              for bnd,lft,rgt in PB:
-                                  pl.append(bc(c,lo,hi,bnd))
-                                  ps.append(bc(c,lo,hi,lft)+bc(c,lo,hi,rgt))
-                              items.append({**base,'line':line,'side':side,'pl':np.asarray(pl,float),'ps':np.asarray(ps,float)})
-                              ROW.append({**base,'status':'OK','model':midn,'line_508_514_counts':line,'side_total_counts':side,'expected':exp,'ratio':ratio,'z':z})
+                              ranked.sort(key=lambda x: x[0], reverse=True)
+                              score, model_id, e, q = ranked[0]
+                              lo, hi = edges(e)
+                              it = {**base, 'counts':counts, 'lo':lo, 'hi':hi, 'model_id':model_id, 'model_score':score, 'cal_file':cal['file']}
+                              items.append(it)
+                              m = metric_items([it], DEFAULT_LINE, DEFAULT_LEFT, DEFAULT_RIGHT)
+                              ROW.append({k:v for k,v in it.items() if k not in ('counts','lo','hi')} | {'status':'OK', 'line_508_514_counts':m['line_counts'], 'side_total_counts':m['side_total_counts'], 'expected':m['expected_from_side_density'], 'ratio':m['ratio'], 'z':m['z']})
               except Exception as e:
-                  ERR.append(dict(stage='spectra',file=str(p),error=repr(e)[:300]))
+                  ERR.append(dict(stage='spectra_read', file=str(p), error=repr(e)[:500]))
 
-          def agg(scope,sub,extra):
-              if not sub:
-                  return
-              line=sum(x['line'] for x in sub)
-              side=sum(x['side'] for x in sub)
-              exp,ratio,z=zr(line,side)
-              pl=np.sum([x['pl'] for x in sub],axis=0)
-              ps=np.sum([x['ps'] for x in sub],axis=0)
-              pz=[]
-              for a,b in zip(pl,ps):
-                  pz.append(zr(float(a),float(b))[2])
-              vz=[v for v in pz if math.isfinite(v)]
-              rank=1+sum(1 for v in vz if math.isfinite(z) and v>z) if math.isfinite(z) else ''
-              if math.isfinite(z) and z>=5 and ratio>=1.20 and rank!='' and int(rank)<=3:
-                  level='STRONG_PRODUCT_FIRST_511_CANDIDATE'
-              elif math.isfinite(z) and z>=3 and ratio>=1.10 and rank!='' and int(rank)<=5:
-                  level='MODERATE_PRODUCT_FIRST_511_CANDIDATE'
-              elif math.isfinite(z) and z>=2 and ratio>=1.05:
-                  level='WEAK_PRODUCT_FIRST_511_HINT'
+          all_scws = sorted({it['scw'] for it in items if it['scw']})
+          center_scws = [s for s in all_scws if str(REV_CENTER) == s[:4]]
+          target_scws = [s for s in center_scws if TARGET_START <= s <= TARGET_END]
+          if not target_scws:
+              target_scws = [s for s in all_scws if TARGET_START <= s <= TARGET_END]
+          width = max(1, len(target_scws))
+          target_set = set(target_scws)
+          target_items = [it for it in items if it['scw'] in target_set]
+
+          def scw_slice_around(base_list, start_scw, end_scw, offset, width):
+              if not base_list:
+                  return []
+              try:
+                  start_idx = base_list.index(start_scw)
+                  end_idx = base_list.index(end_scw)
+              except Exception:
+                  return []
+              if offset < 0:
+                  a = max(0, start_idx + offset * width)
+                  b = max(0, start_idx + (offset + 1) * width)
               else:
-                  level='NO_LOCKED_511_EXCESS_CANDIDATE'
-              CAND.append(dict(scope=scope,**extra,rows=len(sub),line_508_514_counts=line,side_total_counts=side,expected=exp,ratio=ratio,z=z,rank=rank,placebo_n=len(vz),candidate_level=level,backtrace_permission='ONLY_IF_MODERATE_OR_STRONG',claim_ceiling='DIAGNOSTIC_NOT_PROOF'))
+                  a = min(len(base_list), end_idx + 1 + (offset - 1) * width)
+                  b = min(len(base_list), end_idx + 1 + offset * width)
+              return base_list[a:b]
 
-          agg('ALL',items,dict(candidate_id='ALL'))
-          scws=sorted({x['scw'] for x in items})
-          for s in scws:
-              agg('SCW',[x for x in items if x['scw']==s],dict(candidate_id='SCW_'+s,scw=s,rev=s[:4],window_width=1))
+          control_windows = []
+          if target_scws:
+              control_windows.append(('TARGET_WINDOW', target_scws))
+              control_windows.append(('PRE_IMMEDIATE', scw_slice_around(center_scws, target_scws[0], target_scws[-1], -1, width)))
+              control_windows.append(('POST_IMMEDIATE', scw_slice_around(center_scws, target_scws[0], target_scws[-1], 1, width)))
+              control_windows.append(('PRE_FAR', scw_slice_around(center_scws, target_scws[0], target_scws[-1], -2, width)))
+              control_windows.append(('POST_FAR', scw_slice_around(center_scws, target_scws[0], target_scws[-1], 2, width)))
 
-          for w in (2,3,5,8,13,21,34):
-              if len(scws)<w:
-                  continue
-              for i in range(len(scws)-w+1):
-                  ss=set(scws[i:i+w])
-                  agg('ROLLING_SCW_WINDOW',[x for x in items if x['scw'] in ss],dict(candidate_id='WIN_'+scws[i]+'_'+scws[i+w-1],scw_start=scws[i],scw_end=scws[i+w-1],window_width=w))
+          def add_metric(bucket, scope, items_subset, line_id, line_band, sb_id, left_band, right_band, extra):
+              m = metric_items(items_subset, line_band, left_band, right_band)
+              rank, pn, scans = placebo_rank(items_subset, float(m['z']), line_band[1] - line_band[0])
+              row = dict(scope=scope, line_band_id=line_id, sideband_id=sb_id, line_band_min=line_band[0], line_band_max=line_band[1], left_band_min=left_band[0], left_band_max=left_band[1], right_band_min=right_band[0], right_band_max=right_band[1], placebo_rank=rank, placebo_n=pn, **m, **extra)
+              bucket.append(row)
+              if scope == 'TARGET_WINDOW' and line_id == 'LINE_508_514_LOCKED' and sb_id == 'SB_LOCKED_490_500_522_532':
+                  for s in scans:
+                      PLACEBO.append(dict(scope=scope, **extra, **s))
+              return row
 
-          strong=[c for c in CAND if c['candidate_level'].startswith('STRONG')]
-          moderate=[c for c in CAND if c['candidate_level'].startswith('MODERATE')]
-          weak=[c for c in CAND if c['candidate_level'].startswith('WEAK')]
-          valid=[c for c in CAND if math.isfinite(float(c.get('z',float('nan'))))]
-          best=sorted(valid,key=lambda r:(float(r['z']),float(r['ratio'])),reverse=True)[0] if valid else {}
+          primary = {}
+          if target_items:
+              for lid, lb in LINE_VARIANTS:
+                  for sid, left, right in SIDEBAND_VARIANTS:
+                      row = add_metric(METRICS, 'TARGET_WINDOW', target_items, lid, lb, sid, left, right, dict(scw_start=target_scws[0], scw_end=target_scws[-1], scw_list=';'.join(target_scws), window_width=len(target_scws)))
+                      if lid == 'LINE_508_514_LOCKED' and sid == 'SB_LOCKED_490_500_522_532':
+                          primary = row
 
-          decision='R17K_R8U_NO_SPI_SPECTRA_AVAILABLE_AFTER_FETCH'
-          if items:
-              decision='R17K_R8U_NO_CALIBRATED_PRODUCT_FIRST_511_EXCESS_IN_CUMULATIVE_WIDE_SET'
-          if weak:
-              decision='R17K_R8U_ONLY_WEAK_511_HINTS_FOUND_NOT_LOCKED_NOT_PROOF'
-          if moderate:
-              decision='R17K_R8U_MODERATE_PRODUCT_FIRST_511_CANDIDATE_FOUND_BACKTRACE_REQUIRED_NOT_PROOF'
-          if strong:
-              decision='R17K_R8U_STRONG_PRODUCT_FIRST_511_CANDIDATE_FOUND_BACKTRACE_REQUIRED_NOT_PROOF'
+              for s in target_scws:
+                  sub = [it for it in target_items if it['scw'] != s]
+                  add_metric(LOO, 'TARGET_LEAVE_ONE_SCW_OUT', sub, 'LINE_508_514_LOCKED', DEFAULT_LINE, 'SB_LOCKED_490_500_522_532', DEFAULT_LEFT, DEFAULT_RIGHT, dict(removed_scw=s, remaining_window_width=len(set(it['scw'] for it in sub))))
 
-          wcsv(OUT/'R17K_R8U_FETCH_MANIFEST.csv',FETCH)
-          wcsv(OUT/'R17K_R8U_ROW_511_MEASUREMENTS.csv',ROW)
-          wcsv(OUT/'R17K_R8U_PRODUCT_FIRST_CANDIDATES.csv',CAND)
-          (OUT/'R17K_R8U_ERRORS.json').write_text(json.dumps(ERR,indent=2),encoding='utf-8')
-          (OUT/'R17K_R8U_THEORY_LINK_NOTE.txt').write_text('Continues product-first search. 511 candidate first; ACIRM reverse trace only after moderate/strong candidate. R8O channel approximation remains excluded from proof.\n',encoding='utf-8')
+              for det in sorted({it['det_id'] for it in target_items}):
+                  sub = [it for it in target_items if it['det_id'] != det]
+                  add_metric(JACK, 'TARGET_DETECTOR_JACKKNIFE', sub, 'LINE_508_514_LOCKED', DEFAULT_LINE, 'SB_LOCKED_490_500_522_532', DEFAULT_LEFT, DEFAULT_RIGHT, dict(removed_detector=det))
 
-          rev_counts={}
-          for p in spectra:
-              rv,_=ids(p)
-              rev_counts[rv]=rev_counts.get(rv,0)+1
+              total_line = 0.0
+              det_line = {}
+              scw_line = {}
+              for it in target_items:
+                  l = band_counts(it['counts'], it['lo'], it['hi'], DEFAULT_LINE)
+                  total_line += l
+                  det_line[it['det_id']] = det_line.get(it['det_id'], 0.0) + l
+                  scw_line[it['scw']] = scw_line.get(it['scw'], 0.0) + l
+              for det, val in sorted(det_line.items()):
+                  CONTRIB.append(dict(type='DETECTOR_LINE_CONTRIBUTION', det_id=det, line_counts=val, share=val/total_line if total_line > 0 else float('nan')))
+              for s, val in sorted(scw_line.items()):
+                  CONTRIB.append(dict(type='SCW_LINE_CONTRIBUTION', scw=s, line_counts=val, share=val/total_line if total_line > 0 else float('nan')))
 
-          summary=dict(
-              run_id='R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH',
+          for name, scws in control_windows:
+              sub = [it for it in items if it['scw'] in set(scws)]
+              if sub:
+                  add_metric(CONTROL, name, sub, 'LINE_508_514_LOCKED', DEFAULT_LINE, 'SB_LOCKED_490_500_522_532', DEFAULT_LEFT, DEFAULT_RIGHT, dict(scw_start=scws[0], scw_end=scws[-1], scw_list=';'.join(scws), window_width=len(scws)))
+
+          def valid_z(rows):
+              out = []
+              for r in rows:
+                  try:
+                      z = float(r.get('z', float('nan')))
+                      if math.isfinite(z):
+                          out.append(z)
+                  except Exception:
+                      pass
+              return out
+
+          primary_z = sf(primary.get('z')) if primary else float('nan')
+          primary_ratio = sf(primary.get('ratio')) if primary else float('nan')
+          primary_rank = primary.get('placebo_rank', '') if primary else ''
+          max_det_share = sf(primary.get('max_detector_line_share')) if primary else float('nan')
+          loo_z = valid_z(LOO)
+          jack_z = valid_z(JACK)
+          control_z = [sf(r.get('z')) for r in CONTROL if r.get('scope') != 'TARGET_WINDOW' and math.isfinite(sf(r.get('z')))]
+          min_loo_z = min(loo_z) if loo_z else float('nan')
+          min_jack_z = min(jack_z) if jack_z else float('nan')
+          max_control_z = max(control_z) if control_z else float('nan')
+
+          robust_notes = []
+          backtrace_permission = False
+          if not target_items:
+              decision = 'R17K_R8V_TARGET_WINDOW_NOT_FOUND_IN_CACHE_OR_FETCH'
+              robust_notes.append('Target SCW window not found; no validation possible.')
+          elif math.isfinite(primary_z) and primary_z >= 5 and primary_ratio >= 1.20 and primary_rank != '' and int(primary_rank) <= 3 and max_det_share <= 0.35 and (not math.isfinite(max_control_z) or primary_z > max_control_z):
+              decision = 'R17K_R8V_STRONG_TARGET_511_VALIDATED_BACKTRACE_READY_NOT_PROOF'
+              backtrace_permission = True
+          elif math.isfinite(primary_z) and primary_z >= 3 and primary_ratio >= 1.10 and primary_rank != '' and int(primary_rank) <= 5 and max_det_share <= 0.40 and (not math.isfinite(min_loo_z) or min_loo_z >= 2.0) and (not math.isfinite(max_control_z) or primary_z > max_control_z):
+              decision = 'R17K_R8V_MODERATE_TARGET_511_VALIDATED_BACKTRACE_READY_NOT_PROOF'
+              backtrace_permission = True
+          elif math.isfinite(primary_z) and primary_z >= 2 and primary_ratio >= 1.05 and primary_rank != '' and int(primary_rank) <= 10:
+              decision = 'R17K_R8V_WEAK_TARGET_511_HINT_SURVIVES_PRIMARY_NOT_VALIDATED_NOT_PROOF'
+              robust_notes.append('Primary target remains weak; reverse trace is not locked.')
+          else:
+              decision = 'R17K_R8V_TARGET_511_HINT_NOT_ROBUST_DIAGNOSTIC_ONLY'
+              robust_notes.append('Target failed weak/moderate validation criteria.')
+
+          if math.isfinite(max_det_share) and max_det_share > 0.40:
+              robust_notes.append('Detector concentration warning: max detector line share > 0.40.')
+          if math.isfinite(min_loo_z) and min_loo_z < 2.0:
+              robust_notes.append('Leave-one-out instability warning: removing one SCW drops z below 2.')
+          if math.isfinite(max_control_z) and math.isfinite(primary_z) and max_control_z >= primary_z:
+              robust_notes.append('Adjacent control warning: a control window matches/exceeds target z.')
+
+          theory_note = []
+          theory_note.append('R8V validates the R8U weak product-first 511 hint before any ACIRM reverse trace.')
+          theory_note.append('Backtrace permission is granted only for MODERATE_TARGET_511_VALIDATED or STRONG_TARGET_511_VALIDATED.')
+          theory_note.append('If only weak survives, the correct label remains diagnostic hint, not proof and not phase-product evidence.')
+          (OUT/'R17K_R8V_THEORY_LINK_NOTE.txt').write_text('\n'.join(theory_note)+'\n', encoding='utf-8')
+
+          write_csv(OUT/'R17K_R8V_FETCH_MANIFEST.csv', FETCH)
+          write_csv(OUT/'R17K_R8V_ROW_MEASUREMENTS.csv', ROW)
+          write_csv(OUT/'R17K_R8V_TARGET_VARIANT_METRICS.csv', METRICS)
+          write_csv(OUT/'R17K_R8V_SCW_LEAVE_ONE_OUT.csv', LOO)
+          write_csv(OUT/'R17K_R8V_DETECTOR_JACKKNIFE.csv', JACK)
+          write_csv(OUT/'R17K_R8V_LINE_CONTRIBUTIONS.csv', CONTRIB)
+          write_csv(OUT/'R17K_R8V_ADJACENT_CONTROL_WINDOWS.csv', CONTROL)
+          write_csv(OUT/'R17K_R8V_PLACEBO_SCAN_TARGET.csv', PLACEBO)
+          (OUT/'R17K_R8V_ERRORS.json').write_text(json.dumps(ERR, indent=2), encoding='utf-8')
+
+          summary = dict(
+              run_id='R17K_R8V_TARGETED_REV2446_WEAK_511_CANDIDATE_VALIDATION',
               decision=decision,
               proof_allowed=False,
-              downloaded_files=got,
-              downloaded_bytes=total,
+              backtrace_permission=backtrace_permission,
+              downloaded_files=downloaded,
+              downloaded_bytes=downloaded_bytes,
               spectra_files_found=len(spectra),
-              raw_rows_seen=raw_seen,
-              calibration_rows_found=len(CAL),
               calibrated_rows_used=len(items),
-              candidate_rows=len(CAND),
-              strong_candidate_count=len(strong),
-              moderate_candidate_count=len(moderate),
-              weak_hint_count=len(weak),
-              best_candidate_by_z=best,
-              rev_file_counts=rev_counts,
+              target_start=TARGET_START,
+              target_end=TARGET_END,
+              target_scws=target_scws,
+              target_rows=len(target_items),
+              primary_target_metric=primary,
+              min_leave_one_out_z=min_loo_z,
+              min_detector_jackknife_z=min_jack_z,
+              max_adjacent_control_z=max_control_z,
+              max_detector_line_share=max_det_share,
+              robust_notes=robust_notes,
               claim_ceiling=['DIAGNOSTIC_NOT_PROOF','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF']
           )
-          (OUT/'R17K_R8U_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          (OUT/'R17K_R8V_DECISION.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
           PY
-          python3 scripts/r8u.py > logs/r8u_python.log 2>&1
-          echo "PYTHON_EXIT=$?" | tee ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_PYTHON_EXIT.txt
+          python3 scripts/r8v.py > logs/r8v_python.log 2>&1
+          echo "PYTHON_EXIT=$?" | tee ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_PYTHON_EXIT.txt
 
-      - name: Save cumulative spectra cache
+      - name: Save targeted spectra cache
         if: steps.restore-wide.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: repo/scw
-          key: acirm-r17k-r8u-wide-spi-spectra-${{ inputs.rev_start }}-${{ inputs.rev_end }}-max${{ inputs.max_files }}-v1
+          key: acirm-r17k-r8v-targeted-rev${{ inputs.rev_center }}-${{ inputs.target_start }}-${{ inputs.target_end }}-v1
 
       - name: Package artifact
         shell: bash
         run: |
           set +e
-          cp logs/*.log ACIRM_R17K_R8U_OUTPUTS/ 2>/dev/null || true
-          find repo/scw -maxdepth 6 -type f -name 'spi_spectra.fits.gz' -printf '%p,%s\n' | sort > ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_FINAL_SPECTRA_FILE_SIZES.csv 2>/dev/null || true
-          df -h > ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_DF_END.txt
-          free -h > ACIRM_R17K_R8U_OUTPUTS/R17K_R8U_FREE_END.txt
-          zip -r ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip ACIRM_R17K_R8U_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip > ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip.sha256.txt
+          cp logs/*.log ACIRM_R17K_R8V_OUTPUTS/ 2>/dev/null || true
+          find repo/scw -maxdepth 6 -type f -name 'spi_spectra.fits.gz' -printf '%p,%s\n' | sort > ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_FINAL_SPECTRA_FILE_SIZES.csv 2>/dev/null || true
+          df -h > ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_DF_END.txt
+          free -h > ACIRM_R17K_R8V_OUTPUTS/R17K_R8V_FREE_END.txt
+          zip -r ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip ACIRM_R17K_R8V_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip > ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip.sha256.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT
+          name: ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT
           path: |
-            ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip
-            ACIRM_R17K_R8U_CONTINUE_WIDE_PRODUCT_FIRST_SPI511_SEARCH_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip
+            ACIRM_R17K_R8V_TARGETED_REV2446_SPI511_VALIDATION_OUTPUT.zip.sha256.txt
           retention-days: 7
