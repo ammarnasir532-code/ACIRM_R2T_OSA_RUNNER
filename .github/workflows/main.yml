@@ -1,4 +1,4 @@
-name: ACIRM R17K R8K Clean Direct Params SPI511
+name: ACIRM R17K R8L Xvfb Direct Params SPI511
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
   actions: write
 
 jobs:
-  r17k-r8k-clean-direct-params-spi511:
+  r17k-r8l-xvfb-direct-params-spi511:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_R8K_OUTPUTS logs scripts repo/scw/2504 repo/aux repo/ic repo/idx repo/cat selected_products
+          mkdir -p ACIRM_R17K_R8L_OUTPUTS logs scripts repo/scw/2504 repo/aux repo/ic repo/idx repo/cat selected_products
           cat > scw_ids.list <<'EOF'
           250400090010
           250400020010
@@ -29,9 +29,9 @@ jobs:
           250400050010
           EOF
           sed -i 's/^ *//' scw_ids.list
-          cp scw_ids.list ACIRM_R17K_R8K_OUTPUTS/LOCKED_SCW_IDS.txt
-          cat > ACIRM_R17K_R8K_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511
+          cp scw_ids.list ACIRM_R17K_R8L_OUTPUTS/LOCKED_SCW_IDS.txt
+          cat > ACIRM_R17K_R8L_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R8L_XVFB_DIRECT_PARAMS_SPI511
           OFFICIAL_OSA_SPI_SCIENCE_DIRECT_PARAMETER_ATTEMPT
           NOT_DISCOVERY
           NOT_PARTICLE_PROOF
@@ -64,15 +64,15 @@ jobs:
         shell: bash
         run: |
           set +e
-          echo "SCW_CACHE_HIT=${{ steps.restore-scw.outputs.cache-hit }}" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SCW_CACHE_HIT.txt
-          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_TREE_CACHE_HIT.txt
+          echo "SCW_CACHE_HIT=${{ steps.restore-scw.outputs.cache-hit }}" | tee ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_SCW_CACHE_HIT.txt
+          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_TREE_CACHE_HIT.txt
           if [ "${{ steps.restore-scw.outputs.cache-hit }}" != "true" ] || [ "${{ steps.restore-tree.outputs.cache-hit }}" != "true" ]; then
-            echo "CACHE_MISS_NO_RERUN_DOWNLOAD_IN_R8K" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_CACHE_STATUS.txt
-            zip -r ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8K_OUTPUTS
-            sha256sum ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip > ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
+            echo "CACHE_MISS_NO_RERUN_DOWNLOAD_IN_R8J" | tee ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_CACHE_STATUS.txt
+            zip -r ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8L_OUTPUTS
+            sha256sum ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip > ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
             exit 0
           fi
-          echo "CACHE_OK_PROCEED_OSA" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_CACHE_STATUS.txt
+          echo "CACHE_OK_PROCEED_OSA" | tee ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_CACHE_STATUS.txt
 
       - name: System diagnostics and dependencies
         shell: bash
@@ -83,28 +83,28 @@ jobs:
           free -h | tee logs/free_start.txt
           docker --version | tee logs/docker_version.txt
           sudo apt-get update -y > logs/apt_update.log 2>&1
-          sudo apt-get install -y curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
+          sudo apt-get install -y curl wget zip unzip python3-pip xvfb > logs/apt_install.log 2>&1
           python3 -m pip install -q astropy numpy requests > logs/pip_install.log 2>&1
-          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_REPO_DIRS.txt
-          find repo/ic repo/idx repo/cat repo/aux -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_IC_IDX_CAT_AUX_FILES.txt
-          find repo/scw/2504 -maxdepth 2 -type f 2>/dev/null | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SCW_FILE_INVENTORY.txt
-          du -sh repo 2>/dev/null | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_REPO_SIZE.txt
+          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_REPO_DIRS.txt
+          find repo/ic repo/idx repo/cat repo/aux -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_IC_IDX_CAT_AUX_FILES.txt
+          find repo/scw/2504 -maxdepth 2 -type f 2>/dev/null | sort > ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_SCW_FILE_INVENTORY.txt
+          du -sh repo 2>/dev/null | tee ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_REPO_SIZE.txt
 
       - name: Pull OSA Docker and build direct-param script
         shell: bash
         run: |
           set +e
           docker pull integralsw/osa:latest > logs/docker_pull_integralsw_osa.log 2>&1
-          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_DOCKER_PULL_EXIT.txt
+          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_DOCKER_PULL_EXIT.txt
 
-          cat > scripts/r17k_r8k_inside_osa.sh <<'SH'
+          cat > scripts/r17k_r8l_inside_osa.sh <<'SH'
           set +e
 
           export REP_BASE_PROD=/data
           export CURRENT_IC=/data
           export HEADASNOQUERY=1
           export HEADASPROMPT=/dev/null
-          export DISPLAY=
+          export DISPLAY=${DISPLAY:-:99}
 
           if [ -f /init.sh ]; then . /init.sh || true; fi
           for init in /opt/osa/bin/osa-init.sh /opt/osa/osa-init.sh /opt/osa/init.sh /usr/local/osa/bin/osa-init.sh; do
@@ -125,7 +125,7 @@ jobs:
           [ -n "$OG" ] && export PATH="$(dirname "$OG"):$PATH"
           [ -n "$SP" ] && export PATH="$(dirname "$SP"):$PATH"
 
-          mkdir -p /home/integral/pfiles /home/integral/ACIRM_R17K_R8K_OUTPUTS /home/integral/selected_products /home/integral/obswork
+          mkdir -p /home/integral/pfiles /home/integral/ACIRM_R17K_R8L_OUTPUTS /home/integral/selected_products /home/integral/obswork
           SYS_PFILES="/opt/osa/pfiles"
           if [ -d "$SYS_PFILES" ]; then
             cp "$SYS_PFILES"/*.par /home/integral/pfiles/ 2>/dev/null || true
@@ -135,12 +135,12 @@ jobs:
           par="/home/integral/pfiles/spi_science_analysis.par"
           if [ -f "$par" ]; then
             sed -E -i 's/^([^#,]+,[^,]+),[^,]+,/\1,hl,/' "$par" 2>/dev/null || true
-            cp "$par" /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_PAR_BEFORE_COMMAND.par 2>/dev/null || true
+            cp "$par" /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_SPI_PAR_BEFORE_COMMAND.par 2>/dev/null || true
           fi
 
           cd /home/integral
           {
-            echo "=== R17K_R8K direct-param preflight ==="
+            echo "=== R17K_R8L direct-param preflight ==="
             echo "REP_BASE_PROD=$REP_BASE_PROD"
             echo "CURRENT_IC=$CURRENT_IC"
             echo "ISDC_REF_CAT=$ISDC_REF_CAT"
@@ -150,7 +150,7 @@ jobs:
             which spi_science_analysis || true
             og_create --version || true
             spi_science_analysis --version || true
-          } > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OSA_PREFLIGHT.txt 2>&1
+          } > ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_OSA_PREFLIGHT.txt 2>&1
 
           : > list_ids.txt
           while read -r id; do
@@ -164,20 +164,20 @@ jobs:
 
           {
             echo "=== og_create exact successful pattern ==="
-            echo "COMMAND: og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8k baseDir=. instrument=SPI"
+            echo "COMMAND: og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8l baseDir=. instrument=SPI"
             cat ./scw_input.list
-          } > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OG_CREATE.log
+          } > /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_OG_CREATE.log
 
-          og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8k baseDir=. instrument=SPI >> /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OG_CREATE.log 2>&1
+          og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8l baseDir=. instrument=SPI >> /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_OG_CREATE.log 2>&1
           og_ec=$?
-          echo "OG_CREATE_EXIT=$og_ec" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OG_CREATE_EXIT.txt
+          echo "OG_CREATE_EXIT=$og_ec" > /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_OG_CREATE_EXIT.txt
 
           first_og=$(find /home/integral/obswork /home/integral -type f -name 'og_spi.fits' 2>/dev/null | head -1)
-          echo "$first_og" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_FIRST_OG_SPI_PATH.txt
+          echo "$first_og" > /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_FIRST_OG_SPI_PATH.txt
           if [ -n "$first_og" ]; then
             cp "$first_og" /home/integral/selected_products/og_spi.fits 2>/dev/null || true
           else
-            echo "NO_OG_SPI_CREATED_SKIP_SPI_SCIENCE" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_ANALYSIS_EXIT.txt
+            echo "NO_OG_SPI_CREATED_SKIP_SPI_SCIENCE" > /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_SPI_SCIENCE_ANALYSIS_EXIT.txt
             exit 0
           fi
 
@@ -185,6 +185,8 @@ jobs:
           cd "$og_dir"
 
           cat > /home/integral/spi_cmd.sh <<'CMD'
+          # R8L: only actual parameter names from spi_science_analysis.par.
+          # Removed bogus R8J params: add_mocksour, orbital_motion, asini, orbital_period, T90, eccentricity, omega_d, pporb.
           spi_science_analysis \
             obs_group=og_spi.fits \
             clobber=yes \
@@ -198,7 +200,6 @@ jobs:
             run_gaincorrection=no \
             run_fullcheck=no \
             detectors="0-18" \
-            catalog="" \
             coordinates=RADEC \
             cat_extract_fluxMin=0.001 \
             cat_extract_fluxMax=1000 \
@@ -226,14 +227,13 @@ jobs:
             use_background_templates=no \
             use_background_models=no \
             spi_flatfield_ptsNbConstBack=5 \
-            loc_spiflatfield_dol="" \
             spi_flatfield_single=no \
             spi_templates_type="GEDSAT" \
             spi_templates_scaling=no \
             spi_obs_back_nmodel=0
           CMD
           chmod +x /home/integral/spi_cmd.sh
-          cp /home/integral/spi_cmd.sh /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_DIRECT_COMMAND.sh 2>/dev/null || true
+          cp /home/integral/spi_cmd.sh /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_SPI_DIRECT_COMMAND.sh 2>/dev/null || true
 
           {
             echo "=== SPI science direct-params attempt ==="
@@ -241,31 +241,34 @@ jobs:
             echo "OG=$first_og"
             echo "PFILES=$PFILES"
             echo "command_file=/home/integral/spi_cmd.sh"
-          } > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_CONTEXT.txt
+          } > /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_SPI_SCIENCE_CONTEXT.txt
 
           set -o pipefail
           timeout 100m bash -lc '/home/integral/spi_cmd.sh < /dev/null' 2>&1 | awk '
             NR <= 12000 { print; next }
             /Error_|Log_|Task|terminating|created|evts|spectra|energy|bound|Exception|PIL_|spi_/ { print }
             NR == 12001 { print "... ACIRM_LOG_TRUNCATED_AFTER_12000_LINES ..." }
-          ' > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_STDOUT_FILTERED.log
+          ' > /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_SPI_SCIENCE_STDOUT_FILTERED.log
           spi_ec=${PIPESTATUS[0]}
-          echo "SPI_SCIENCE_ANALYSIS_CLEAN_DIRECT_PARAMS_EXIT=$spi_ec" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_ANALYSIS_EXIT.txt
+          echo "SPI_SCIENCE_ANALYSIS_XVFB_DIRECT_PARAMS_EXIT=$spi_ec" > /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_SPI_SCIENCE_ANALYSIS_EXIT.txt
 
-          find /home/integral -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' -o -iname '*spi*spect*' \) 2>/dev/null | sort > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_PRODUCTS_FOUND.txt
+          find /home/integral -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' -o -iname '*spi*spect*' \) 2>/dev/null | sort > /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_PRODUCTS_FOUND.txt
           while read -r f; do
             [ -f "$f" ] || continue
             size=$(stat -c%s "$f" 2>/dev/null || echo 0)
             if [ "$size" -le 200000000 ]; then cp -f "$f" /home/integral/selected_products/ 2>/dev/null || true; fi
-          done < /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_PRODUCTS_FOUND.txt
+          done < /home/integral/ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_PRODUCTS_FOUND.txt
           SH
-          chmod +x scripts/r17k_r8k_inside_osa.sh
+          chmod +x scripts/r17k_r8l_inside_osa.sh
 
-      - name: Run OSA R8K direct params
+      - name: Run OSA R8L xvfb direct params
         shell: bash
         run: |
           set +e
+          Xvfb :99 -screen 0 1280x1024x24 > logs/xvfb.log 2>&1 &
           docker run --rm \
+            -e DISPLAY=:99 \
+            -v /tmp/.X11-unix:/tmp/.X11-unix \
             -v "$PWD:/home/integral" \
             -v "$PWD/repo/scw:/data/scw:ro" \
             -v "$PWD/repo/aux:/data/aux:ro" \
@@ -273,15 +276,15 @@ jobs:
             -v "$PWD/repo/idx:/data/idx:ro" \
             -v "$PWD/repo/cat:/data/cat:ro" \
             --entrypoint="" \
-            integralsw/osa:latest bash -lc 'bash /home/integral/scripts/r17k_r8k_inside_osa.sh' > logs/r17k_r8k_osa_run.log 2>&1
-          echo "R17K_R8K_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OSA_RUN_EXIT.txt
+            integralsw/osa:latest bash -lc 'bash /home/integral/scripts/r17k_r8l_inside_osa.sh' > logs/r17k_r8l_osa_run.log 2>&1
+          echo "R17K_R8L_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_OSA_RUN_EXIT.txt
 
       - name: Inspect selected products and 511 rows
         shell: bash
         run: |
           set +e
-          cp logs/*.log ACIRM_R17K_R8K_OUTPUTS/ 2>/dev/null || true
-          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SELECTED_PRODUCTS_MANIFEST.csv || true
+          cp logs/*.log ACIRM_R17K_R8L_OUTPUTS/ 2>/dev/null || true
+          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_SELECTED_PRODUCTS_MANIFEST.csv || true
 
           cat > scripts/inspect_final.py <<'PY'
           import json, csv, math
@@ -292,7 +295,7 @@ jobs:
           except Exception:
               fits = None
 
-          OUT=Path('ACIRM_R17K_R8K_OUTPUTS')
+          OUT=Path('ACIRM_R17K_R8L_OUTPUTS')
           PROD=Path('selected_products')
           rows=[]; meas=[]; errs=[]
           LINE=(508.0,514.0); SB1=(490.0,500.0); SB2=(522.0,532.0)
@@ -371,19 +374,19 @@ jobs:
                   w=csv.DictWriter(f,fieldnames=keys); w.writeheader()
                   for r in data: w.writerow({k:r.get(k,'') for k in keys})
 
-          write_csv(OUT/'R17K_R8K_SELECTED_PRODUCT_SCHEMA.csv',rows)
-          write_csv(OUT/'R17K_R8K_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
-          (OUT/'R17K_R8K_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
+          write_csv(OUT/'R17K_R8L_SELECTED_PRODUCT_SCHEMA.csv',rows)
+          write_csv(OUT/'R17K_R8L_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
+          (OUT/'R17K_R8L_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
 
           selected=list(PROD.glob('*'))
-          og_path=(OUT/'R17K_R8K_FIRST_OG_SPI_PATH.txt')
+          og_path=(OUT/'R17K_R8L_FIRST_OG_SPI_PATH.txt')
           og_success=og_path.exists() and bool(og_path.read_text(errors='replace').strip())
-          decision='R17K_R8K_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS'
-          if og_success: decision='R17K_R8K_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF'
-          if any(('evts' in p.name.lower() or 'energy' in p.name.lower() or 'ebounds' in p.name.lower()) for p in selected): decision='R17K_R8K_OFFICIAL_SPI_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
-          if meas: decision='R17K_R8K_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          decision='R17K_R8L_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS'
+          if og_success: decision='R17K_R8L_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF'
+          if any(('evts' in p.name.lower() or 'energy' in p.name.lower() or 'ebounds' in p.name.lower()) for p in selected): decision='R17K_R8L_OFFICIAL_SPI_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          if meas: decision='R17K_R8L_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
           summary={'decision':decision,'proof_allowed':False,'selected_product_count':len(selected),'og_success':og_success,'direct_511_measurement_rows':len(meas),'schema_rows':len(rows),'claim_ceiling':['OFFICIAL_OSA_SPI_SCIENCE_DIRECT_PARAMETER_ATTEMPT','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_LOCKED_CONTROLS_PASS']}
-          (OUT/'R17K_R8K_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          (OUT/'R17K_R8L_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
           PY
 
           python3 scripts/inspect_final.py > logs/inspect_final.log 2>&1
@@ -392,19 +395,19 @@ jobs:
         shell: bash
         run: |
           set +e
-          cp logs/*.log ACIRM_R17K_R8K_OUTPUTS/ 2>/dev/null || true
-          cp -r selected_products ACIRM_R17K_R8K_OUTPUTS/selected_products 2>/dev/null || true
-          df -h > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_DF_END.txt
-          free -h > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_FREE_END.txt
-          zip -r ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8K_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip > ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
+          cp logs/*.log ACIRM_R17K_R8L_OUTPUTS/ 2>/dev/null || true
+          cp -r selected_products ACIRM_R17K_R8L_OUTPUTS/selected_products 2>/dev/null || true
+          df -h > ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_DF_END.txt
+          free -h > ACIRM_R17K_R8L_OUTPUTS/R17K_R8L_FREE_END.txt
+          zip -r ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8L_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip > ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
 
       - name: Upload slim artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT
+          name: ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT
           path: |
-            ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip
-            ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip
+            ACIRM_R17K_R8L_XVFB_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
           retention-days: 7
