@@ -1,4 +1,4 @@
-name: ACIRM R17K R8Q ERange Channel Coverage SPI511
+name: ACIRM R17K R8S Product First Calibrated SPI511 Search
 
 on:
   workflow_dispatch:
@@ -8,34 +8,24 @@ permissions:
   actions: write
 
 jobs:
-  r17k-r8q-erange-channel-coverage-spi511:
+  r17k-r8s-product-first-calibrated-spi511:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
 
     steps:
       - name: Prepare
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_R8Q_OUTPUTS logs scripts repo/scw/2504 repo/ic repo/idx repo/cat repo/aux
-          cat > scw_ids.list <<'EOF'
-          250400090010
-          250400020010
-          250400080010
-          250400030010
-          250400070021
-          250400040010
-          250400060010
-          250400050010
-          EOF
-          sed -i 's/^ *//' scw_ids.list
-          cp scw_ids.list ACIRM_R17K_R8Q_OUTPUTS/LOCKED_SCW_IDS.txt
-          cat > ACIRM_R17K_R8Q_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511
+          mkdir -p ACIRM_R17K_R8S_OUTPUTS logs scripts repo/scw repo/ic repo/idx repo/cat repo/aux
+          cat > ACIRM_R17K_R8S_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH
           EXISTING_LOCKED_CACHE_ONLY
+          PRODUCT_FIRST_SEARCH_FOR_CALIBRATED_508_514_EXCESS
           READS spi_spectra.fits.gz DIRECTLY
-          MAPS NONZERO CHANNELS USING SPI CHAN_KEV / KEV_CHAN CALIBRATION CANDIDATES
-          PURPOSE: EXPLAIN R8O VS R8P AND TEST WHETHER NONZERO CHANNELS COVER 508-514 KEV
+          USES SPI CHAN_KEV / KEV_CHAN CALIBRATION CANDIDATES
+          NO spi_science_analysis GUI
+          NO CHANNEL_APPROXIMATION_RESULT_ALLOWED_AS_PROOF
           DIAGNOSTIC_NOT_PROOF
           NOT_DISCOVERY
           NOT_PARTICLE_PROOF
@@ -68,15 +58,15 @@ jobs:
         shell: bash
         run: |
           set +e
-          echo "SCW_CACHE_HIT=${{ steps.restore-scw.outputs.cache-hit }}" | tee ACIRM_R17K_R8Q_OUTPUTS/R17K_R8Q_SCW_CACHE_HIT.txt
-          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8Q_OUTPUTS/R17K_R8Q_TREE_CACHE_HIT.txt
+          echo "SCW_CACHE_HIT=${{ steps.restore-scw.outputs.cache-hit }}" | tee ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_SCW_CACHE_HIT.txt
+          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_TREE_CACHE_HIT.txt
           if [ "${{ steps.restore-scw.outputs.cache-hit }}" != "true" ]; then
-            echo "SCW_CACHE_MISS_NO_DOWNLOAD_IN_R8Q" | tee ACIRM_R17K_R8Q_OUTPUTS/R17K_R8Q_CACHE_STATUS.txt
-            zip -r ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip ACIRM_R17K_R8Q_OUTPUTS
-            sha256sum ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip > ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip.sha256.txt
+            echo "SCW_CACHE_MISS_NO_DOWNLOAD_IN_R8S" | tee ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_CACHE_STATUS.txt
+            zip -r ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip ACIRM_R17K_R8S_OUTPUTS
+            sha256sum ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip > ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip.sha256.txt
             exit 0
           fi
-          echo "CACHE_OK" | tee ACIRM_R17K_R8Q_OUTPUTS/R17K_R8Q_CACHE_STATUS.txt
+          echo "CACHE_OK_PRODUCT_FIRST_SEARCH" | tee ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_CACHE_STATUS.txt
 
       - name: Install tools
         shell: bash
@@ -85,31 +75,31 @@ jobs:
           sudo apt-get update -y > logs/apt_update.log 2>&1
           sudo apt-get install -y zip unzip python3-pip > logs/apt_install.log 2>&1
           python3 -m pip install -q astropy numpy > logs/pip_install.log 2>&1
-          find repo/scw/2504 -maxdepth 4 -type f 2>/dev/null | sort > ACIRM_R17K_R8Q_OUTPUTS/R17K_R8Q_SCW_INVENTORY.txt
-          find repo/ic repo/idx repo/cat repo/aux -maxdepth 10 -type f 2>/dev/null | sort > ACIRM_R17K_R8Q_OUTPUTS/R17K_R8Q_CAL_TREE_INVENTORY.txt
+          find repo/scw -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_SCW_INVENTORY.txt
+          find repo/ic repo/idx repo/cat repo/aux -maxdepth 10 -type f 2>/dev/null | sort > ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_CAL_TREE_INVENTORY.txt
+          df -h > ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_DF_START.txt
 
-      - name: ERange channel coverage audit
+      - name: Product-first calibrated 511 search
         shell: bash
         run: |
           set +e
-          cat > scripts/r8q.py <<'PY'
+          cat > scripts/r8s_product_first.py <<'PY'
           import csv, json, math, re, warnings
           from pathlib import Path
           import numpy as np
           from astropy.io import fits
 
-          OUT = Path('ACIRM_R17K_R8Q_OUTPUTS')
-          SCW_ROOT = Path('repo/scw/2504')
+          OUT = Path('ACIRM_R17K_R8S_OUTPUTS')
+          SCW_ROOT = Path('repo/scw')
           IC_ROOT = Path('repo/ic')
-          IDS = [x.strip() for x in Path('scw_ids.list').read_text().splitlines() if x.strip()]
           LINE = (508.0, 514.0)
           SB1 = (490.0, 500.0)
           SB2 = (522.0, 532.0)
           ERR = []
           CAL = []
           ROWS = []
-          MODEL_ROWS = []
           AGG = []
+          CANDS = []
           PLACEBO = []
 
           def write_csv(path, rows):
@@ -126,27 +116,25 @@ jobs:
                   for r in rows:
                       w.writerow({k: r.get(k, '') for k in keys})
 
-          def finite(x):
+          def ffloat(x):
               try:
                   y = float(x)
                   return y if math.isfinite(y) else float('nan')
               except Exception:
                   return float('nan')
 
-          def colmap(cols, name):
+          def cmap(cols, name):
               return {c.upper(): c for c in cols}.get(name.upper())
 
           def scw_id(path):
-              m = re.search(r'(2504\d{8})\.001', str(path))
+              m = re.search(r'(\d{12})\.001', str(path))
               return m.group(1) if m else ''
 
           def polyval(c, x, order):
               c = np.asarray(c, dtype=float).reshape(-1)
               with warnings.catch_warnings():
                   warnings.simplefilter('ignore')
-                  if order == 'asc':
-                      return np.polynomial.polynomial.polyval(x, c)
-                  return np.polyval(c, x)
+                  return np.polynomial.polynomial.polyval(x, c) if order == 'asc' else np.polyval(c, x)
 
           def invert_poly_to_energy(c, nchan, order):
               grid_e = np.linspace(0.0, 12000.0, 60001)
@@ -165,136 +153,56 @@ jobs:
                   return None
               return np.interp(np.arange(nchan, dtype=float), ch_unique, grid_e, left=np.nan, right=np.nan)
 
-          def energy_model_candidates(chan_kev, kev_chan, nchan):
+          def energy_candidates(chan_kev, kev_chan, nchan):
               x = np.arange(nchan, dtype=float)
-              candidates = []
+              out = []
               if chan_kev is not None:
                   ck = np.asarray(chan_kev, dtype=float).reshape(-1)
                   if ck.size == nchan:
-                      candidates.append(('CHAN_KEV_VECTOR', ck))
+                      out.append(('CHAN_KEV_VECTOR', ck))
                   if 0 < ck.size <= 16:
-                      candidates.append(('CHAN_KEV_ASC_POLY', polyval(ck, x, 'asc')))
-                      candidates.append(('CHAN_KEV_DESC_POLY', polyval(ck, x, 'desc')))
+                      out.append(('CHAN_KEV_ASC_POLY', polyval(ck, x, 'asc')))
+                      out.append(('CHAN_KEV_DESC_POLY', polyval(ck, x, 'desc')))
               if kev_chan is not None:
                   kc = np.asarray(kev_chan, dtype=float).reshape(-1)
                   if kc.size == nchan:
-                      candidates.append(('KEV_CHAN_VECTOR_AS_ENERGY_DIAGNOSTIC', kc))
+                      out.append(('KEV_CHAN_VECTOR_AS_ENERGY_DIAGNOSTIC', kc))
                   if 0 < kc.size <= 16:
                       a = invert_poly_to_energy(kc, nchan, 'asc')
                       d = invert_poly_to_energy(kc, nchan, 'desc')
                       if a is not None:
-                          candidates.append(('KEV_CHAN_ASC_INVERTED', a))
+                          out.append(('KEV_CHAN_ASC_INVERTED', a))
                       if d is not None:
-                          candidates.append(('KEV_CHAN_DESC_INVERTED', d))
-              return candidates
+                          out.append(('KEV_CHAN_DESC_INVERTED', d))
+              return out
 
-          def model_quality(e, counts=None):
+          def quality(e, counts):
               e = np.asarray(e, dtype=float).reshape(-1)
-              n = len(e)
+              c = np.asarray(counts, dtype=float).reshape(-1)
               ok = np.isfinite(e)
-              finite_frac = float(ok.mean()) if n else 0.0
-              if ok.sum() < 3:
-                  return {'usable': False, 'reason': 'too_few_finite_energy_values', 'score': -9999.0}
+              if ok.sum() < 10:
+                  return None
               ee = e[ok]
               d = np.diff(ee)
-              inc_frac = float(np.mean(d > 0)) if len(d) else 0.0
-              dec_frac = float(np.mean(d < 0)) if len(d) else 0.0
+              inc = float(np.mean(d > 0)) if len(d) else 0.0
               emin = float(np.nanmin(ee))
               emax = float(np.nanmax(ee))
-              covers_511 = bool(emin <= 511.0 <= emax)
-              covers_side = bool(emin <= 490.0 and emax >= 532.0)
-              ch511 = float('nan')
-              local_step = float('nan')
-              if inc_frac > 0.98 and covers_511:
-                  try:
-                      ch511 = float(np.interp(511.0, e, np.arange(n, dtype=float)))
-                      ic = int(round(ch511))
-                      local = np.diff(e[max(0, ic - 10):min(n, ic + 11)])
-                      local = local[np.isfinite(local)]
-                      if len(local):
-                          local_step = float(np.nanmedian(np.abs(local)))
-                  except Exception:
-                      pass
-
-              nonzero_min_ch = ''
-              nonzero_max_ch = ''
-              nonzero_min_kev = ''
-              nonzero_max_kev = ''
-              nonzero_q50_kev = ''
-              nonzero_q95_kev = ''
-              nonzero_q99_kev = ''
-              nonzero_total = 0.0
-
-              if counts is not None:
-                  c = np.nan_to_num(np.asarray(counts, dtype=float).reshape(-1), nan=0.0, posinf=0.0, neginf=0.0)
-                  m = c > 0
-                  if m.any():
-                      idx = np.where(m)[0]
-                      nonzero_min_ch = int(idx.min())
-                      nonzero_max_ch = int(idx.max())
-                      ek = e[m]
-                      ck = c[m]
-                      valid = np.isfinite(ek) & np.isfinite(ck) & (ck > 0)
-                      if valid.any():
-                          ek = ek[valid]
-                          ck = ck[valid]
-                          nonzero_total = float(ck.sum())
-                          order = np.argsort(ek)
-                          ek = ek[order]
-                          ck = ck[order]
-                          cum = np.cumsum(ck)
-                          if cum[-1] > 0:
-                              def wq(q):
-                                  return float(ek[np.searchsorted(cum, q * cum[-1], side='left')])
-                              nonzero_min_kev = float(np.nanmin(ek))
-                              nonzero_max_kev = float(np.nanmax(ek))
-                              nonzero_q50_kev = wq(0.50)
-                              nonzero_q95_kev = wq(0.95)
-                              nonzero_q99_kev = wq(0.99)
-
-              score = 0.0
-              score += 80.0 * finite_frac
-              score += 80.0 * max(inc_frac, dec_frac)
-              if inc_frac > 0.98:
-                  score += 30.0
-              if covers_511:
-                  score += 30.0
-              if covers_side:
-                  score += 20.0
-              if counts is not None and nonzero_total > 0:
+              covers = bool(emin <= 490.0 and emax >= 532.0)
+              if inc < 0.95 or not covers:
+                  return None
+              score = 100.0 * inc + 30.0
+              if len(e) == len(c) and np.nansum(c) > 0:
                   score += 10.0
-              if emin < -100 or emax > 20000:
-                  score -= 20.0
-
-              return {
-                  'usable': bool(finite_frac > 0.90 and (inc_frac > 0.90 or dec_frac > 0.90)),
-                  'reason': 'ok',
-                  'score': score,
-                  'finite_frac': finite_frac,
-                  'inc_frac': inc_frac,
-                  'dec_frac': dec_frac,
-                  'emin_keV': emin,
-                  'emax_keV': emax,
-                  'covers_511': covers_511,
-                  'covers_490_532': covers_side,
-                  'channel_at_511': ch511,
-                  'local_keV_per_channel_at_511': local_step,
-                  'nonzero_channel_min': nonzero_min_ch,
-                  'nonzero_channel_max': nonzero_max_ch,
-                  'nonzero_keV_min': nonzero_min_kev,
-                  'nonzero_keV_max': nonzero_max_kev,
-                  'nonzero_keV_q50': nonzero_q50_kev,
-                  'nonzero_keV_q95': nonzero_q95_kev,
-                  'nonzero_keV_q99': nonzero_q99_kev,
-                  'nonzero_total_counts': nonzero_total,
-              }
+              try:
+                  ch511 = float(np.interp(511.0, e, np.arange(len(e), dtype=float)))
+              except Exception:
+                  ch511 = float('nan')
+              return dict(score=score, emin=emin, emax=emax, channel_at_511=ch511, inc_frac=inc)
 
           def edges_from_centers(e):
               e = np.asarray(e, dtype=float).reshape(-1)
               if len(e) < 3 or not np.all(np.isfinite(e)):
                   return None, None
-              if np.nanmean(np.diff(e) < 0) > 0.9:
-                  e = e[::-1]
               mid = (e[:-1] + e[1:]) / 2.0
               b = np.r_[e[0] - (mid[0] - e[0]), mid, e[-1] + (e[-1] - mid[-1])]
               return np.minimum(b[:-1], b[1:]), np.maximum(b[:-1], b[1:])
@@ -309,43 +217,50 @@ jobs:
               frac = np.maximum(0.0, np.minimum(hi, band[1]) - np.maximum(lo, band[0])) / np.maximum(1e-12, hi - lo)
               return float((c * frac).sum())
 
-          def metric(counts, lo, hi, band=LINE, left=SB1, right=SB2):
-              line = band_counts(counts, lo, hi, band)
-              s1 = band_counts(counts, lo, hi, left)
-              s2 = band_counts(counts, lo, hi, right)
+          def metric(items, band=LINE, left=SB1, right=SB2):
+              line = s1 = s2 = raw = 0.0
+              rows = 0
+              for it in items:
+                  c, lo, hi = it['counts'], it['lo'], it['hi']
+                  rows += 1
+                  raw += float(np.nansum(c))
+                  line += band_counts(c, lo, hi, band)
+                  s1 += band_counts(c, lo, hi, left)
+                  s2 += band_counts(c, lo, hi, right)
               side = s1 + s2
               exp = side / 20.0 * 6.0 if side > 0 else float('nan')
               ratio = (line / 6.0) / (side / 20.0) if side > 0 else float('inf')
               z = (line - exp) / math.sqrt(exp) if exp and exp > 0 else float('nan')
-              return line, s1, s2, side, exp, ratio, z
+              return dict(rows=rows, raw_total_counts=raw, line_508_514_counts=line, side_490_500_counts=s1, side_522_532_counts=s2, side_total_counts=side, expected_line_from_side_density=exp, line_to_side_density_ratio=ratio, z_vs_side_density=z)
+
+          def placebo_rank(items, target_z):
+              scans = []
+              for st in np.arange(430.0, 590.1, 2.0):
+                  band = (float(st), float(st + 6.0))
+                  if max(band[0], 488.0) < min(band[1], 516.0) or max(band[0], 520.0) < min(band[1], 534.0):
+                      continue
+                  left = (band[0] - 18.0, band[0] - 8.0)
+                  right = (band[1] + 8.0, band[1] + 18.0)
+                  m = metric(items, band, left, right)
+                  scans.append(dict(band_min_keV=band[0], band_max_keV=band[1], z_vs_local_side_density=m['z_vs_side_density'], band_to_side_density_ratio=m['line_to_side_density_ratio'], band_counts=m['line_508_514_counts'], side_counts=m['side_total_counts']))
+              zs = [s['z_vs_local_side_density'] for s in scans if math.isfinite(float(s['z_vs_local_side_density']))]
+              rank = 1 + sum(1 for z in zs if math.isfinite(target_z) and z > target_z) if math.isfinite(target_z) else ''
+              return rank, len(zs), scans
 
           for p in sorted(set(list(IC_ROOT.glob('**/spi_coef_cal_*.fits')) + list(IC_ROOT.glob('**/*coef*cal*.fits')))):
               try:
                   with fits.open(p, memmap=True) as hdul:
-                      for hdu in hdul:
-                          cols = list(hdu.columns.names or []) if hasattr(hdu, 'columns') and hdu.columns is not None else []
-                          if hdu.data is None:
+                      for h in hdul:
+                          cols = list(h.columns.names or []) if hasattr(h, 'columns') and h.columns is not None else []
+                          if h.data is None:
                               continue
-                          dc = colmap(cols, 'DET_ID')
-                          ec = colmap(cols, 'E_RANGE')
-                          ck = colmap(cols, 'CHAN_KEV')
-                          kc = colmap(cols, 'KEV_CHAN')
-                          os = colmap(cols, 'OBT_START')
-                          oe = colmap(cols, 'OBT_END')
+                          dc = cmap(cols, 'DET_ID'); ec = cmap(cols, 'E_RANGE'); ck = cmap(cols, 'CHAN_KEV'); kc = cmap(cols, 'KEV_CHAN'); os = cmap(cols, 'OBT_START'); oe = cmap(cols, 'OBT_END')
                           if not (dc and ec and (ck or kc)):
                               continue
-                          for i in range(len(hdu.data)):
-                              CAL.append({
-                                  'file': str(p),
-                                  'det_id': int(hdu.data[dc][i]),
-                                  'e_range': int(hdu.data[ec][i]),
-                                  'obt_start': finite(hdu.data[os][i]) if os else float('nan'),
-                                  'obt_end': finite(hdu.data[oe][i]) if oe else float('nan'),
-                                  'chan_kev': np.asarray(hdu.data[ck][i], dtype=float).reshape(-1) if ck else None,
-                                  'kev_chan': np.asarray(hdu.data[kc][i], dtype=float).reshape(-1) if kc else None,
-                              })
+                          for i in range(len(h.data)):
+                              CAL.append(dict(file=str(p), det_id=int(h.data[dc][i]), e_range=int(h.data[ec][i]), obt_start=ffloat(h.data[os][i]) if os else float('nan'), obt_end=ffloat(h.data[oe][i]) if oe else float('nan'), chan_kev=np.asarray(h.data[ck][i], dtype=float).reshape(-1) if ck else None, kev_chan=np.asarray(h.data[kc][i], dtype=float).reshape(-1) if kc else None))
               except Exception as e:
-                  ERR.append({'stage': 'calibration_read', 'file': str(p), 'error': repr(e)[:500]})
+                  ERR.append(dict(stage='calibration_read', file=str(p), error=repr(e)[:500]))
 
           def match_cal(det, er, obt_mid):
               rows = [r for r in CAL if r['det_id'] == det and r['e_range'] == er]
@@ -357,270 +272,142 @@ jobs:
               return sorted(rows, key=lambda r: (str(r['file']), r['obt_start']))[-1], 'FALLBACK_LATEST'
 
           selected = []
-          raw_rows_seen = 0
-          spectra = []
-          for sid in IDS:
-              spectra += sorted(SCW_ROOT.glob(f'{sid}.001/spi_spectra.fits.gz'))
-
+          spectra = sorted(SCW_ROOT.glob('**/spi_spectra.fits.gz'))
+          raw_seen = 0
           for p in spectra:
               sid = scw_id(p)
               try:
                   with fits.open(p, memmap=True) as hdul:
-                      for hdu in hdul:
-                          if hdu.name != 'SPI.-ACOF-RAW' or hdu.data is None:
+                      for h in hdul:
+                          if h.name != 'SPI.-ACOF-RAW' or h.data is None:
                               continue
-                          cols = list(hdu.columns.names or [])
-                          dc = colmap(cols, 'DET_ID')
-                          ec = colmap(cols, 'E_RANGE')
-                          cc = colmap(cols, 'COUNTS')
-                          ls = colmap(cols, 'LOBT_START')
-                          le = colmap(cols, 'LOBT_END')
+                          cols = list(h.columns.names or [])
+                          dc = cmap(cols, 'DET_ID'); ec = cmap(cols, 'E_RANGE'); cc = cmap(cols, 'COUNTS'); ls = cmap(cols, 'LOBT_START'); le = cmap(cols, 'LOBT_END')
                           if not (dc and ec and cc):
                               continue
-                          for i in range(len(hdu.data)):
-                              raw_rows_seen += 1
-                              det = int(hdu.data[dc][i])
-                              er = int(hdu.data[ec][i])
-                              counts = np.asarray(hdu.data[cc][i], dtype=float).reshape(-1)
-                              a = finite(hdu.data[ls][i]) if ls else float('nan')
-                              b = finite(hdu.data[le][i]) if le else float('nan')
+                          for i in range(len(h.data)):
+                              raw_seen += 1
+                              det = int(h.data[dc][i]); er = int(h.data[ec][i]); counts = np.asarray(h.data[cc][i], dtype=float).reshape(-1)
+                              a = ffloat(h.data[ls][i]) if ls else float('nan'); b = ffloat(h.data[le][i]) if le else float('nan')
                               obt_mid = (a + b) / 2.0 if math.isfinite(a) and math.isfinite(b) else float('nan')
-                              base = {
-                                  'scw': sid,
-                                  'file': str(p),
-                                  'row_index': i,
-                                  'det_id': det,
-                                  'e_range': er,
-                                  'channel_count': int(len(counts)),
-                                  'raw_total_counts': float(np.nansum(counts)),
-                                  'nonzero_channels': int(np.count_nonzero(counts)),
-                              }
+                              base = dict(scw=sid, file=str(p), row_index=i, det_id=det, e_range=er, channel_count=len(counts), raw_total_counts=float(np.nansum(counts)), nonzero_channels=int(np.count_nonzero(counts)))
                               cal, match = match_cal(det, er, obt_mid)
                               if cal is None:
-                                  ROWS.append({**base, 'status': 'NO_CAL', 'cal_match': match})
+                                  ROWS.append({**base, 'status':'NO_CAL', 'cal_match':match})
                                   continue
-
-                              candidates = energy_model_candidates(cal['chan_kev'], cal['kev_chan'], len(counts))
                               ranked = []
-                              for model_id, energy in candidates:
-                                  q = model_quality(energy, counts)
-                                  MODEL_ROWS.append({**base, 'cal_match': match, 'cal_file': cal['file'], 'model_id': model_id, **q})
-                                  if q.get('usable'):
-                                      ranked.append((q.get('score', -9999.0), model_id, energy, q))
-
+                              for model_id, e in energy_candidates(cal['chan_kev'], cal['kev_chan'], len(counts)):
+                                  q = quality(e, counts)
+                                  if q:
+                                      ranked.append((q['score'], model_id, e, q))
                               if not ranked:
-                                  ROWS.append({**base, 'status': 'NO_USABLE_MODEL', 'cal_match': match, 'cal_file': cal['file']})
+                                  ROWS.append({**base, 'status':'NO_USABLE_MODEL', 'cal_match':match, 'cal_file':cal['file']})
                                   continue
-
                               ranked.sort(key=lambda x: x[0], reverse=True)
-                              score, model_id, energy, q = ranked[0]
-                              lo, hi = edges_from_centers(energy)
-                              line, s1, s2, side, exp, ratio, z = metric(counts, lo, hi)
-                              row = {
-                                  **base,
-                                  'status': 'OK',
-                                  'cal_match': match,
-                                  'cal_file': cal['file'],
-                                  'selected_model': model_id,
-                                  **q,
-                                  'line_508_514_counts': line,
-                                  'side_490_500_counts': s1,
-                                  'side_522_532_counts': s2,
-                                  'side_total_counts': side,
-                                  'expected_line_from_side_density': exp,
-                                  'line_to_side_density_ratio': ratio,
-                                  'z_vs_side_density': z,
-                              }
+                              score, model_id, e, q = ranked[0]
+                              lo, hi = edges_from_centers(e)
+                              item = dict(scw=sid, det_id=det, e_range=er, counts=counts, lo=lo, hi=hi, model_id=model_id)
+                              m = metric([item])
+                              row = {**base, 'status':'OK', 'cal_match':match, 'cal_file':cal['file'], 'selected_model':model_id, 'model_score':score, 'channel_at_511':q.get('channel_at_511'), **m}
                               ROWS.append(row)
-                              selected.append((counts, lo, hi, row))
+                              selected.append(item)
               except Exception as e:
-                  ERR.append({'stage': 'spectra_read', 'file': str(p), 'error': repr(e)[:500]})
+                  ERR.append(dict(stage='spectra_read', file=str(p), error=repr(e)[:500]))
 
-          def aggregate(name, filt, extra):
-              line = s1 = s2 = raw = 0.0
-              rows = 0
-              nonzero_rows = 0
-              cover_rows = 0
-              nonzero_target_cover_rows = 0
-              nonzero_kev_min = float('inf')
-              nonzero_kev_max = float('-inf')
-
-              for counts, lo, hi, r in selected:
-                  if not filt(r):
-                      continue
-                  rows += 1
-                  raw += float(r.get('raw_total_counts', 0.0))
-                  if float(r.get('raw_total_counts', 0.0)) > 0:
-                      nonzero_rows += 1
-                  if r.get('covers_490_532'):
-                      cover_rows += 1
-
-                  mn = r.get('nonzero_keV_min')
-                  mx = r.get('nonzero_keV_max')
-                  if isinstance(mn, (int, float)) and isinstance(mx, (int, float)) and math.isfinite(float(mn)) and math.isfinite(float(mx)):
-                      nonzero_kev_min = min(nonzero_kev_min, float(mn))
-                      nonzero_kev_max = max(nonzero_kev_max, float(mx))
-                      if float(mn) <= 514.0 and float(mx) >= 508.0:
-                          nonzero_target_cover_rows += 1
-
-                  a, b, c, d, exp, ratio, z = metric(counts, lo, hi)
-                  line += a
-                  s1 += b
-                  s2 += c
-
-              side = s1 + s2
-              exp = side / 20.0 * 6.0 if side > 0 else float('nan')
-              ratio = (line / 6.0) / (side / 20.0) if side > 0 else float('inf')
-              z = (line - exp) / math.sqrt(exp) if exp and exp > 0 else float('nan')
-
-              if nonzero_kev_min == float('inf'):
-                  nonzero_kev_min = ''
-                  nonzero_kev_max = ''
-
-              out = {
-                  'scope': name,
-                  'rows': rows,
-                  'nonzero_rows': nonzero_rows,
-                  'rows_covering_490_532_by_model': cover_rows,
-                  'rows_with_nonzero_energy_range_touching_508_514': nonzero_target_cover_rows,
-                  'raw_total_counts': raw,
-                  'nonzero_keV_min_global': nonzero_kev_min,
-                  'nonzero_keV_max_global': nonzero_kev_max,
-                  'line_508_514_counts': line,
-                  'side_490_500_counts': s1,
-                  'side_522_532_counts': s2,
-                  'side_total_counts': side,
-                  'expected_line_from_side_density': exp,
-                  'line_to_side_density_ratio': ratio,
-                  'z_vs_side_density': z,
-              }
-              out.update(extra)
+          def add_aggregate(scope, items, extra):
+              if not items:
+                  return None
+              m = metric(items)
+              rank, npl, scans = placebo_rank(items, float(m['z_vs_side_density']))
+              out = dict(scope=scope, **extra, **m, target_rank_among_placebo_windows=rank, placebo_window_count=npl)
               AGG.append(out)
+              if scope in ('AGGREGATE_ALL', 'SCW_WINDOW'):
+                  for s in scans:
+                      PLACEBO.append({**extra, 'scope':scope, **s})
+              z = float(out['z_vs_side_density']) if math.isfinite(float(out['z_vs_side_density'])) else float('nan')
+              ratio = float(out['line_to_side_density_ratio']) if math.isfinite(float(out['line_to_side_density_ratio'])) else float('inf')
+              if z >= 5 and ratio >= 1.20 and rank != '' and int(rank) <= 3:
+                  level = 'STRONG_PRODUCT_FIRST_511_CANDIDATE'
+              elif z >= 3 and ratio >= 1.10 and rank != '' and int(rank) <= 5:
+                  level = 'MODERATE_PRODUCT_FIRST_511_CANDIDATE'
+              elif z >= 2 and ratio >= 1.05:
+                  level = 'WEAK_PRODUCT_FIRST_511_HINT'
+              else:
+                  level = 'NO_LOCKED_511_EXCESS_CANDIDATE'
+              cand = {**out, 'candidate_level':level, 'acirm_link_status':'PRODUCT_FIRST_ONLY_REQUIRES_PHASE_BACKTRACE_IF_MODERATE_OR_STRONG', 'claim_ceiling':'DIAGNOSTIC_NOT_PROOF'}
+              CANDS.append(cand)
               return out
 
-          primary = aggregate('AGGREGATE_ALL_SELECTED_MODELS', lambda r: True, {'aggregate_id': 'ALL'}) if selected else {}
+          add_aggregate('AGGREGATE_ALL', selected, dict(candidate_id='ALL_CACHED_SPI_SPECTRA'))
 
-          for er in sorted({r[3]['e_range'] for r in selected}):
-              aggregate('AGGREGATE_BY_ERANGE', lambda r, er=er: r.get('e_range') == er, {'e_range': er})
+          scws = sorted({it['scw'] for it in selected})
+          for sid in scws:
+              add_aggregate('AGGREGATE_BY_SCW', [it for it in selected if it['scw'] == sid], dict(candidate_id='SCW_'+sid, scw=sid, window_width=1))
 
-          for sid in sorted({r[3]['scw'] for r in selected}):
-              aggregate('AGGREGATE_BY_SCW', lambda r, sid=sid: r.get('scw') == sid, {'scw': sid})
+          for er in sorted({it['e_range'] for it in selected}):
+              add_aggregate('AGGREGATE_BY_ERANGE', [it for it in selected if it['e_range'] == er], dict(candidate_id='ERANGE_'+str(er), e_range=er))
 
-          if selected:
-              zlist = []
-              for st in np.arange(430.0, 590.1, 2.0):
-                  band = (float(st), float(st + 6.0))
-                  if max(band[0], 488.0) < min(band[1], 516.0) or max(band[0], 520.0) < min(band[1], 534.0):
-                      continue
-                  left = (band[0] - 18.0, band[0] - 8.0)
-                  right = (band[1] + 8.0, band[1] + 18.0)
-                  line = side = 0.0
-                  for counts, lo, hi, r in selected:
-                      line += band_counts(counts, lo, hi, band)
-                      side += band_counts(counts, lo, hi, left) + band_counts(counts, lo, hi, right)
-                  exp = side / 20.0 * 6.0 if side > 0 else float('nan')
-                  ratio = (line / 6.0) / (side / 20.0) if side > 0 else float('inf')
-                  z = (line - exp) / math.sqrt(exp) if exp and exp > 0 else float('nan')
-                  PLACEBO.append({
-                      'band_min_keV': band[0],
-                      'band_max_keV': band[1],
-                      'band_counts': line,
-                      'side_counts': side,
-                      'expected_from_side_density': exp,
-                      'band_to_side_density_ratio': ratio,
-                      'z_vs_local_side_density': z,
-                  })
-                  if math.isfinite(z):
-                      zlist.append(z)
+          for w in (2, 3, 4, 5, 8):
+              if len(scws) < w:
+                  continue
+              for i in range(0, len(scws) - w + 1):
+                  subset = scws[i:i+w]
+                  items = [it for it in selected if it['scw'] in set(subset)]
+                  add_aggregate('SCW_WINDOW', items, dict(candidate_id='SCW_WINDOW_'+'_'.join(subset), scw_start=subset[0], scw_end=subset[-1], window_width=w, scw_list=';'.join(subset)))
+
+          strong = [c for c in CANDS if c.get('candidate_level') == 'STRONG_PRODUCT_FIRST_511_CANDIDATE']
+          moderate = [c for c in CANDS if c.get('candidate_level') == 'MODERATE_PRODUCT_FIRST_511_CANDIDATE']
+          weak = [c for c in CANDS if c.get('candidate_level') == 'WEAK_PRODUCT_FIRST_511_HINT']
+          valid = [c for c in CANDS if math.isfinite(float(c.get('z_vs_side_density', float('nan'))))]
+          best = sorted(valid, key=lambda r: (float(r.get('z_vs_side_density', -999)), float(r.get('line_to_side_density_ratio', -999))), reverse=True)[0] if valid else {}
+
+          if strong:
+              decision = 'R17K_R8S_STRONG_PRODUCT_FIRST_511_CANDIDATE_FOUND_BACKTRACE_REQUIRED_NOT_PROOF'
+          elif moderate:
+              decision = 'R17K_R8S_MODERATE_PRODUCT_FIRST_511_CANDIDATE_FOUND_BACKTRACE_REQUIRED_NOT_PROOF'
+          elif weak:
+              decision = 'R17K_R8S_ONLY_WEAK_511_HINTS_FOUND_NOT_LOCKED_NOT_PROOF'
+          elif selected:
+              decision = 'R17K_R8S_NO_CALIBRATED_PRODUCT_FIRST_511_EXCESS_IN_AVAILABLE_CACHE'
+          elif spectra:
+              decision = 'R17K_R8S_SPI_SPECTRA_FOUND_BUT_NO_USABLE_CALIBRATION_MAPPING'
           else:
-              zlist = []
+              decision = 'R17K_R8S_NO_SPI_SPECTRA_FOUND_IN_AVAILABLE_CACHE'
 
-          target_z = primary.get('z_vs_side_density', float('nan')) if primary else float('nan')
-          target_rank = 1 + sum(1 for z in zlist if math.isfinite(target_z) and z > target_z) if math.isfinite(target_z) else ''
+          theory_note = []
+          theory_note.append('Product-first rule applied: search calibrated 511 excess first, then allow phase/backtrace only for moderate or strong candidates.')
+          theory_note.append('R8O channel approximation is not allowed as proof or as a retuning source.')
+          theory_note.append('R8Q calibration-resolved no-excess result remains the local Rev2504 closure unless R8S finds a calibrated candidate in available cache.')
+          theory_note.append('If no moderate/strong candidate exists, the correct ACIRM label is no calibrated 511 product signature in this available SPI raw cache, not global theory failure.')
+          (OUT/'R17K_R8S_THEORY_LINK_NOTE.txt').write_text('\n'.join(theory_note)+'\n', encoding='utf-8')
 
-          er_status = {}
-          for r in ROWS:
-              er = str(r.get('e_range', ''))
-              er_status.setdefault(er, {'rows': 0, 'ok': 0, 'no_model': 0, 'raw_total_counts': 0.0, 'target_counts': 0.0, 'nonzero_touch_rows': 0})
-              er_status[er]['rows'] += 1
-              er_status[er]['raw_total_counts'] += float(r.get('raw_total_counts', 0.0) or 0.0)
-              if r.get('status') == 'OK':
-                  er_status[er]['ok'] += 1
-              else:
-                  er_status[er]['no_model'] += 1
-              er_status[er]['target_counts'] += float(r.get('line_508_514_counts', 0.0) or 0.0)
-              mn = r.get('nonzero_keV_min')
-              mx = r.get('nonzero_keV_max')
-              if isinstance(mn, (int, float)) and isinstance(mx, (int, float)) and math.isfinite(float(mn)) and math.isfinite(float(mx)) and float(mn) <= 514.0 and float(mx) >= 508.0:
-                  er_status[er]['nonzero_touch_rows'] += 1
-
-          if not spectra:
-              decision = 'R17K_R8Q_NO_SPI_SPECTRA_FOUND'
-          elif not CAL:
-              decision = 'R17K_R8Q_NO_CALIBRATION_ROWS_FOUND'
-          elif not selected:
-              decision = 'R17K_R8Q_NO_USABLE_CALIBRATION_MODEL_FOR_RAW_ROWS'
-          elif float(primary.get('line_508_514_counts', 0.0) or 0.0) > 0:
-              decision = 'R17K_R8Q_CALIBRATED_NONZERO_511_COUNTS_PRESENT_DIAGNOSTIC_NOT_PROOF'
-          elif primary.get('rows_with_nonzero_energy_range_touching_508_514', 0) == 0:
-              decision = 'R17K_R8Q_NONZERO_CHANNELS_DO_NOT_TOUCH_508_514_UNDER_SELECTED_CALIBRATION_DIAGNOSTIC_CLOSURE'
-          else:
-              decision = 'R17K_R8Q_511_CHANNELS_COVERED_BUT_ZERO_COUNTS_DIAGNOSTIC_NOT_PROOF'
-
-          reconciliation = []
-          reconciliation.append('R8O used an approximate channel-to-keV scale and found a positive raw diagnostic excess.')
-          reconciliation.append('R8P applied calibration candidates and did not recover 508-514 or sideband counts.')
-          reconciliation.append('R8Q audits where the nonzero raw channels fall after calibration, especially E_RANGE=0 versus E_RANGE=1.')
-          reconciliation.append('If nonzero calibrated energy ranges do not touch 508-514 keV, R8O is explained as channel-index aliasing and cannot be used as 511 support.')
-          (OUT / 'R17K_R8Q_RECONCILIATION_NOTE.txt').write_text('\n'.join(reconciliation) + '\n', encoding='utf-8')
-
-          write_csv(OUT / 'R17K_R8Q_RAW_ROW_CHANNEL_COVERAGE.csv', ROWS)
-          write_csv(OUT / 'R17K_R8Q_MODEL_CANDIDATE_DIAGNOSTICS.csv', MODEL_ROWS)
-          write_csv(OUT / 'R17K_R8Q_AGGREGATES.csv', AGG)
-          write_csv(OUT / 'R17K_R8Q_PLACEBO_SCAN.csv', PLACEBO)
-          (OUT / 'R17K_R8Q_ERRORS.json').write_text(json.dumps(ERR, indent=2), encoding='utf-8')
-
-          summary = {
-              'run_id': 'R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511',
-              'decision': decision,
-              'proof_allowed': False,
-              'spectra_files_found': len(spectra),
-              'raw_rows_seen': raw_rows_seen,
-              'calibration_rows_found': len(CAL),
-              'selected_rows_used': len(selected),
-              'primary_aggregate': primary,
-              'erange_status': er_status,
-              'target_rank_among_placebo_windows': target_rank,
-              'placebo_window_count': len(zlist),
-              'claim_ceiling': [
-                  'DIAGNOSTIC_NOT_PROOF',
-                  'NOT_DISCOVERY',
-                  'NOT_PARTICLE_PROOF',
-                  'NOT_SOURCE_ATTRIBUTION',
-                  'NOT_OFFICIAL_SPI_511_LINE_PROOF'
-              ]
-          }
-          (OUT / 'R17K_R8Q_DECISION.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+          write_csv(OUT/'R17K_R8S_ROW_CALIBRATED_511_MEASUREMENTS.csv', ROWS)
+          write_csv(OUT/'R17K_R8S_PRODUCT_FIRST_AGGREGATES.csv', AGG)
+          write_csv(OUT/'R17K_R8S_PRODUCT_FIRST_CANDIDATES.csv', CANDS)
+          write_csv(OUT/'R17K_R8S_PLACEBO_SCAN_SELECTED_WINDOWS.csv', PLACEBO)
+          (OUT/'R17K_R8S_ERRORS.json').write_text(json.dumps(ERR, indent=2), encoding='utf-8')
+          summary = dict(run_id='R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH', decision=decision, proof_allowed=False, spectra_files_found=len(spectra), raw_rows_seen=raw_seen, calibration_rows_found=len(CAL), calibrated_rows_used=len(selected), aggregate_rows=len(AGG), candidate_rows=len(CANDS), strong_candidate_count=len(strong), moderate_candidate_count=len(moderate), weak_hint_count=len(weak), best_candidate_by_z=best, claim_ceiling=['DIAGNOSTIC_NOT_PROOF','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF'])
+          (OUT/'R17K_R8S_DECISION.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
           PY
-          python3 scripts/r8q.py > logs/r8q_python.log 2>&1
-          echo "PYTHON_EXIT=$?" | tee ACIRM_R17K_R8Q_OUTPUTS/R17K_R8Q_PYTHON_EXIT.txt
+          python3 scripts/r8s_product_first.py > logs/r8s_python.log 2>&1
+          echo "PYTHON_EXIT=$?" | tee ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_PYTHON_EXIT.txt
 
       - name: Package artifact
         shell: bash
         run: |
           set +e
-          cp logs/*.log ACIRM_R17K_R8Q_OUTPUTS/ 2>/dev/null || true
-          df -h > ACIRM_R17K_R8Q_OUTPUTS/R17K_R8Q_DF_END.txt
-          free -h > ACIRM_R17K_R8Q_OUTPUTS/R17K_R8Q_FREE_END.txt
-          zip -r ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip ACIRM_R17K_R8Q_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip > ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip.sha256.txt
+          cp logs/*.log ACIRM_R17K_R8S_OUTPUTS/ 2>/dev/null || true
+          df -h > ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_DF_END.txt
+          free -h > ACIRM_R17K_R8S_OUTPUTS/R17K_R8S_FREE_END.txt
+          zip -r ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip ACIRM_R17K_R8S_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip > ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip.sha256.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT
+          name: ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT
           path: |
-            ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip
-            ACIRM_R17K_R8Q_ERANGE_CHANNEL_COVERAGE_SPI511_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip
+            ACIRM_R17K_R8S_PRODUCT_FIRST_CALIBRATED_SPI511_SEARCH_OUTPUT.zip.sha256.txt
           retention-days: 7
