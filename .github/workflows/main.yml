@@ -1,4 +1,4 @@
-name: ACIRM R17K R8G Answerfile LogGuard SPI511
+name: ACIRM R17K R8H BoolFixed Answerfile SPI511
 
 on:
   workflow_dispatch:
@@ -8,16 +8,16 @@ permissions:
   actions: write
 
 jobs:
-  r17k-r8g-answerfile-logguard-spi511:
+  r17k-r8h-boolfixed-answerfile-spi511:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 180
 
     steps:
       - name: Prepare locked inputs
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_R8G_OUTPUTS logs scripts repo/scw/2504 repo/aux repo/ic repo/idx repo/cat selected_products pfiles
+          mkdir -p ACIRM_R17K_R8H_OUTPUTS logs scripts repo/scw/2504 repo/aux repo/ic repo/idx repo/cat selected_products
           cat > scw_ids.list <<'EOF'
           250400090010
           250400020010
@@ -29,9 +29,9 @@ jobs:
           250400050010
           EOF
           sed -i 's/^ *//' scw_ids.list
-          cp scw_ids.list ACIRM_R17K_R8G_OUTPUTS/LOCKED_SCW_IDS.txt
-          cat > ACIRM_R17K_R8G_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R8G_ANSWERFILE_LOGGUARD_SPI511
+          cp scw_ids.list ACIRM_R17K_R8H_OUTPUTS/LOCKED_SCW_IDS.txt
+          cat > ACIRM_R17K_R8H_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R8H_BOOLFIXED_ANSWERFILE_SPI511
           OFFICIAL_OSA_SPI_SCIENCE_NON_GUI_ANSWERFILE_ATTEMPT
           NOT_DISCOVERY
           NOT_PARTICLE_PROOF
@@ -39,19 +39,7 @@ jobs:
           NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_PRODUCTS_AND_LOCKED_CONTROLS_PASS
           EOF
 
-      - name: System diagnostics and dependencies
-        shell: bash
-        run: |
-          set +e
-          uname -a | tee logs/uname.txt
-          df -h | tee logs/df_start.txt
-          free -h | tee logs/free_start.txt
-          docker --version | tee logs/docker_version.txt
-          sudo apt-get update -y > logs/apt_update.log 2>&1
-          sudo apt-get install -y curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
-          python3 -m pip install -q astropy numpy requests > logs/pip_install.log 2>&1
-
-      - name: Restore SCW cache from R8C
+      - name: Restore SCW cache
         id: restore-scw
         uses: actions/cache/restore@v4
         with:
@@ -59,25 +47,6 @@ jobs:
             repo/scw/2504
             repo/.scw_complete_R17K_R8C
           key: acirm-r17k-r8c-scw-2504-locked8-v1
-
-      - name: Fetch locked SCW only if cache miss
-        if: steps.restore-scw.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set +e
-          cd repo
-          ok=1
-          while read -r id; do
-            [ -n "$id" ] || continue
-            url="https://heasarc.gsfc.nasa.gov/FTP/integral/data/scw/2504/${id}.001/"
-            echo "SCW_FETCH_START $id $url" | tee -a ../logs/scw_full_fetch.log
-            timeout 45m wget -q -nH --no-check-certificate --cut-dirs=3 -r -l1 -c -N -np -R 'index*' -erobots=off --retr-symlinks "$url" >> ../logs/scw_full_fetch.log 2>&1
-            ec=$?
-            echo "SCW_FETCH_EXIT $id $ec" | tee -a ../logs/scw_full_fetch.log
-            if [ "$ec" != "0" ]; then ok=0; fi
-          done < ../scw_ids.list
-          cd ..
-          if [ "$ok" = "1" ]; then touch repo/.scw_complete_R17K_R8C; fi
 
       - name: Restore minimal OSA tree cache
         id: restore-tree
@@ -91,65 +60,34 @@ jobs:
             repo/.tree_complete_R17K_R8E_MINIMAL
           key: acirm-r17k-r8e-minimal-osa-tree-no-full-aux-v1
 
-      - name: Fetch minimal official IC IDX CAT tree if cache miss
-        if: steps.restore-tree.outputs.cache-hit != 'true'
+      - name: System diagnostics and dependencies
         shell: bash
         run: |
           set +e
-          cd repo
-          echo "R17K_R8G minimal tree fetch started" > ../logs/minimal_tree_fetch.log
-          fetch_tree() {
-            label="$1"
-            url="$2"
-            limit="$3"
-            echo "FETCH_START $label $url" | tee -a ../logs/minimal_tree_fetch.log
-            timeout "$limit" wget -q -nH --no-check-certificate --cut-dirs=3 -r -l0 -c -N -np -R 'index*' -erobots=off --retr-symlinks "$url" >> ../logs/minimal_tree_fetch.log 2>&1
-            ec=$?
-            echo "FETCH_EXIT $label $ec" | tee -a ../logs/minimal_tree_fetch.log
-          }
-          fetch_tree ic_sc  https://heasarc.gsfc.nasa.gov/FTP/integral/data/ic/sc/ 35m
-          fetch_tree ic_spi https://heasarc.gsfc.nasa.gov/FTP/integral/data/ic/spi/ 35m
-          fetch_tree idx_ic  https://heasarc.gsfc.nasa.gov/FTP/integral/data/idx/ic/ 30m
-          fetch_tree idx_rev https://heasarc.gsfc.nasa.gov/FTP/integral/data/idx/rev/ 30m
-          fetch_tree idx_scw https://heasarc.gsfc.nasa.gov/FTP/integral/data/idx/scw/ 15m
-          fetch_tree cat_hec https://heasarc.gsfc.nasa.gov/FTP/integral/data/cat/hec/ 20m
-          mkdir -p aux
-          cd ..
-          touch repo/.tree_complete_R17K_R8E_MINIMAL
+          echo "SCW_CACHE_HIT=${{ steps.restore-scw.outputs.cache-hit }}" | tee ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_SCW_CACHE_HIT.txt
+          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_TREE_CACHE_HIT.txt
+          uname -a | tee logs/uname.txt
+          df -h | tee logs/df_start.txt
+          free -h | tee logs/free_start.txt
+          docker --version | tee logs/docker_version.txt
+          sudo apt-get update -y > logs/apt_update.log 2>&1
+          sudo apt-get install -y curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
+          python3 -m pip install -q astropy numpy requests > logs/pip_install.log 2>&1
+          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_REPO_DIRS.txt
+          find repo/ic repo/idx repo/cat repo/aux -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_IC_IDX_CAT_AUX_FILES.txt
+          find repo/scw/2504 -maxdepth 2 -type f 2>/dev/null | sort > ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_SCW_FILE_INVENTORY.txt
+          du -sh repo 2>/dev/null | tee ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_REPO_SIZE.txt
 
-      - name: Save minimal OSA tree cache if rebuilt
-        if: steps.restore-tree.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            repo/ic
-            repo/idx
-            repo/cat
-            repo/aux
-            repo/.tree_complete_R17K_R8E_MINIMAL
-          key: acirm-r17k-r8e-minimal-osa-tree-no-full-aux-v1
-
-      - name: Inventory data
-        shell: bash
-        run: |
-          set +e
-          echo "SCW_CACHE_HIT=${{ steps.restore-scw.outputs.cache-hit }}" | tee ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_SCW_CACHE_HIT.txt
-          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_TREE_CACHE_HIT.txt
-          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_REPO_DIRS.txt
-          find repo/ic repo/idx repo/cat repo/aux -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_IC_IDX_CAT_AUX_FILES.txt
-          find repo/scw/2504 -maxdepth 2 -type f | sort > ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_SCW_FILE_INVENTORY.txt
-          du -sh repo 2>/dev/null | tee ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_REPO_SIZE.txt
-          df -h | tee logs/df_after_data_ready.txt
-
-      - name: Pull OSA Docker and build answerfile inside script
+      - name: Pull OSA Docker and build bool-fixed answerfile script
         shell: bash
         run: |
           set +e
           docker pull integralsw/osa:latest > logs/docker_pull_integralsw_osa.log 2>&1
-          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_DOCKER_PULL_EXIT.txt
+          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_DOCKER_PULL_EXIT.txt
 
-          cat > scripts/r17k_r8g_inside_osa.sh <<'SH'
+          cat > scripts/r17k_r8h_inside_osa.sh <<'SH'
           set +e
+
           export REP_BASE_PROD=/data
           export CURRENT_IC=/data
           export ISDC_REF_CAT=/home/integral/cat/hec/gnrl_refr_cat_0043.fits[1]
@@ -170,7 +108,7 @@ jobs:
           [ -n "$OG" ] && export PATH="$(dirname "$OG"):$PATH"
           [ -n "$SP" ] && export PATH="$(dirname "$SP"):$PATH"
 
-          mkdir -p /home/integral/pfiles /home/integral/ACIRM_R17K_R8G_OUTPUTS /home/integral/selected_products /home/integral/obswork
+          mkdir -p /home/integral/pfiles /home/integral/ACIRM_R17K_R8H_OUTPUTS /home/integral/selected_products /home/integral/obswork
           SYS_PFILES="/opt/osa/pfiles"
           if [ -d "$SYS_PFILES" ]; then
             cp "$SYS_PFILES"/*.par /home/integral/pfiles/ 2>/dev/null || true
@@ -181,7 +119,7 @@ jobs:
 
           cd /home/integral
           {
-            echo "=== R17K_R8G answerfile preflight ==="
+            echo "=== R17K_R8H bool-fixed answerfile preflight ==="
             echo "REP_BASE_PROD=$REP_BASE_PROD"
             echo "CURRENT_IC=$CURRENT_IC"
             echo "ISDC_REF_CAT=$ISDC_REF_CAT"
@@ -191,7 +129,7 @@ jobs:
             which spi_science_analysis || true
             og_create --version || true
             spi_science_analysis --version || true
-          } > ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_OSA_PREFLIGHT.txt 2>&1
+          } > ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_OSA_PREFLIGHT.txt 2>&1
 
           : > list_ids.txt
           while read -r id; do
@@ -204,21 +142,21 @@ jobs:
           cp /home/integral/list_ids.txt ./scw_input.list
 
           {
-            echo "=== og_create exact R7 successful pattern ==="
-            echo "COMMAND: og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8g baseDir=. instrument=SPI"
+            echo "=== og_create exact R7/R8G successful pattern ==="
+            echo "COMMAND: og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8h baseDir=. instrument=SPI"
             cat ./scw_input.list
-          } > /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_OG_CREATE.log
+          } > /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_OG_CREATE.log
 
-          og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8g baseDir=. instrument=SPI >> /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_OG_CREATE.log 2>&1
+          og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8h baseDir=. instrument=SPI >> /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_OG_CREATE.log 2>&1
           og_ec=$?
-          echo "OG_CREATE_EXIT=$og_ec" > /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_OG_CREATE_EXIT.txt
+          echo "OG_CREATE_EXIT=$og_ec" > /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_OG_CREATE_EXIT.txt
 
           first_og=$(find /home/integral/obswork /home/integral -type f -name 'og_spi.fits' 2>/dev/null | head -1)
-          echo "$first_og" > /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_FIRST_OG_SPI_PATH.txt
+          echo "$first_og" > /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_FIRST_OG_SPI_PATH.txt
           if [ -n "$first_og" ]; then
             cp "$first_og" /home/integral/selected_products/og_spi.fits 2>/dev/null || true
           else
-            echo "NO_OG_SPI_CREATED_SKIP_SPI_SCIENCE" > /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_SPI_SCIENCE_ANALYSIS_EXIT.txt
+            echo "NO_OG_SPI_CREATED_SKIP_SPI_SCIENCE" > /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_SPI_SCIENCE_ANALYSIS_EXIT.txt
             exit 0
           fi
 
@@ -258,8 +196,32 @@ jobs:
           0
           0
           0
+          no
+          no
+          no
+          no
+          no
+          no
+          no
+          no
+          no
+          no
           0
           0
+          0
+          0
+          0
+          0
+          0
+          0
+          0
+          0
+          no
+          no
+          no
+          no
+          no
+          no
           0
           0
           0
@@ -269,32 +231,32 @@ jobs:
           EOF
 
           {
-            echo "=== SPI science answerfile/logguard attempt ==="
+            echo "=== SPI science bool-fixed answerfile/logguard attempt ==="
             echo "PWD=$(pwd)"
             echo "OG=$first_og"
             echo "PFILES=$PFILES"
             echo "answers_file=/home/integral/spi_answers.txt"
-          } > /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_SPI_SCIENCE_CONTEXT.txt
+          } > /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_SPI_SCIENCE_CONTEXT.txt
 
           set -o pipefail
           timeout 110m bash -lc 'spi_science_analysis < /home/integral/spi_answers.txt' 2>&1 | awk '
-            NR <= 6000 { print; next }
+            NR <= 8000 { print; next }
             /Error_|Log_|Task|terminating|created|evts|spectra|energy|bound|Exception|PIL_|spi_/ { print }
-            NR == 6001 { print "... ACIRM_LOG_TRUNCATED_AFTER_6000_LINES ..." }
-          ' > /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_SPI_SCIENCE_STDOUT_FILTERED.log
+            NR == 8001 { print "... ACIRM_LOG_TRUNCATED_AFTER_8000_LINES ..." }
+          ' > /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_SPI_SCIENCE_STDOUT_FILTERED.log
           spi_ec=${PIPESTATUS[0]}
-          echo "SPI_SCIENCE_ANALYSIS_ANSWERFILE_EXIT=$spi_ec" > /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_SPI_SCIENCE_ANALYSIS_EXIT.txt
+          echo "SPI_SCIENCE_ANALYSIS_BOOLFIXED_ANSWERFILE_EXIT=$spi_ec" > /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_SPI_SCIENCE_ANALYSIS_EXIT.txt
 
-          find /home/integral -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' -o -iname '*spi*spect*' \) 2>/dev/null | sort > /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_PRODUCTS_FOUND.txt
+          find /home/integral -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' -o -iname '*spi*spect*' \) 2>/dev/null | sort > /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_PRODUCTS_FOUND.txt
           while read -r f; do
             [ -f "$f" ] || continue
             size=$(stat -c%s "$f" 2>/dev/null || echo 0)
             if [ "$size" -le 200000000 ]; then cp -f "$f" /home/integral/selected_products/ 2>/dev/null || true; fi
-          done < /home/integral/ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_PRODUCTS_FOUND.txt
+          done < /home/integral/ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_PRODUCTS_FOUND.txt
           SH
-          chmod +x scripts/r17k_r8g_inside_osa.sh
+          chmod +x scripts/r17k_r8h_inside_osa.sh
 
-      - name: Run OSA R8G answerfile logguard
+      - name: Run OSA R8H bool-fixed answerfile
         shell: bash
         run: |
           set +e
@@ -306,15 +268,16 @@ jobs:
             -v "$PWD/repo/idx:/data/idx:ro" \
             -v "$PWD/repo/cat:/home/integral/cat:ro" \
             --entrypoint="" \
-            integralsw/osa:latest bash -lc 'bash /home/integral/scripts/r17k_r8g_inside_osa.sh' > logs/r17k_r8g_osa_run.log 2>&1
-          echo "R17K_R8G_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_OSA_RUN_EXIT.txt
+            integralsw/osa:latest bash -lc 'bash /home/integral/scripts/r17k_r8h_inside_osa.sh' > logs/r17k_r8h_osa_run.log 2>&1
+          echo "R17K_R8H_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_OSA_RUN_EXIT.txt
 
       - name: Inspect selected products and 511 rows
         shell: bash
         run: |
           set +e
-          cp logs/*.log ACIRM_R17K_R8G_OUTPUTS/ 2>/dev/null || true
-          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_SELECTED_PRODUCTS_MANIFEST.csv || true
+          cp logs/*.log ACIRM_R17K_R8H_OUTPUTS/ 2>/dev/null || true
+          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_SELECTED_PRODUCTS_MANIFEST.csv || true
+
           cat > scripts/inspect_final.py <<'PY'
           import json, csv, math
           from pathlib import Path
@@ -323,13 +286,15 @@ jobs:
               from astropy.io import fits
           except Exception:
               fits = None
-          OUT=Path('ACIRM_R17K_R8G_OUTPUTS')
+
+          OUT=Path('ACIRM_R17K_R8H_OUTPUTS')
           PROD=Path('selected_products')
           rows=[]; meas=[]; errs=[]
           LINE=(508.0,514.0); SB1=(490.0,500.0); SB2=(522.0,532.0)
           E_PAIRS=[('E_MIN','E_MAX'),('ENERG_LO','ENERG_HI'),('ENERGY_LO','ENERGY_HI'),('E_LO','E_HI'),('EMIN','EMAX'),('E_LOW','E_HIGH')]
           E_SINGLE=['ENERGY','E','E_MEAN','E_CENTER','PI','PHA','CHANNEL','CHAN']
           C_COLS=['COUNTS','COUNT','RATE','SPECTRUM','SPEC','DATA','FLUX','VALUE','NCOUNTS']
+
           def arr(x): return np.asarray(x,dtype=float)
           def collapse(x,n):
               a=np.nan_to_num(arr(x),nan=0.0,posinf=0.0,neginf=0.0)
@@ -337,6 +302,7 @@ jobs:
               if a.ndim>=2 and a.shape[-1]==n: return a.sum(axis=tuple(range(a.ndim-1))).reshape(-1)
               if a.ndim>=2 and a.shape[0]==n: return a.sum(axis=tuple(range(1,a.ndim))).reshape(-1)
               return None
+
           def measure_edges(lo,hi,cnt):
               lo=arr(lo).reshape(-1); hi=arr(hi).reshape(-1); n=min(len(lo),len(hi))
               if n==0: return None
@@ -349,6 +315,7 @@ jobs:
               exp=side/20*6 if side>0 else math.nan
               z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
               return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':n}
+
           def measure_centers(e,cnt):
               e=arr(e).reshape(-1); c=collapse(cnt,len(e))
               if c is None or len(e)==0: return None
@@ -360,6 +327,7 @@ jobs:
               exp=side/20*6 if side>0 else math.nan
               z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
               return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':len(e)}
+
           if fits:
               for p in PROD.glob('*'):
                   if not p.name.lower().endswith(('.fits','.fit','.fits.gz','.fit.gz')): continue
@@ -387,6 +355,7 @@ jobs:
                                               if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_centers','energy_source':cmap[ek], 'count_source':cmap[ck]}); meas.append(m)
                   except Exception as e:
                       errs.append({'file':str(p),'error':repr(e)[:300]})
+
           def write_csv(path,data):
               keys=[]
               for r in data:
@@ -396,38 +365,41 @@ jobs:
               with open(path,'w',newline='',encoding='utf-8') as f:
                   w=csv.DictWriter(f,fieldnames=keys); w.writeheader()
                   for r in data: w.writerow({k:r.get(k,'') for k in keys})
-          write_csv(OUT/'R17K_R8G_SELECTED_PRODUCT_SCHEMA.csv',rows)
-          write_csv(OUT/'R17K_R8G_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
-          (OUT/'R17K_R8G_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
+
+          write_csv(OUT/'R17K_R8H_SELECTED_PRODUCT_SCHEMA.csv',rows)
+          write_csv(OUT/'R17K_R8H_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
+          (OUT/'R17K_R8H_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
+
           selected=list(PROD.glob('*'))
-          og_path=(OUT/'R17K_R8G_FIRST_OG_SPI_PATH.txt')
+          og_path=(OUT/'R17K_R8H_FIRST_OG_SPI_PATH.txt')
           og_success=og_path.exists() and bool(og_path.read_text(errors='replace').strip())
-          decision='R17K_R8G_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS'
-          if og_success: decision='R17K_R8G_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF'
-          if any(('evts' in p.name.lower() or 'energy' in p.name.lower() or 'ebounds' in p.name.lower()) for p in selected): decision='R17K_R8G_OFFICIAL_SPI_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
-          if meas: decision='R17K_R8G_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          decision='R17K_R8H_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS'
+          if og_success: decision='R17K_R8H_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF'
+          if any(('evts' in p.name.lower() or 'energy' in p.name.lower() or 'ebounds' in p.name.lower()) for p in selected): decision='R17K_R8H_OFFICIAL_SPI_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          if meas: decision='R17K_R8H_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
           summary={'decision':decision,'proof_allowed':False,'selected_product_count':len(selected),'og_success':og_success,'direct_511_measurement_rows':len(meas),'schema_rows':len(rows),'claim_ceiling':['OFFICIAL_OSA_SPI_SCIENCE_NON_GUI_ANSWERFILE_ATTEMPT','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_LOCKED_CONTROLS_PASS']}
-          (OUT/'R17K_R8G_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          (OUT/'R17K_R8H_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
           PY
+
           python3 scripts/inspect_final.py > logs/inspect_final.log 2>&1
 
       - name: Package slim artifact
         shell: bash
         run: |
           set +e
-          cp logs/*.log ACIRM_R17K_R8G_OUTPUTS/ 2>/dev/null || true
-          cp -r selected_products ACIRM_R17K_R8G_OUTPUTS/selected_products 2>/dev/null || true
-          df -h > ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_DF_END.txt
-          free -h > ACIRM_R17K_R8G_OUTPUTS/R17K_R8G_FREE_END.txt
-          zip -r ACIRM_R17K_R8G_ANSWERFILE_LOGGUARD_SPI511_OUTPUT.zip ACIRM_R17K_R8G_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R8G_ANSWERFILE_LOGGUARD_SPI511_OUTPUT.zip > ACIRM_R17K_R8G_ANSWERFILE_LOGGUARD_SPI511_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R8G_ANSWERFILE_LOGGUARD_SPI511_OUTPUT.zip ACIRM_R17K_R8G_ANSWERFILE_LOGGUARD_SPI511_OUTPUT.zip.sha256.txt
+          cp logs/*.log ACIRM_R17K_R8H_OUTPUTS/ 2>/dev/null || true
+          cp -r selected_products ACIRM_R17K_R8H_OUTPUTS/selected_products 2>/dev/null || true
+          df -h > ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_DF_END.txt
+          free -h > ACIRM_R17K_R8H_OUTPUTS/R17K_R8H_FREE_END.txt
+          zip -r ACIRM_R17K_R8H_BOOLFIXED_ANSWERFILE_SPI511_OUTPUT.zip ACIRM_R17K_R8H_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R8H_BOOLFIXED_ANSWERFILE_SPI511_OUTPUT.zip > ACIRM_R17K_R8H_BOOLFIXED_ANSWERFILE_SPI511_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R8H_BOOLFIXED_ANSWERFILE_SPI511_OUTPUT.zip ACIRM_R17K_R8H_BOOLFIXED_ANSWERFILE_SPI511_OUTPUT.zip.sha256.txt
 
       - name: Upload slim artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R8G_ANSWERFILE_LOGGUARD_SPI511_OUTPUT
+          name: ACIRM_R17K_R8H_BOOLFIXED_ANSWERFILE_SPI511_OUTPUT
           path: |
-            ACIRM_R17K_R8G_ANSWERFILE_LOGGUARD_SPI511_OUTPUT.zip
-            ACIRM_R17K_R8G_ANSWERFILE_LOGGUARD_SPI511_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R8H_BOOLFIXED_ANSWERFILE_SPI511_OUTPUT.zip
+            ACIRM_R17K_R8H_BOOLFIXED_ANSWERFILE_SPI511_OUTPUT.zip.sha256.txt
           retention-days: 7
