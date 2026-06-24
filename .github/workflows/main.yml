@@ -1,412 +1,410 @@
 name: ACIRM R17K R8K Clean Direct Params SPI511
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 permissions:
-contents: read
-actions: write
+  contents: read
+  actions: write
 
 jobs:
-r17k-r8k-clean-direct-params-spi511:
-runs-on: ubuntu-latest
-timeout-minutes: 180
+  r17k-r8k-clean-direct-params-spi511:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
 
-steps:
-  - name: Prepare locked inputs
-    shell: bash
-    run: |
-      set -Eeuo pipefail
-      mkdir -p ACIRM_R17K_R8K_OUTPUTS logs scripts repo/scw/2504 repo/aux repo/ic repo/idx repo/cat selected_products
-      cat > scw_ids.list <<'EOF'
-      250400090010
-      250400020010
-      250400080010
-      250400030010
-      250400070021
-      250400040010
-      250400060010
-      250400050010
-      EOF
-      sed -i 's/^ *//' scw_ids.list
-      cp scw_ids.list ACIRM_R17K_R8K_OUTPUTS/LOCKED_SCW_IDS.txt
-      cat > ACIRM_R17K_R8K_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-      R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511
-      OFFICIAL_OSA_SPI_SCIENCE_DIRECT_PARAMETER_ATTEMPT
-      NOT_DISCOVERY
-      NOT_PARTICLE_PROOF
-      NOT_SOURCE_ATTRIBUTION
-      NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_PRODUCTS_AND_LOCKED_CONTROLS_PASS
-      EOF
+    steps:
+      - name: Prepare locked inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ACIRM_R17K_R8K_OUTPUTS logs scripts repo/scw/2504 repo/aux repo/ic repo/idx repo/cat selected_products
+          cat > scw_ids.list <<'EOF'
+          250400090010
+          250400020010
+          250400080010
+          250400030010
+          250400070021
+          250400040010
+          250400060010
+          250400050010
+          EOF
+          sed -i 's/^ *//' scw_ids.list
+          cp scw_ids.list ACIRM_R17K_R8K_OUTPUTS/LOCKED_SCW_IDS.txt
+          cat > ACIRM_R17K_R8K_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511
+          OFFICIAL_OSA_SPI_SCIENCE_DIRECT_PARAMETER_ATTEMPT
+          NOT_DISCOVERY
+          NOT_PARTICLE_PROOF
+          NOT_SOURCE_ATTRIBUTION
+          NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_PRODUCTS_AND_LOCKED_CONTROLS_PASS
+          EOF
 
-  - name: Restore SCW cache
-    id: restore-scw
-    uses: actions/cache/restore@v4
-    with:
-      path: |
-        repo/scw/2504
-        repo/.scw_complete_R17K_R8C
-      key: acirm-r17k-r8c-scw-2504-locked8-v1
+      - name: Restore SCW cache
+        id: restore-scw
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            repo/scw/2504
+            repo/.scw_complete_R17K_R8C
+          key: acirm-r17k-r8c-scw-2504-locked8-v1
 
-  - name: Restore minimal OSA tree cache
-    id: restore-tree
-    uses: actions/cache/restore@v4
-    with:
-      path: |
-        repo/ic
-        repo/idx
-        repo/cat
-        repo/aux
-        repo/.tree_complete_R17K_R8E_MINIMAL
-      key: acirm-r17k-r8e-minimal-osa-tree-no-full-aux-v1
+      - name: Restore minimal OSA tree cache
+        id: restore-tree
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            repo/ic
+            repo/idx
+            repo/cat
+            repo/aux
+            repo/.tree_complete_R17K_R8E_MINIMAL
+          key: acirm-r17k-r8e-minimal-osa-tree-no-full-aux-v1
 
-  - name: Stop if caches are missing
-    shell: bash
-    run: |
-      set +e
-      echo "SCW_CACHE_HIT=${{ steps.restore-scw.outputs.cache-hit }}" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SCW_CACHE_HIT.txt
-      echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_TREE_CACHE_HIT.txt
-      if [ "${{ steps.restore-scw.outputs.cache-hit }}" != "true" ] || [ "${{ steps.restore-tree.outputs.cache-hit }}" != "true" ]; then
-        echo "CACHE_MISS_NO_RERUN_DOWNLOAD_IN_R8J" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_CACHE_STATUS.txt
-        zip -r ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8K_OUTPUTS
-        sha256sum ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip > ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
-        exit 0
-      fi
-      echo "CACHE_OK_PROCEED_OSA" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_CACHE_STATUS.txt
+      - name: Stop if caches are missing
+        shell: bash
+        run: |
+          set +e
+          echo "SCW_CACHE_HIT=${{ steps.restore-scw.outputs.cache-hit }}" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SCW_CACHE_HIT.txt
+          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_TREE_CACHE_HIT.txt
+          if [ "${{ steps.restore-scw.outputs.cache-hit }}" != "true" ] || [ "${{ steps.restore-tree.outputs.cache-hit }}" != "true" ]; then
+            echo "CACHE_MISS_NO_RERUN_DOWNLOAD_IN_R8K" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_CACHE_STATUS.txt
+            zip -r ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8K_OUTPUTS
+            sha256sum ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip > ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
+            exit 0
+          fi
+          echo "CACHE_OK_PROCEED_OSA" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_CACHE_STATUS.txt
 
-  - name: System diagnostics and dependencies
-    shell: bash
-    run: |
-      set +e
-      uname -a | tee logs/uname.txt
-      df -h | tee logs/df_start.txt
-      free -h | tee logs/free_start.txt
-      docker --version | tee logs/docker_version.txt
-      sudo apt-get update -y > logs/apt_update.log 2>&1
-      sudo apt-get install -y curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
-      python3 -m pip install -q astropy numpy requests > logs/pip_install.log 2>&1
-      find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_REPO_DIRS.txt
-      find repo/ic repo/idx repo/cat repo/aux -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_IC_IDX_CAT_AUX_FILES.txt
-      find repo/scw/2504 -maxdepth 2 -type f 2>/dev/null | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SCW_FILE_INVENTORY.txt
-      du -sh repo 2>/dev/null | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_REPO_SIZE.txt
+      - name: System diagnostics and dependencies
+        shell: bash
+        run: |
+          set +e
+          uname -a | tee logs/uname.txt
+          df -h | tee logs/df_start.txt
+          free -h | tee logs/free_start.txt
+          docker --version | tee logs/docker_version.txt
+          sudo apt-get update -y > logs/apt_update.log 2>&1
+          sudo apt-get install -y curl wget zip unzip python3-pip > logs/apt_install.log 2>&1
+          python3 -m pip install -q astropy numpy requests > logs/pip_install.log 2>&1
+          find repo -maxdepth 4 -type d | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_REPO_DIRS.txt
+          find repo/ic repo/idx repo/cat repo/aux -maxdepth 6 -type f 2>/dev/null | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_IC_IDX_CAT_AUX_FILES.txt
+          find repo/scw/2504 -maxdepth 2 -type f 2>/dev/null | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SCW_FILE_INVENTORY.txt
+          du -sh repo 2>/dev/null | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_REPO_SIZE.txt
 
-  - name: Pull OSA Docker and build direct-param script
-    shell: bash
-    run: |
-      set +e
-      docker pull integralsw/osa:latest > logs/docker_pull_integralsw_osa.log 2>&1
-      echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_DOCKER_PULL_EXIT.txt
+      - name: Pull OSA Docker and build direct-param script
+        shell: bash
+        run: |
+          set +e
+          docker pull integralsw/osa:latest > logs/docker_pull_integralsw_osa.log 2>&1
+          echo "DOCKER_PULL_EXIT=$?" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_DOCKER_PULL_EXIT.txt
 
-      cat > scripts/r17k_r8k_inside_osa.sh <<'SH'
-      set +e
+          cat > scripts/r17k_r8k_inside_osa.sh <<'SH'
+          set +e
 
-      export REP_BASE_PROD=/data
-      export CURRENT_IC=/data
-      export HEADASNOQUERY=1
-      export HEADASPROMPT=/dev/null
-      export DISPLAY=
+          export REP_BASE_PROD=/data
+          export CURRENT_IC=/data
+          export HEADASNOQUERY=1
+          export HEADASPROMPT=/dev/null
+          export DISPLAY=
 
-      if [ -f /init.sh ]; then . /init.sh || true; fi
-      for init in /opt/osa/bin/osa-init.sh /opt/osa/osa-init.sh /opt/osa/init.sh /usr/local/osa/bin/osa-init.sh; do
-        if [ -f "$init" ]; then . "$init" || true; fi
-      done
+          if [ -f /init.sh ]; then . /init.sh || true; fi
+          for init in /opt/osa/bin/osa-init.sh /opt/osa/osa-init.sh /opt/osa/init.sh /usr/local/osa/bin/osa-init.sh; do
+            if [ -f "$init" ]; then . "$init" || true; fi
+          done
 
-      if [ -f /data/cat/hec/gnrl_refr_cat_0043.fits ]; then
-        export ISDC_REF_CAT=/data/cat/hec/gnrl_refr_cat_0043.fits
-      elif [ -f /home/integral/cat/hec/gnrl_refr_cat_0043.fits ]; then
-        export ISDC_REF_CAT=/home/integral/cat/hec/gnrl_refr_cat_0043.fits
-      fi
+          if [ -f /data/cat/hec/gnrl_refr_cat_0043.fits ]; then
+            export ISDC_REF_CAT=/data/cat/hec/gnrl_refr_cat_0043.fits
+          elif [ -f /home/integral/cat/hec/gnrl_refr_cat_0043.fits ]; then
+            export ISDC_REF_CAT=/home/integral/cat/hec/gnrl_refr_cat_0043.fits
+          fi
 
-      LIB_DIRS=$(find /opt /usr/local /usr -type f -name 'libGui.so' -o -name 'libdal*.so*' -o -name 'libisdc*.so*' -o -name 'libspi*.so*' 2>/dev/null | xargs -r -n1 dirname | sort -u | tr '\n' ':')
-      export LD_LIBRARY_PATH="${LIB_DIRS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          LIB_DIRS=$(find /opt /usr/local /usr -type f \( -name 'libGui.so' -o -name 'libdal*.so*' -o -name 'libisdc*.so*' -o -name 'libspi*.so*' \) 2>/dev/null | xargs -r -n1 dirname | sort -u | tr '\n' ':')
+          export LD_LIBRARY_PATH="${LIB_DIRS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-      OG=$(find /opt /usr/local /usr -type f -name og_create 2>/dev/null | head -1)
-      SP=$(find /opt /usr/local /usr -type f -name spi_science_analysis 2>/dev/null | head -1)
-      [ -n "$OG" ] && export PATH="$(dirname "$OG"):$PATH"
-      [ -n "$SP" ] && export PATH="$(dirname "$SP"):$PATH"
+          OG=$(find /opt /usr/local /usr -type f -name og_create 2>/dev/null | head -1)
+          SP=$(find /opt /usr/local /usr -type f -name spi_science_analysis 2>/dev/null | head -1)
+          [ -n "$OG" ] && export PATH="$(dirname "$OG"):$PATH"
+          [ -n "$SP" ] && export PATH="$(dirname "$SP"):$PATH"
 
-      mkdir -p /home/integral/pfiles /home/integral/ACIRM_R17K_R8K_OUTPUTS /home/integral/selected_products /home/integral/obswork
-      SYS_PFILES="/opt/osa/pfiles"
-      if [ -d "$SYS_PFILES" ]; then
-        cp "$SYS_PFILES"/*.par /home/integral/pfiles/ 2>/dev/null || true
-      fi
-      export PFILES="/home/integral/pfiles;$SYS_PFILES"
+          mkdir -p /home/integral/pfiles /home/integral/ACIRM_R17K_R8K_OUTPUTS /home/integral/selected_products /home/integral/obswork
+          SYS_PFILES="/opt/osa/pfiles"
+          if [ -d "$SYS_PFILES" ]; then
+            cp "$SYS_PFILES"/*.par /home/integral/pfiles/ 2>/dev/null || true
+          fi
+          export PFILES="/home/integral/pfiles;$SYS_PFILES"
 
-      par="/home/integral/pfiles/spi_science_analysis.par"
-      if [ -f "$par" ]; then
-        sed -E -i 's/^([^#,]+,[^,]+),[^,]+,/\1,hl,/' "$par" 2>/dev/null || true
-        cp "$par" /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_PAR_BEFORE_COMMAND.par 2>/dev/null || true
-      fi
+          par="/home/integral/pfiles/spi_science_analysis.par"
+          if [ -f "$par" ]; then
+            sed -E -i 's/^([^#,]+,[^,]+),[^,]+,/\1,hl,/' "$par" 2>/dev/null || true
+            cp "$par" /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_PAR_BEFORE_COMMAND.par 2>/dev/null || true
+          fi
 
-      cd /home/integral
-      {
-        echo "=== R17K_R8K direct-param preflight ==="
-        echo "REP_BASE_PROD=$REP_BASE_PROD"
-        echo "CURRENT_IC=$CURRENT_IC"
-        echo "ISDC_REF_CAT=$ISDC_REF_CAT"
-        echo "PFILES=$PFILES"
-        echo "DISPLAY=$DISPLAY"
-        which og_create || true
-        which spi_science_analysis || true
-        og_create --version || true
-        spi_science_analysis --version || true
-      } > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OSA_PREFLIGHT.txt 2>&1
+          cd /home/integral
+          {
+            echo "=== R17K_R8K direct-param preflight ==="
+            echo "REP_BASE_PROD=$REP_BASE_PROD"
+            echo "CURRENT_IC=$CURRENT_IC"
+            echo "ISDC_REF_CAT=$ISDC_REF_CAT"
+            echo "PFILES=$PFILES"
+            echo "DISPLAY=$DISPLAY"
+            which og_create || true
+            which spi_science_analysis || true
+            og_create --version || true
+            spi_science_analysis --version || true
+          } > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OSA_PREFLIGHT.txt 2>&1
 
-      : > list_ids.txt
-      while read -r id; do
-        [ -n "$id" ] || continue
-        echo "$id" >> list_ids.txt
-      done < scw_ids.list
+          : > list_ids.txt
+          while read -r id; do
+            [ -n "$id" ] || continue
+            echo "$id" >> list_ids.txt
+          done < scw_ids.list
 
-      mkdir -p obswork
-      cd obswork
-      cp /home/integral/list_ids.txt ./scw_input.list
+          mkdir -p obswork
+          cd obswork
+          cp /home/integral/list_ids.txt ./scw_input.list
 
-      {
-        echo "=== og_create exact successful pattern ==="
-        echo "COMMAND: og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8k baseDir=. instrument=SPI"
-        cat ./scw_input.list
-      } > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OG_CREATE.log
+          {
+            echo "=== og_create exact successful pattern ==="
+            echo "COMMAND: og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8k baseDir=. instrument=SPI"
+            cat ./scw_input.list
+          } > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OG_CREATE.log
 
-      og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8k baseDir=. instrument=SPI >> /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OG_CREATE.log 2>&1
-      og_ec=$?
-      echo "OG_CREATE_EXIT=$og_ec" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OG_CREATE_EXIT.txt
+          og_create idxSwg=./scw_input.list ogid=acirm_r17k_r8k baseDir=. instrument=SPI >> /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OG_CREATE.log 2>&1
+          og_ec=$?
+          echo "OG_CREATE_EXIT=$og_ec" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OG_CREATE_EXIT.txt
 
-      first_og=$(find /home/integral/obswork /home/integral -type f -name 'og_spi.fits' 2>/dev/null | head -1)
-      echo "$first_og" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_FIRST_OG_SPI_PATH.txt
-      if [ -n "$first_og" ]; then
-        cp "$first_og" /home/integral/selected_products/og_spi.fits 2>/dev/null || true
-      else
-        echo "NO_OG_SPI_CREATED_SKIP_SPI_SCIENCE" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_ANALYSIS_EXIT.txt
-        exit 0
-      fi
+          first_og=$(find /home/integral/obswork /home/integral -type f -name 'og_spi.fits' 2>/dev/null | head -1)
+          echo "$first_og" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_FIRST_OG_SPI_PATH.txt
+          if [ -n "$first_og" ]; then
+            cp "$first_og" /home/integral/selected_products/og_spi.fits 2>/dev/null || true
+          else
+            echo "NO_OG_SPI_CREATED_SKIP_SPI_SCIENCE" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_ANALYSIS_EXIT.txt
+            exit 0
+          fi
 
-      og_dir=$(dirname "$first_og")
-      cd "$og_dir"
+          og_dir=$(dirname "$first_og")
+          cd "$og_dir"
 
-      cat > /home/integral/spi_cmd.sh <<'CMD'
-      # R8K: only actual parameter names from spi_science_analysis.par.
-      # Removed bogus R8J params: add_mocksour, orbital_motion, asini, orbital_period, T90, eccentricity, omega_d, pporb.
-      spi_science_analysis \
-        obs_group=og_spi.fits \
-        clobber=yes \
-        run_cat_extract=no \
-        run_pointing=yes \
-        run_binning=yes \
-        run_background=no \
-        run_simulation=no \
-        run_spiros=no \
-        run_phase_analysis=no \
-        run_gaincorrection=no \
-        run_fullcheck=no \
-        detectors="0-18" \
-        catalog="" \
-        coordinates=RADEC \
-        cat_extract_fluxMin=0.001 \
-        cat_extract_fluxMax=1000 \
-        use_pointing_filter=yes \
-        spibounds_nregions=3 \
-        spibounds_regions="490,500,508,514,522,532" \
-        spibounds_nbins="1,1,1" \
-        spi_phase_hist_ephemDOL="ephemeris.fits" \
-        spi_phase_hist_phaseBinNum=0 \
-        spi_phase_hist_phaseSameWidthBin=yes \
-        spi_phase_hist_phaseBounds="0" \
-        spi_phase_hist_phaseSubtractOff=no \
-        spi_phase_hist_phaseOffNum=0 \
-        spi_phase_hist_orbit=no \
-        spi_phase_hist_asini=0 \
-        spi_phase_hist_porb=0 \
-        spi_phase_hist_T90epoch=0 \
-        spi_phase_hist_ecc=0 \
-        spi_phase_hist_omega_d=0 \
-        spi_phase_hist_pporb=0 \
-        spi_add_sim_SrcLong=0 \
-        spi_add_sim_SrcLat=0 \
-        spi_add_sim_FluxScale=0 \
-        use_background_flatfields=no \
-        use_background_templates=no \
-        use_background_models=no \
-        spi_flatfield_ptsNbConstBack=5 \
-        loc_spiflatfield_dol="" \
-        spi_flatfield_single=no \
-        spi_templates_type="GEDSAT" \
-        spi_templates_scaling=no \
-        spi_obs_back_nmodel=0
-      CMD
-      chmod +x /home/integral/spi_cmd.sh
-      cp /home/integral/spi_cmd.sh /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_DIRECT_COMMAND.sh 2>/dev/null || true
+          cat > /home/integral/spi_cmd.sh <<'CMD'
+          spi_science_analysis \
+            obs_group=og_spi.fits \
+            clobber=yes \
+            run_cat_extract=no \
+            run_pointing=yes \
+            run_binning=yes \
+            run_background=no \
+            run_simulation=no \
+            run_spiros=no \
+            run_phase_analysis=no \
+            run_gaincorrection=no \
+            run_fullcheck=no \
+            detectors="0-18" \
+            catalog="" \
+            coordinates=RADEC \
+            cat_extract_fluxMin=0.001 \
+            cat_extract_fluxMax=1000 \
+            use_pointing_filter=yes \
+            spibounds_nregions=3 \
+            spibounds_regions="490,500,508,514,522,532" \
+            spibounds_nbins="1,1,1" \
+            spi_phase_hist_ephemDOL="ephemeris.fits" \
+            spi_phase_hist_phaseBinNum=0 \
+            spi_phase_hist_phaseSameWidthBin=yes \
+            spi_phase_hist_phaseBounds="0" \
+            spi_phase_hist_phaseSubtractOff=no \
+            spi_phase_hist_phaseOffNum=0 \
+            spi_phase_hist_orbit=no \
+            spi_phase_hist_asini=0 \
+            spi_phase_hist_porb=0 \
+            spi_phase_hist_T90epoch=0 \
+            spi_phase_hist_ecc=0 \
+            spi_phase_hist_omega_d=0 \
+            spi_phase_hist_pporb=0 \
+            spi_add_sim_SrcLong=0 \
+            spi_add_sim_SrcLat=0 \
+            spi_add_sim_FluxScale=0 \
+            use_background_flatfields=no \
+            use_background_templates=no \
+            use_background_models=no \
+            spi_flatfield_ptsNbConstBack=5 \
+            loc_spiflatfield_dol="" \
+            spi_flatfield_single=no \
+            spi_templates_type="GEDSAT" \
+            spi_templates_scaling=no \
+            spi_obs_back_nmodel=0
+          CMD
+          chmod +x /home/integral/spi_cmd.sh
+          cp /home/integral/spi_cmd.sh /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_DIRECT_COMMAND.sh 2>/dev/null || true
 
-      {
-        echo "=== SPI science direct-params attempt ==="
-        echo "PWD=$(pwd)"
-        echo "OG=$first_og"
-        echo "PFILES=$PFILES"
-        echo "command_file=/home/integral/spi_cmd.sh"
-      } > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_CONTEXT.txt
+          {
+            echo "=== SPI science direct-params attempt ==="
+            echo "PWD=$(pwd)"
+            echo "OG=$first_og"
+            echo "PFILES=$PFILES"
+            echo "command_file=/home/integral/spi_cmd.sh"
+          } > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_CONTEXT.txt
 
-      set -o pipefail
-      timeout 100m bash -lc '/home/integral/spi_cmd.sh < /dev/null' 2>&1 | awk '
-        NR <= 12000 { print; next }
-        /Error_|Log_|Task|terminating|created|evts|spectra|energy|bound|Exception|PIL_|spi_/ { print }
-        NR == 12001 { print "... ACIRM_LOG_TRUNCATED_AFTER_12000_LINES ..." }
-      ' > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_STDOUT_FILTERED.log
-      spi_ec=${PIPESTATUS[0]}
-      echo "SPI_SCIENCE_ANALYSIS_CLEAN_DIRECT_PARAMS_EXIT=$spi_ec" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_ANALYSIS_EXIT.txt
+          set -o pipefail
+          timeout 100m bash -lc '/home/integral/spi_cmd.sh < /dev/null' 2>&1 | awk '
+            NR <= 12000 { print; next }
+            /Error_|Log_|Task|terminating|created|evts|spectra|energy|bound|Exception|PIL_|spi_/ { print }
+            NR == 12001 { print "... ACIRM_LOG_TRUNCATED_AFTER_12000_LINES ..." }
+          ' > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_STDOUT_FILTERED.log
+          spi_ec=${PIPESTATUS[0]}
+          echo "SPI_SCIENCE_ANALYSIS_CLEAN_DIRECT_PARAMS_EXIT=$spi_ec" > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SPI_SCIENCE_ANALYSIS_EXIT.txt
 
-      find /home/integral -type f -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' -o -iname '*spi*spect*' 2>/dev/null | sort > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_PRODUCTS_FOUND.txt
-      while read -r f; do
-        [ -f "$f" ] || continue
-        size=$(stat -c%s "$f" 2>/dev/null || echo 0)
-        if [ "$size" -le 200000000 ]; then cp -f "$f" /home/integral/selected_products/ 2>/dev/null || true; fi
-      done < /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_PRODUCTS_FOUND.txt
-      SH
-      chmod +x scripts/r17k_r8k_inside_osa.sh
+          find /home/integral -type f \( -iname '*evts*det*spec*' -o -iname '*energy*bound*' -o -iname '*ebounds*' -o -iname 'og_spi.fits' -o -iname '*spi*spect*' \) 2>/dev/null | sort > /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_PRODUCTS_FOUND.txt
+          while read -r f; do
+            [ -f "$f" ] || continue
+            size=$(stat -c%s "$f" 2>/dev/null || echo 0)
+            if [ "$size" -le 200000000 ]; then cp -f "$f" /home/integral/selected_products/ 2>/dev/null || true; fi
+          done < /home/integral/ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_PRODUCTS_FOUND.txt
+          SH
+          chmod +x scripts/r17k_r8k_inside_osa.sh
 
-  - name: Run OSA R8J direct params
-    shell: bash
-    run: |
-      set +e
-      docker run --rm \
-        -v "$PWD:/home/integral" \
-        -v "$PWD/repo/scw:/data/scw:ro" \
-        -v "$PWD/repo/aux:/data/aux:ro" \
-        -v "$PWD/repo/ic:/data/ic:ro" \
-        -v "$PWD/repo/idx:/data/idx:ro" \
-        -v "$PWD/repo/cat:/data/cat:ro" \
-        --entrypoint="" \
-        integralsw/osa:latest bash -lc 'bash /home/integral/scripts/r17k_r8k_inside_osa.sh' > logs/r17k_r8k_osa_run.log 2>&1
-      echo "R17K_R8K_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OSA_RUN_EXIT.txt
+      - name: Run OSA R8K direct params
+        shell: bash
+        run: |
+          set +e
+          docker run --rm \
+            -v "$PWD:/home/integral" \
+            -v "$PWD/repo/scw:/data/scw:ro" \
+            -v "$PWD/repo/aux:/data/aux:ro" \
+            -v "$PWD/repo/ic:/data/ic:ro" \
+            -v "$PWD/repo/idx:/data/idx:ro" \
+            -v "$PWD/repo/cat:/data/cat:ro" \
+            --entrypoint="" \
+            integralsw/osa:latest bash -lc 'bash /home/integral/scripts/r17k_r8k_inside_osa.sh' > logs/r17k_r8k_osa_run.log 2>&1
+          echo "R17K_R8K_OSA_RUN_EXIT=$?" | tee ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_OSA_RUN_EXIT.txt
 
-  - name: Inspect selected products and 511 rows
-    shell: bash
-    run: |
-      set +e
-      cp logs/*.log ACIRM_R17K_R8K_OUTPUTS/ 2>/dev/null || true
-      find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SELECTED_PRODUCTS_MANIFEST.csv || true
+      - name: Inspect selected products and 511 rows
+        shell: bash
+        run: |
+          set +e
+          cp logs/*.log ACIRM_R17K_R8K_OUTPUTS/ 2>/dev/null || true
+          find selected_products -maxdepth 1 -type f -printf '%f,%s\n' | sort > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_SELECTED_PRODUCTS_MANIFEST.csv || true
 
-      cat > scripts/inspect_final.py <<'PY'
-      import json, csv, math
-      from pathlib import Path
-      import numpy as np
-      try:
-          from astropy.io import fits
-      except Exception:
-          fits = None
+          cat > scripts/inspect_final.py <<'PY'
+          import json, csv, math
+          from pathlib import Path
+          import numpy as np
+          try:
+              from astropy.io import fits
+          except Exception:
+              fits = None
 
-      OUT=Path('ACIRM_R17K_R8K_OUTPUTS')
-      PROD=Path('selected_products')
-      rows=[]; meas=[]; errs=[]
-      LINE=(508.0,514.0); SB1=(490.0,500.0); SB2=(522.0,532.0)
-      E_PAIRS=[('E_MIN','E_MAX'),('ENERG_LO','ENERG_HI'),('ENERGY_LO','ENERGY_HI'),('E_LO','E_HI'),('EMIN','EMAX'),('E_LOW','E_HIGH')]
-      E_SINGLE=['ENERGY','E','E_MEAN','E_CENTER','PI','PHA','CHANNEL','CHAN']
-      C_COLS=['COUNTS','COUNT','RATE','SPECTRUM','SPEC','DATA','FLUX','VALUE','NCOUNTS']
+          OUT=Path('ACIRM_R17K_R8K_OUTPUTS')
+          PROD=Path('selected_products')
+          rows=[]; meas=[]; errs=[]
+          LINE=(508.0,514.0); SB1=(490.0,500.0); SB2=(522.0,532.0)
+          E_PAIRS=[('E_MIN','E_MAX'),('ENERG_LO','ENERG_HI'),('ENERGY_LO','ENERGY_HI'),('E_LO','E_HI'),('EMIN','EMAX'),('E_LOW','E_HIGH')]
+          E_SINGLE=['ENERGY','E','E_MEAN','E_CENTER','PI','PHA','CHANNEL','CHAN']
+          C_COLS=['COUNTS','COUNT','RATE','SPECTRUM','SPEC','DATA','FLUX','VALUE','NCOUNTS']
 
-      def arr(x): return np.asarray(x,dtype=float)
-      def collapse(x,n):
-          a=np.nan_to_num(arr(x),nan=0.0,posinf=0.0,neginf=0.0)
-          if a.size==n: return a.reshape(-1)[:n]
-          if a.ndim>=2 and a.shape[-1]==n: return a.sum(axis=tuple(range(a.ndim-1))).reshape(-1)
-          if a.ndim>=2 and a.shape[0]==n: return a.sum(axis=tuple(range(1,a.ndim))).reshape(-1)
-          return None
+          def arr(x): return np.asarray(x,dtype=float)
+          def collapse(x,n):
+              a=np.nan_to_num(arr(x),nan=0.0,posinf=0.0,neginf=0.0)
+              if a.size==n: return a.reshape(-1)[:n]
+              if a.ndim>=2 and a.shape[-1]==n: return a.sum(axis=tuple(range(a.ndim-1))).reshape(-1)
+              if a.ndim>=2 and a.shape[0]==n: return a.sum(axis=tuple(range(1,a.ndim))).reshape(-1)
+              return None
 
-      def measure_edges(lo,hi,cnt):
-          lo=arr(lo).reshape(-1); hi=arr(hi).reshape(-1); n=min(len(lo),len(hi))
-          if n==0: return None
-          lo=lo[:n]; hi=hi[:n]; c=collapse(cnt,n)
-          if c is None: return None
-          width=np.maximum(1e-12,hi-lo)
-          def frac(w): return np.maximum(0,np.minimum(hi,w[1])-np.maximum(lo,w[0]))/width
-          line=float((c*frac(LINE)).sum()); sb1=float((c*frac(SB1)).sum()); sb2=float((c*frac(SB2)).sum()); side=sb1+sb2
-          ratio=(line/6)/(side/20) if side>0 else math.inf
-          exp=side/20*6 if side>0 else math.nan
-          z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
-          return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':n}
+          def measure_edges(lo,hi,cnt):
+              lo=arr(lo).reshape(-1); hi=arr(hi).reshape(-1); n=min(len(lo),len(hi))
+              if n==0: return None
+              lo=lo[:n]; hi=hi[:n]; c=collapse(cnt,n)
+              if c is None: return None
+              width=np.maximum(1e-12,hi-lo)
+              def frac(w): return np.maximum(0,np.minimum(hi,w[1])-np.maximum(lo,w[0]))/width
+              line=float((c*frac(LINE)).sum()); sb1=float((c*frac(SB1)).sum()); sb2=float((c*frac(SB2)).sum()); side=sb1+sb2
+              ratio=(line/6)/(side/20) if side>0 else math.inf
+              exp=side/20*6 if side>0 else math.nan
+              z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
+              return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':n}
 
-      def measure_centers(e,cnt):
-          e=arr(e).reshape(-1); c=collapse(cnt,len(e))
-          if c is None or len(e)==0: return None
-          line=float(np.nansum(c[(e>=LINE[0])&(e<=LINE[1])]))
-          sb1=float(np.nansum(c[(e>=SB1[0])&(e<=SB1[1])]))
-          sb2=float(np.nansum(c[(e>=SB2[0])&(e<=SB2[1])]))
-          side=sb1+sb2
-          ratio=(line/6)/(side/20) if side>0 else math.inf
-          exp=side/20*6 if side>0 else math.nan
-          z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
-          return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':len(e)}
+          def measure_centers(e,cnt):
+              e=arr(e).reshape(-1); c=collapse(cnt,len(e))
+              if c is None or len(e)==0: return None
+              line=float(np.nansum(c[(e>=LINE[0])&(e<=LINE[1])]))
+              sb1=float(np.nansum(c[(e>=SB1[0])&(e<=SB1[1])]))
+              sb2=float(np.nansum(c[(e>=SB2[0])&(e<=SB2[1])]))
+              side=sb1+sb2
+              ratio=(line/6)/(side/20) if side>0 else math.inf
+              exp=side/20*6 if side>0 else math.nan
+              z=(line-exp)/math.sqrt(exp) if exp and exp>0 else math.nan
+              return {'line_508_514_counts':line,'side_490_500_counts':sb1,'side_522_532_counts':sb2,'side_total_counts':side,'line_to_side_density_ratio':ratio,'expected_line_from_side_density':exp,'z_vs_side_density':z,'energy_bins':len(e)}
 
-      if fits:
-          for p in PROD.glob('*'):
-              if not p.name.lower().endswith(('.fits','.fit','.fits.gz','.fit.gz')): continue
-              try:
-                  with fits.open(p,memmap=True) as hdul:
-                      for i,hdu in enumerate(hdul):
-                          cols=[]; nrows=''
-                          if hasattr(hdu,'columns') and hdu.columns is not None: cols=list(hdu.columns.names or [])
-                          try: nrows=len(hdu.data) if getattr(hdu,'data',None) is not None else ''
-                          except Exception: nrows=''
-                          rows.append({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'class':hdu.__class__.__name__,'rows':nrows,'column_count':len(cols),'columns':';'.join(cols[:120])})
-                          if not (hasattr(hdu,'columns') and hdu.columns is not None and hdu.data is not None): continue
-                          cmap={c.upper():c for c in cols}
-                          for a,b in E_PAIRS:
-                              if a in cmap and b in cmap:
-                                  for ck in C_COLS:
-                                      if ck in cmap:
-                                          m=measure_edges(hdu.data[cmap[a]],hdu.data[cmap[b]],hdu.data[cmap[ck]])
-                                          if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_edges','energy_source':cmap[a]+'|'+cmap[b], 'count_source':cmap[ck]}); meas.append(m)
-                          for ek in E_SINGLE:
-                              if ek in cmap:
-                                  for ck in C_COLS:
-                                      if ck in cmap and ck!=ek:
-                                          m=measure_centers(hdu.data[cmap[ek]],hdu.data[cmap[ck]])
-                                          if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_centers','energy_source':cmap[ek], 'count_source':cmap[ck]}); meas.append(m)
-              except Exception as e:
-                  errs.append({'file':str(p),'error':repr(e)[:300]})
+          if fits:
+              for p in PROD.glob('*'):
+                  if not p.name.lower().endswith(('.fits','.fit','.fits.gz','.fit.gz')): continue
+                  try:
+                      with fits.open(p,memmap=True) as hdul:
+                          for i,hdu in enumerate(hdul):
+                              cols=[]; nrows=''
+                              if hasattr(hdu,'columns') and hdu.columns is not None: cols=list(hdu.columns.names or [])
+                              try: nrows=len(hdu.data) if getattr(hdu,'data',None) is not None else ''
+                              except Exception: nrows=''
+                              rows.append({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'class':hdu.__class__.__name__,'rows':nrows,'column_count':len(cols),'columns':';'.join(cols[:120])})
+                              if not (hasattr(hdu,'columns') and hdu.columns is not None and hdu.data is not None): continue
+                              cmap={c.upper():c for c in cols}
+                              for a,b in E_PAIRS:
+                                  if a in cmap and b in cmap:
+                                      for ck in C_COLS:
+                                          if ck in cmap:
+                                              m=measure_edges(hdu.data[cmap[a]],hdu.data[cmap[b]],hdu.data[cmap[ck]])
+                                              if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_edges','energy_source':cmap[a]+'|'+cmap[b], 'count_source':cmap[ck]}); meas.append(m)
+                              for ek in E_SINGLE:
+                                  if ek in cmap:
+                                      for ck in C_COLS:
+                                          if ck in cmap and ck!=ek:
+                                              m=measure_centers(hdu.data[cmap[ek]],hdu.data[cmap[ck]])
+                                              if m: m.update({'file':p.name,'hdu_index':i,'hdu_name':hdu.name or '', 'method':'same_hdu_centers','energy_source':cmap[ek], 'count_source':cmap[ck]}); meas.append(m)
+                  except Exception as e:
+                      errs.append({'file':str(p),'error':repr(e)[:300]})
 
-      def write_csv(path,data):
-          keys=[]
-          for r in data:
-              for k in r:
-                  if k not in keys: keys.append(k)
-          if not keys: keys=['empty']
-          with open(path,'w',newline='',encoding='utf-8') as f:
-              w=csv.DictWriter(f,fieldnames=keys); w.writeheader()
-              for r in data: w.writerow({k:r.get(k,'') for k in keys})
+          def write_csv(path,data):
+              keys=[]
+              for r in data:
+                  for k in r:
+                      if k not in keys: keys.append(k)
+              if not keys: keys=['empty']
+              with open(path,'w',newline='',encoding='utf-8') as f:
+                  w=csv.DictWriter(f,fieldnames=keys); w.writeheader()
+                  for r in data: w.writerow({k:r.get(k,'') for k in keys})
 
-      write_csv(OUT/'R17K_R8K_SELECTED_PRODUCT_SCHEMA.csv',rows)
-      write_csv(OUT/'R17K_R8K_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
-      (OUT/'R17K_R8K_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
+          write_csv(OUT/'R17K_R8K_SELECTED_PRODUCT_SCHEMA.csv',rows)
+          write_csv(OUT/'R17K_R8K_DIRECT_511_MEASUREMENT_ROWS.csv',meas)
+          (OUT/'R17K_R8K_PRODUCT_INSPECTION_ERRORS.json').write_text(json.dumps(errs,indent=2),encoding='utf-8')
 
-      selected=list(PROD.glob('*'))
-      og_path=(OUT/'R17K_R8K_FIRST_OG_SPI_PATH.txt')
-      og_success=og_path.exists() and bool(og_path.read_text(errors='replace').strip())
-      decision='R17K_R8K_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS'
-      if og_success: decision='R17K_R8K_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF'
-      if any(('evts' in p.name.lower() or 'energy' in p.name.lower() or 'ebounds' in p.name.lower()) for p in selected): decision='R17K_R8K_OFFICIAL_SPI_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
-      if meas: decision='R17K_R8K_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
-      summary={'decision':decision,'proof_allowed':False,'selected_product_count':len(selected),'og_success':og_success,'direct_511_measurement_rows':len(meas),'schema_rows':len(rows),'claim_ceiling':['OFFICIAL_OSA_SPI_SCIENCE_DIRECT_PARAMETER_ATTEMPT','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_LOCKED_CONTROLS_PASS']}
-      (OUT/'R17K_R8K_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
-      PY
+          selected=list(PROD.glob('*'))
+          og_path=(OUT/'R17K_R8K_FIRST_OG_SPI_PATH.txt')
+          og_success=og_path.exists() and bool(og_path.read_text(errors='replace').strip())
+          decision='R17K_R8K_NO_OG_SPI_CREATED_NO_OFFICIAL_PRODUCTS'
+          if og_success: decision='R17K_R8K_OG_SPI_CREATED_DIAGNOSTIC_NOT_PROOF'
+          if any(('evts' in p.name.lower() or 'energy' in p.name.lower() or 'ebounds' in p.name.lower()) for p in selected): decision='R17K_R8K_OFFICIAL_SPI_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          if meas: decision='R17K_R8K_DIRECT_511_ROWS_FROM_OFFICIAL_PRODUCTS_FOUND_DIAGNOSTIC_NOT_PROOF'
+          summary={'decision':decision,'proof_allowed':False,'selected_product_count':len(selected),'og_success':og_success,'direct_511_measurement_rows':len(meas),'schema_rows':len(rows),'claim_ceiling':['OFFICIAL_OSA_SPI_SCIENCE_DIRECT_PARAMETER_ATTEMPT','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF_UNLESS_LOCKED_CONTROLS_PASS']}
+          (OUT/'R17K_R8K_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          PY
 
-      python3 scripts/inspect_final.py > logs/inspect_final.log 2>&1
+          python3 scripts/inspect_final.py > logs/inspect_final.log 2>&1
 
-  - name: Package slim artifact
-    shell: bash
-    run: |
-      set +e
-      cp logs/*.log ACIRM_R17K_R8K_OUTPUTS/ 2>/dev/null || true
-      cp -r selected_products ACIRM_R17K_R8K_OUTPUTS/selected_products 2>/dev/null || true
-      df -h > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_DF_END.txt
-      free -h > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_FREE_END.txt
-      zip -r ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8K_OUTPUTS > logs/zip_output.log 2>&1
-      sha256sum ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip > ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
-      ls -lh ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
+      - name: Package slim artifact
+        shell: bash
+        run: |
+          set +e
+          cp logs/*.log ACIRM_R17K_R8K_OUTPUTS/ 2>/dev/null || true
+          cp -r selected_products ACIRM_R17K_R8K_OUTPUTS/selected_products 2>/dev/null || true
+          df -h > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_DF_END.txt
+          free -h > ACIRM_R17K_R8K_OUTPUTS/R17K_R8K_FREE_END.txt
+          zip -r ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8K_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip > ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
 
-  - name: Upload slim artifact
-    uses: actions/upload-artifact@v4
-    with:
-      name: ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT
-      path: |
-        ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip
-        ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
-      retention-days: 7
+      - name: Upload slim artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT
+          path: |
+            ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip
+            ACIRM_R17K_R8K_CLEAN_DIRECT_PARAMS_SPI511_OUTPUT.zip.sha256.txt
+          retention-days: 7
