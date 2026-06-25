@@ -1,26 +1,26 @@
-name: ACIRM R17K R9C R2 Strict Trace Synthesis
+name: ACIRM R17K R9C R3 Direct Evidence Purifier
 
 on:
   workflow_dispatch:
     inputs:
       max_artifacts:
         required: false
-        default: '70'
+        default: '80'
       max_download_mb:
         required: false
-        default: '350'
+        default: '380'
       scan_limit_mb_per_file:
         required: false
-        default: '5'
+        default: '6'
 
 permissions:
   contents: read
   actions: read
 
 jobs:
-  r17k-r9c-r2-strict-trace-synthesis:
+  r17k-r9c-r3-direct-evidence-purifier:
     runs-on: ubuntu-latest
-    timeout-minutes: 80
+    timeout-minutes: 90
     env:
       MAX_ARTIFACTS: ${{ inputs.max_artifacts }}
       MAX_DOWNLOAD_MB: ${{ inputs.max_download_mb }}
@@ -38,22 +38,22 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_R9C_R2_OUTPUTS logs scripts artifact_bank extracted_artifacts
-          cat > ACIRM_R17K_R9C_R2_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R9C_R2_STRICT_TRACE_SYNTHESIS
-          FIXES R9C_R1 KEYWORD FALSE-POSITIVE RISK
+          mkdir -p ACIRM_R17K_R9C_R3_OUTPUTS logs scripts artifact_bank extracted_artifacts
+          cat > ACIRM_R17K_R9C_R3_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER
+          PURPOSE: PURIFY R9C_R2 STRICT TRACE SKELETON INTO DIRECT-EVIDENCE VS META-CHAIN
           USES PRIOR GITHUB ACTIONS ARTIFACTS / COMMITTED FILES ONLY
           NO LAT RERUN
           NO SPI RERUN
           NO NEW PHOTON OR EVENT FIT
-          STRICT EVIDENCE FILTER: DECISION / METRICS / LEDGER FILES PREFERRED; LOGS AND INVENTORIES DOWN-WEIGHTED
-          EXPLORATORY_TRACE_SYNTHESIS_ONLY
+          R9A/R9B/R9C locator/synthesis files may NOT prove minus14, photon alignment, LAT, or R21AX axes.
+          EXPLORATORY_TRACE_PURIFICATION_ONLY
           NOT_OFFICIAL_511_PROOF
           NOT_PARTICLE_PROOF
           NOT_SOURCE_ATTRIBUTION
           NOT_ACIRM_PROOF
           EOF
-          printf 'MAX_ARTIFACTS=%s\nMAX_DOWNLOAD_MB=%s\nSCAN_LIMIT_MB_PER_FILE=%s\nGH_REPO=%s\n' "$MAX_ARTIFACTS" "$MAX_DOWNLOAD_MB" "$SCAN_LIMIT_MB_PER_FILE" "$GH_REPO" > ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_INPUTS.txt
+          printf 'MAX_ARTIFACTS=%s\nMAX_DOWNLOAD_MB=%s\nSCAN_LIMIT_MB_PER_FILE=%s\nGH_REPO=%s\n' "$MAX_ARTIFACTS" "$MAX_DOWNLOAD_MB" "$SCAN_LIMIT_MB_PER_FILE" "$GH_REPO" > ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_INPUTS.txt
 
       - name: Install minimal tools
         shell: bash
@@ -66,11 +66,11 @@ jobs:
         shell: bash
         run: |
           set +e
-          echo 'artifact_id,name,size_in_bytes,created_at,status,path,error' > ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_ARTIFACT_DOWNLOAD_MANIFEST.csv
-          max_art="${MAX_ARTIFACTS:-70}"
+          echo 'artifact_id,name,size_in_bytes,created_at,status,path,error' > ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_ARTIFACT_DOWNLOAD_MANIFEST.csv
+          max_art="${MAX_ARTIFACTS:-80}"
           cap_bytes=$(python3 - <<'PY'
           import os
-          print(int(float(os.environ.get('MAX_DOWNLOAD_MB','350'))*1024*1024))
+          print(int(float(os.environ.get('MAX_DOWNLOAD_MB','380'))*1024*1024))
           PY
           )
           downloaded=0
@@ -80,20 +80,13 @@ jobs:
           page=1
           while [ "$page" -le 10 ] && [ "$downloaded" -lt "$max_art" ]; do
             api="https://api.github.com/repos/${GH_REPO}/actions/artifacts?per_page=100&page=${page}"
-            curl -fsS \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "$api" -o "logs/artifacts_page_${page}.json" 2>> logs/r9c_r2_curl_errors.log
-            if [ $? -ne 0 ]; then
-              echo "artifact_list_page_${page}_failed" >> logs/r9c_r2_curl_errors.log
-              break
-            fi
+            curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$api" -o "logs/artifacts_page_${page}.json" 2>> logs/r9c_r3_curl_errors.log
+            if [ $? -ne 0 ]; then echo "artifact_list_page_${page}_failed" >> logs/r9c_r3_curl_errors.log; break; fi
             count=$(jq '.artifacts | length' "logs/artifacts_page_${page}.json" 2>/dev/null || echo 0)
             if [ "$count" = "0" ]; then break; fi
             jq -r '.artifacts[] | select(.expired == false) | [.id,.name,.size_in_bytes,.created_at,.archive_download_url] | @tsv' "logs/artifacts_page_${page}.json" > "logs/artifacts_page_${page}.tsv"
             while IFS=$'\t' read -r aid aname asize created aurl; do
-              echo "$aname" | grep -Eiq 'ACIRM|R17K|R8Y|R8Z|R9A|R9B|R21AX|R7E|R7F|R6|LAT|SPI511|511|PHOTON|TRACE|minus14|R9C' || continue
+              echo "$aname" | grep -Eiq 'ACIRM|R17K|R8Y|R8Z|R8X|R8W|R9A|R9B|R9C|R21AX|R7E|R7F|R6|LAT|SPI511|511|PHOTON|TRACE|minus14|R13M|R10' || continue
               candidates=$((candidates+1))
               safe=$(python3 - <<PY
           import re
@@ -104,25 +97,17 @@ jobs:
               dest="artifact_bank/${safe}__artifact_${aid}.zip"
               if [ -z "$asize" ]; then asize=0; fi
               if [ $((total + asize)) -gt "$cap_bytes" ]; then
-                printf '%s,%s,%s,%s,%s,%s,%s\n' "$aid" "$aname" "$asize" "$created" "SKIP_SIZE_CAP" "$dest" "size cap" >> ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_ARTIFACT_DOWNLOAD_MANIFEST.csv
+                printf '%s,%s,%s,%s,%s,%s,%s\n' "$aid" "$aname" "$asize" "$created" "SKIP_SIZE_CAP" "$dest" "size cap" >> ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_ARTIFACT_DOWNLOAD_MANIFEST.csv
                 continue
               fi
-              curl -fL --retry 2 --retry-delay 2 \
-                -H "Authorization: Bearer ${GH_TOKEN}" \
-                -H "Accept: application/vnd.github+json" \
-                -H "X-GitHub-Api-Version: 2022-11-28" \
-                "$aurl" -o "$dest" > "logs/download_${aid}.log" 2>&1
+              curl -fL --retry 2 --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$aurl" -o "$dest" > "logs/download_${aid}.log" 2>&1
               rc=$?
               if [ "$rc" -eq 0 ] && unzip -t "$dest" > "logs/unzip_test_${aid}.log" 2>&1; then
-                sz=$(stat -c%s "$dest" 2>/dev/null || echo 0)
-                total=$((total + sz))
-                downloaded=$((downloaded + 1))
-                printf '%s,%s,%s,%s,%s,%s,%s\n' "$aid" "$aname" "$asize" "$created" "OK" "$dest" "" >> ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_ARTIFACT_DOWNLOAD_MANIFEST.csv
+                sz=$(stat -c%s "$dest" 2>/dev/null || echo 0); total=$((total + sz)); downloaded=$((downloaded + 1))
+                printf '%s,%s,%s,%s,%s,%s,%s\n' "$aid" "$aname" "$asize" "$created" "OK" "$dest" "" >> ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_ARTIFACT_DOWNLOAD_MANIFEST.csv
               else
-                err=$(tail -c 220 "logs/download_${aid}.log" 2>/dev/null | tr '\n,' '  ')
-                errors=$((errors + 1))
-                rm -f "$dest"
-                printf '%s,%s,%s,%s,%s,%s,%s\n' "$aid" "$aname" "$asize" "$created" "DOWNLOAD_FAIL" "$dest" "$err" >> ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_ARTIFACT_DOWNLOAD_MANIFEST.csv
+                err=$(tail -c 220 "logs/download_${aid}.log" 2>/dev/null | tr '\n,' '  '); errors=$((errors + 1)); rm -f "$dest"
+                printf '%s,%s,%s,%s,%s,%s,%s\n' "$aid" "$aname" "$asize" "$created" "DOWNLOAD_FAIL" "$dest" "$err" >> ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_ARTIFACT_DOWNLOAD_MANIFEST.csv
               fi
               if [ "$downloaded" -ge "$max_art" ]; then break; fi
               if [ "$total" -ge "$cap_bytes" ]; then break; fi
@@ -132,45 +117,47 @@ jobs:
           python3 - <<PY
           import json
           summary={'downloaded_artifact_count':int(${downloaded}),'downloaded_bytes':int(${total}),'candidate_count_seen':int(${candidates}),'error_count':int(${errors}),'method':'curl_L_redirect_safe'}
-          open('ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_ARTIFACT_DOWNLOAD_SUMMARY.json','w').write(json.dumps(summary,indent=2))
+          open('ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_ARTIFACT_DOWNLOAD_SUMMARY.json','w').write(json.dumps(summary,indent=2))
           PY
-          echo "FETCH_EXIT=0" | tee ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_FETCH_EXIT.txt
+          echo "FETCH_EXIT=0" | tee ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_FETCH_EXIT.txt
 
       - name: Copy optional committed ACIRM zip packages
         shell: bash
         run: |
           set +e
-          find . -maxdepth 4 -type f -name '*ACIRM*.zip' ! -path './artifact_bank/*' ! -path './extracted_artifacts/*' -printf '%p\n' | sort > ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_COMMITTED_ZIP_CANDIDATES.txt
+          find . -maxdepth 4 -type f -name '*ACIRM*.zip' ! -path './artifact_bank/*' ! -path './extracted_artifacts/*' -printf '%p\n' | sort > ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_COMMITTED_ZIP_CANDIDATES.txt
           n=0
           while IFS= read -r z; do
             [ -f "$z" ] || continue
             safe=$(basename "$z" | tr -c 'A-Za-z0-9._-' '_')
             cp "$z" "artifact_bank/COMMITTED_${safe}" 2>/dev/null && n=$((n+1))
-          done < ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_COMMITTED_ZIP_CANDIDATES.txt
-          echo "committed_zip_copied_count=$n" > ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_COMMITTED_ZIP_SUMMARY.txt
+          done < ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_COMMITTED_ZIP_CANDIDATES.txt
+          echo "committed_zip_copied_count=$n" > ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_COMMITTED_ZIP_SUMMARY.txt
 
-      - name: Strict evidence synthesis
+      - name: Direct evidence purification
         shell: bash
         run: |
           set +e
-          cat > scripts/r9c_r2_strict.py <<'PY'
+          cat > scripts/r9c_r3_direct_purifier.py <<'PY'
+
           import csv, json, os, re, zipfile, hashlib
           from pathlib import Path
-          OUT=Path('ACIRM_R17K_R9C_R2_OUTPUTS'); BANK=Path('artifact_bank'); EXT=Path('extracted_artifacts')
+          OUT=Path('ACIRM_R17K_R9C_R3_OUTPUTS'); BANK=Path('artifact_bank'); EXT=Path('extracted_artifacts')
           EXT.mkdir(exist_ok=True)
-          limit=int(float(os.environ.get('SCAN_LIMIT_MB_PER_FILE','5'))*1024*1024)
-          errors=[]; extracted=[]; docs=[]; selected=[]; gates=[]; ledger=[]
-          noisy_terms=['manifest','inventory','file_sizes','df_end','free_end','download','apt_','pip_','curl','unzip_test','logs__','_errors']
-          preferred_terms=['decision.json','target_metrics','bootstrap_summary','poisson_tails','trace_ledger','reverse_trace_ledger','report_ar','synthesis_report','key_metrics','status.txt']
-          def safe(s): return re.sub(r'[^A-Za-z0-9._-]+','_',s)[:170]
+          limit=int(float(os.environ.get('SCAN_LIMIT_MB_PER_FILE','6'))*1024*1024)
+          errors=[]; extracted=[]; docs=[]; accepted=[]; rejected=[]; gates=[]; ledger=[]
+          allowed_suffix={'.txt','.md','.json','.csv','.log','.yml','.yaml','.tex'}
+          preferred=['decision.json','target_metrics','key_metrics','bootstrap_summary','poisson_tails','trace_ledger','reverse_trace_ledger','report_ar','closure_report','synthesis_report','status.txt','results_explanation']
+          meta_marker=['r9a_','r9b_','r9c_','locator','synthesis','next_steps','artifact_hits','download_manifest','extracted_file_manifest','file_sizes','inventory','df_end','free_end','apt_','pip_','curl','unzip_test','logs__','_errors','scan_errors']
+          def safe(s): return re.sub(r'[^A-Za-z0-9._-]+','_',s)[:180]
           def extract(zpath,dest,depth=0):
               if depth>3: return
               try:
                   with zipfile.ZipFile(zpath) as z:
                       bad=z.testzip()
                       if bad: errors.append({'stage':'zip_test','zip':str(zpath),'bad':bad})
-                      for m in z.infolist()[:3500]:
-                          if m.is_dir() or m.file_size>35*1024*1024: continue
+                      for m in z.infolist()[:4000]:
+                          if m.is_dir() or m.file_size>40*1024*1024: continue
                           if '..' in Path(m.filename).parts: continue
                           out=dest/safe(m.filename.replace('/','__'))
                           out.parent.mkdir(parents=True,exist_ok=True)
@@ -179,97 +166,106 @@ jobs:
                               extracted.append({'zip':str(zpath),'member':m.filename,'size':m.file_size,'path':str(out)})
                               if out.suffix.lower()=='.zip':
                                   nd=dest/(out.stem+'_unzipped'); nd.mkdir(exist_ok=True); extract(out,nd,depth+1)
-                          except Exception as e: errors.append({'stage':'member_extract','zip':str(zpath),'member':m.filename,'error':repr(e)[:220]})
-              except Exception as e: errors.append({'stage':'zip_extract','zip':str(zpath),'error':repr(e)[:220]})
+                          except Exception as e: errors.append({'stage':'member_extract','zip':str(zpath),'member':m.filename,'error':repr(e)[:240]})
+              except Exception as e: errors.append({'stage':'zip_extract','zip':str(zpath),'error':repr(e)[:240]})
           for z in sorted(BANK.glob('*.zip')):
               d=EXT/safe(z.stem); d.mkdir(exist_ok=True); extract(z,d,0)
-          allowed={'.txt','.md','.json','.csv','.log','.yml','.yaml','.tex'}
-          def has_any(text, terms): return any(t.lower() in text for t in terms)
-          def file_quality(path):
+          def quality(path):
               pl=str(path).lower()
-              pref=sum(1 for t in preferred_terms if t in pl)
-              noise=sum(1 for t in noisy_terms if t in pl)
-              if pref>=1 and noise==0: return 'HIGH'
-              if pref>=1 and noise<=1: return 'MEDIUM'
-              if noise>=1: return 'LOW'
-              return 'MEDIUM'
-          def classify(path, txt):
-              low=txt.lower(); pl=str(path).lower(); groups=[]; evidence=[]
-              if (('r8y' in pl or 'r8z' in pl or 'r9a' in pl or 'r17k_r8y' in low or 'r17k_r8z' in low or 'r17k_r9a' in low) and ('511' in low) and (('507-515' in low) or ('508-514' in low) or ('broad_507_515' in low))):
-                  groups.append('spi511_response'); evidence.append('SPI511 governed/broad/locked metrics context')
-              if ('r9a' in pl or 'r17k_r9a' in low) and ('exploratory' in low) and ('official_backtrace' in low or 'backtrace_permission' in low or 'reverse_trace' in low):
-                  groups.append('r9a_trace_open'); evidence.append('R9A exploratory permission governance')
-              if ('minus14' in low or 'minus 14' in low or '-14' in low) and has_any(low,['r21ax','r7e','r7f','precursor','preparatory','shoulder','phase-pair']):
-                  groups.append('minus14_precursor'); evidence.append('minus14/preparatory precursor context')
-              if ('photon_alignment' in low or 'photon alignment' in low or ('photon' in low and 'alignment' in low) or 'packet_n' in low or 'f_r9c' in low or '2239.664' in low):
-                  groups.append('photon_alignment'); evidence.append('photon alignment / phase-frequency context')
-              if ('r9c' in low) and has_any(low,['f_r9c','2239.664','m_eff','cyg x-1','cygx-1','cygnus']):
-                  groups.append('r9c_anchor'); evidence.append('R9C anchor with frequency/source metadata')
-              if ('lat' in low) and has_any(low,['plus21','+21','30-100','p5','delayed','fermi']):
-                  groups.append('lat_delayed'); evidence.append('LAT delayed / plus21 context')
-              if ('r21ax' in low) and has_any(low,['r7e','r7f','r6g','r6h','r6i','r6m','minus14','plus21']):
-                  groups.append('r21ax_branch'); evidence.append('R21AX branch context')
-              if has_any(low,['not_proof','not_discovery','not_source_attribution','not_particle_proof','diagnostic_not_proof','exploratory']):
-                  groups.append('claim_ceiling'); evidence.append('claim ceiling')
-              return groups,evidence
+              pref=sum(1 for t in preferred if t in pl)
+              meta=sum(1 for t in meta_marker if t in pl)
+              if pref>=1 and meta==0: return 'DIRECT_HIGH'
+              if pref>=1 and meta<=1: return 'DIRECT_MEDIUM'
+              if meta>=1: return 'META_OR_LOG'
+              return 'GENERAL_TEXT'
+          def is_meta_for_axis(path, axis):
+              pl=str(path).lower()
+              meta=any(t in pl for t in meta_marker)
+              if axis=='trace_governance':
+                  return False if ('r9a_' in pl and any(t in pl for t in ['decision','trace_ledger','reverse_trace_ledger','status'])) else meta
+              if axis=='spi511_response':
+                  if any(x in pl for x in ['r8y','r8z','r8x','r8w']) and any(t in pl for t in preferred): return False
+                  return meta or any(x in pl for x in ['r9a_','r9b_','r9c_'])
+              return meta or any(x in pl for x in ['r9a_','r9b_','r9c_'])
+          def direct_axes(path,txt):
+              low=txt.lower(); pl=str(path).lower(); axes=[]; reasons=[]
+              if not is_meta_for_axis(path,'spi511_response') and any(x in pl for x in ['r8w','r8x','r8y','r8z']) and ('511' in low) and (('507-515' in low) or ('508-514' in low) or ('broad_507_515' in low) or ('poisson_tail' in low) or ('bootstrap' in low)):
+                  axes.append('spi511_direct'); reasons.append('direct R8W/R8X/R8Y/R8Z SPI511 metric/governance file')
+              if not is_meta_for_axis(path,'trace_governance') and ('r9a' in pl or 'r17k_r9a' in low) and ('exploratory' in low) and (('official_backtrace' in low) or ('backtrace_permission' in low) or ('reverse_trace' in low)):
+                  axes.append('trace_governance_direct'); reasons.append('direct R9A governance/permission file')
+              if not is_meta_for_axis(path,'minus14') and any(x in (pl+' '+low) for x in ['r21ax','r7e','r7f','r6g','r6h','r6i','r6m','r7a']) and any(x in low for x in ['minus14','minus 14','-14','preparatory','shoulder','precursor','phase-pair']):
+                  axes.append('minus14_direct'); reasons.append('direct R21AX/R7/R6 minus14/preparatory branch file')
+              align_terms=['photon_alignment','photon alignment','phase alignment','packet_n','z2','rayleigh','phase_bin','aligned_photon']
+              r9c_terms=['f_r9c','2239.664','m_eff','f_raw','packet_n']
+              if not is_meta_for_axis(path,'alignment') and any(t in low for t in align_terms):
+                  axes.append('photon_alignment_direct'); reasons.append('direct photon/phase alignment metric language')
+              if not is_meta_for_axis(path,'r9c_anchor') and ('r9c' in low) and any(t in low for t in r9c_terms) and any(t in low for t in ['cyg','m_eff','f_r9c','2239.664','packet_n']):
+                  axes.append('r9c_anchor_direct'); reasons.append('direct R9C anchor/frequency metadata')
+              if not is_meta_for_axis(path,'lat') and ('lat' in low or 'fermi' in low) and any(t in low for t in ['plus21','+21','30-100','p5','delayed','ts','photon']) and any(t in pl for t in ['lat','r21ax','r7e','r7f','r6','n2','p5','decision','metrics','report','ledger']):
+                  axes.append('lat_direct'); reasons.append('direct LAT/plus21/P5 context file')
+              if not is_meta_for_axis(path,'r21ax') and ('r21ax' in low) and any(t in low for t in ['r7e','r7f','r6g','r6h','r6i','r6m','minus14','plus21','lat','phase']):
+                  axes.append('r21ax_direct'); reasons.append('direct R21AX branch file')
+              if any(t in low for t in ['not_proof','not_discovery','not_source_attribution','not_particle_proof','diagnostic_not_proof','exploratory']):
+                  axes.append('claim_ceiling'); reasons.append('explicit claim ceiling')
+              return sorted(set(axes)), '; '.join(reasons), quality(path)
           for p in EXT.rglob('*'):
-              if not p.is_file() or p.suffix.lower() not in allowed: continue
+              if not p.is_file() or p.suffix.lower() not in allowed_suffix: continue
               try:
                   sz=p.stat().st_size
                   if sz>limit: continue
                   txt=p.read_text(encoding='utf-8',errors='replace')
-                  groups,evidence=classify(p,txt)
-                  if not groups: continue
-                  q=file_quality(p)
-                  score=20*len(groups)+(40 if q=='HIGH' else 15 if q=='MEDIUM' else -20)
-                  score+=sum(8 for t in preferred_terms if t in str(p).lower())
-                  snippets=[]
-                  low=txt.lower()
-                  for term in ['R17K_R8Y','R17K_R8Z','R17K_R9A','minus14','PHOTON_ALIGNMENT','photon alignment','R9C','R21AX','507-515','508-514','LAT','plus21','2239.664','backtrace_permission']:
+                  axes,reasons,q=direct_axes(p,txt)
+                  if not axes: continue
+                  low=txt.lower(); snippets=[]
+                  for term in ['R17K_R8Y','R17K_R8Z','R17K_R8X','R17K_R8W','R17K_R9A','minus14','PHOTON_ALIGNMENT','photon alignment','R9C','R21AX','507-515','508-514','LAT','plus21','2239.664','backtrace_permission','poisson_tail','bootstrap']:
                       i=low.find(term.lower())
-                      if i>=0: snippets.append(txt[max(0,i-160):min(len(txt),i+340)].replace('\n',' ')[:500])
-                  docs.append({'path':str(p),'size':sz,'score':score,'quality':q,'groups':';'.join(sorted(set(groups))),'evidence_tags':';'.join(evidence),'snippet':' || '.join(snippets[:4])})
-              except Exception as e: errors.append({'stage':'scan','path':str(p),'error':repr(e)[:220]})
-          docs=sorted(docs,key=lambda r:(r['quality']=='HIGH',r['score']),reverse=True)
-          def rows_for(group):
-              return [r for r in docs if group in r.get('groups','').split(';')]
-          def strict_present(group):
-              rows=rows_for(group)
-              return any(r['quality'] in ['HIGH','MEDIUM'] and r['score']>=20 for r in rows)
-          for group in ['spi511_response','r9a_trace_open','minus14_precursor','photon_alignment','r9c_anchor','lat_delayed','r21ax_branch','claim_ceiling']:
-              rows=rows_for(group)[:8]
-              for r in rows:
-                  selected.append({'evidence_group':group,'path':r['path'],'quality':r['quality'],'score':r['score'],'groups':r['groups'],'snippet':r.get('snippet','')})
+                      if i>=0: snippets.append(txt[max(0,i-180):min(len(txt),i+380)].replace('\n',' ')[:560])
+                  score=30*len([a for a in axes if a!='claim_ceiling']) + (25 if q=='DIRECT_HIGH' else 10 if q=='DIRECT_MEDIUM' else -15 if q=='META_OR_LOG' else 0)
+                  row={'path':str(p),'size':sz,'quality':q,'axes':';'.join(axes),'score':score,'reasons':reasons,'snippet':' || '.join(snippets[:4])}
+                  nonceil=[a for a in axes if a!='claim_ceiling']
+                  if q=='META_OR_LOG' and not any(a in ['trace_governance_direct'] for a in nonceil):
+                      rejected.append({**row,'reject_reason':'meta/log/locator file cannot support direct scientific axis'})
+                  else:
+                      docs.append(row)
+              except Exception as e: errors.append({'stage':'scan','path':str(p),'error':repr(e)[:240]})
+          docs=sorted(docs,key=lambda r:(r['quality']=='DIRECT_HIGH',r['score']),reverse=True)
+          rejected=sorted(rejected,key=lambda r:r['score'],reverse=True)
+          def rows_for(axis): return [r for r in docs if axis in r.get('axes','').split(';')]
+          def present(axis): return len(rows_for(axis))>0
+          axes_list=['spi511_direct','trace_governance_direct','minus14_direct','photon_alignment_direct','r9c_anchor_direct','lat_direct','r21ax_direct','claim_ceiling']
+          for axis in axes_list:
+              for r in rows_for(axis)[:8]:
+                  accepted.append({'axis':axis,'path':r['path'],'quality':r['quality'],'score':r['score'],'axes':r['axes'],'reasons':r['reasons'],'snippet':r.get('snippet','')})
           gate_defs=[
-              ('G0_EXISTING_ARTIFACT_ACCESS','existing artifacts extracted and scanned',len(extracted)>0),
-              ('G1_STRICT_PRODUCT_511_RESPONSE','strict R8Y/R8Z/R9A SPI511 response artifact located',strict_present('spi511_response')),
-              ('G2_STRICT_R9A_TRACE_GOVERNANCE','R9A exploratory/official-block governance artifact located',strict_present('r9a_trace_open')),
-              ('G3_STRICT_CLAIM_CEILING','not-proof / exploratory ceilings located',strict_present('claim_ceiling')),
-              ('G4_STRICT_MINUS14_PRECURSOR_CONTEXT','minus14/preparatory precursor artifact located',strict_present('minus14_precursor')),
-              ('G5_STRICT_ALIGNMENT_OR_R9C_CONTEXT','photon alignment or R9C anchor artifact located',strict_present('photon_alignment') or strict_present('r9c_anchor')),
-              ('G6_STRICT_LAT_OR_R21AX_CONTEXT','LAT delayed or R21AX branch artifact located',strict_present('lat_delayed') or strict_present('r21ax_branch')),
-              ('G7_SOURCE_ATTRIBUTION_ALLOWED','source attribution is forbidden in this run',False),
-              ('G8_PARTICLE_PROOF_ALLOWED','particle proof is forbidden in this run',False)
+              ('G0_ARTIFACT_EXTRACTION','prior artifacts extracted',len(extracted)>0),
+              ('G1_DIRECT_SPI511_RESPONSE','direct R8W/R8X/R8Y/R8Z SPI511 metric or decision artifact',present('spi511_direct')),
+              ('G2_DIRECT_R9A_GOVERNANCE','direct R9A governance artifact, official block preserved',present('trace_governance_direct')),
+              ('G3_DIRECT_MINUS14_PRECURSOR','direct R21AX/R7/R6 minus14 or preparatory artifact',present('minus14_direct')),
+              ('G4_DIRECT_ALIGNMENT_OR_R9C','direct photon alignment or direct R9C metric anchor artifact',present('photon_alignment_direct') or present('r9c_anchor_direct')),
+              ('G5_DIRECT_LAT_OR_R21AX_BRANCH','direct LAT/plus21/P5 or R21AX branch artifact',present('lat_direct') or present('r21ax_direct')),
+              ('G6_CLAIM_CEILING_PRESENT','explicit not-proof/exploratory ceilings found',present('claim_ceiling')),
+              ('G7_SOURCE_ATTRIBUTION_ALLOWED','source attribution forbidden',False),
+              ('G8_PARTICLE_PROOF_ALLOWED','particle proof forbidden',False)
           ]
           for gid,desc,ok in gate_defs:
-              gates.append({'gate_id':gid,'description':desc,'status':'PASS' if ok else ('BLOCKED' if gid in ['G7_SOURCE_ATTRIBUTION_ALLOWED','G8_PARTICLE_PROOF_ALLOWED'] else 'MISS'),'claim_effect':'low-ceiling synthesis only' if ok else 'no upgrade'})
-          ready=strict_present('spi511_response') and strict_present('r9a_trace_open') and strict_present('claim_ceiling') and strict_present('minus14_precursor') and (strict_present('photon_alignment') or strict_present('r9c_anchor')) and (strict_present('lat_delayed') or strict_present('r21ax_branch'))
-          partial=strict_present('spi511_response') and strict_present('r9a_trace_open') and (strict_present('minus14_precursor') or strict_present('photon_alignment') or strict_present('r9c_anchor') or strict_present('lat_delayed') or strict_present('r21ax_branch'))
-          ledger.append({'trace_order':0,'stage':'PRODUCT_RESPONSE_INPUT','status':'PASS' if strict_present('spi511_response') else 'MISS','interpretation':'Governed SPI511 broad response / locked subthreshold core can serve only as diagnostic product input.','claim_ceiling':'DIAGNOSTIC_511_RESPONSE_NOT_PROOF'})
-          ledger.append({'trace_order':1,'stage':'TRACE_PERMISSION_GOVERNANCE','status':'PASS' if strict_present('r9a_trace_open') else 'MISS','interpretation':'R9A must preserve official backtrace block while allowing exploratory trace.','claim_ceiling':'EXPLORATORY_BACKTRACE_ONLY'})
-          ledger.append({'trace_order':2,'stage':'PRECURSOR_CONTEXT','status':'FOUND' if strict_present('minus14_precursor') else 'NOT_FOUND','interpretation':'minus14/preparatory context is used only for temporal ordering, not causality.','claim_ceiling':'NO_CAUSAL_PROOF'})
-          ledger.append({'trace_order':3,'stage':'ALIGNMENT_OR_GATE_CONTEXT','status':'FOUND' if (strict_present('photon_alignment') or strict_present('r9c_anchor')) else 'NOT_FOUND','interpretation':'alignment/R9C context is exploratory and does not assign a source.','claim_ceiling':'NO_SOURCE_ATTRIBUTION'})
-          ledger.append({'trace_order':4,'stage':'LAT_OR_R21AX_CONTEXT','status':'FOUND' if (strict_present('lat_delayed') or strict_present('r21ax_branch')) else 'NOT_FOUND','interpretation':'LAT/R21AX context can act as a branch witness only.','claim_ceiling':'NOT_ACIRM_PROOF'})
-          ledger.append({'trace_order':5,'stage':'STRICT_SYNTHESIS_RESULT','status':'READY_LOW_CEILING' if ready else ('PARTIAL' if partial else 'INSUFFICIENT'),'interpretation':'Strict evidence filter prevents logs/inventories and broad keywords from upgrading claims.','claim_ceiling':'SYNTHESIS_ONLY_NOT_PROOF'})
-          if ready:
-              decision='R17K_R9C_R2_STRICT_EXPLORATORY_TRACE_SYNTHESIS_READY_LOW_CEILING_NOT_PROOF'
-              next_step='R9D_LOW_CEILING_TRACE_NARRATIVE_AND_GAP_AUDIT'
-          elif partial:
-              decision='R17K_R9C_R2_PARTIAL_STRICT_TRACE_SYNTHESIS_MISSING_CONTEXT_AXIS_NOT_PROOF'
-              next_step='R9C_R3_FILL_MISSING_STRICT_AXIS_OR_MANUAL_UPLOAD'
+              gates.append({'gate_id':gid,'description':desc,'status':'PASS' if ok else ('BLOCKED' if gid in ['G7_SOURCE_ATTRIBUTION_ALLOWED','G8_PARTICLE_PROOF_ALLOWED'] else 'MISS'),'claim_effect':'direct low-ceiling support only' if ok else 'no claim upgrade'})
+          direct_ready=present('spi511_direct') and present('trace_governance_direct') and present('minus14_direct') and (present('photon_alignment_direct') or present('r9c_anchor_direct')) and (present('lat_direct') or present('r21ax_direct')) and present('claim_ceiling')
+          meta_only=not direct_ready and len(docs)>0
+          ledger.append({'trace_order':0,'stage':'PRODUCT_RESPONSE_INPUT','direct_status':'PASS' if present('spi511_direct') else 'MISS','axis':'spi511_direct','interpretation':'Direct SPI511 metric/governance artifact required; R9A/B/C meta files cannot satisfy this axis.','claim_ceiling':'DIAGNOSTIC_511_RESPONSE_NOT_PROOF'})
+          ledger.append({'trace_order':1,'stage':'TRACE_PERMISSION_GOVERNANCE','direct_status':'PASS' if present('trace_governance_direct') else 'MISS','axis':'trace_governance_direct','interpretation':'R9A may only establish exploratory permission and official block.','claim_ceiling':'EXPLORATORY_BACKTRACE_ONLY'})
+          ledger.append({'trace_order':2,'stage':'PRECURSOR_CONTEXT','direct_status':'PASS' if present('minus14_direct') else 'MISS','axis':'minus14_direct','interpretation':'minus14/preparatory context must come from original branch artifacts.','claim_ceiling':'NO_CAUSAL_PROOF'})
+          ledger.append({'trace_order':3,'stage':'ALIGNMENT_OR_GATE_CONTEXT','direct_status':'PASS' if (present('photon_alignment_direct') or present('r9c_anchor_direct')) else 'MISS','axis':'photon_alignment_direct/r9c_anchor_direct','interpretation':'Alignment/R9C metric context must be direct, not a locator mention.','claim_ceiling':'NO_SOURCE_ATTRIBUTION'})
+          ledger.append({'trace_order':4,'stage':'LAT_OR_BRANCH_CONTEXT','direct_status':'PASS' if (present('lat_direct') or present('r21ax_direct')) else 'MISS','axis':'lat_direct/r21ax_direct','interpretation':'LAT/R21AX context must be direct artifact evidence, not keyword references.','claim_ceiling':'NOT_ACIRM_PROOF'})
+          ledger.append({'trace_order':5,'stage':'PURIFICATION_RESULT','direct_status':'DIRECT_READY' if direct_ready else ('META_OR_PARTIAL' if meta_only else 'INSUFFICIENT'),'axis':'combined','interpretation':'R9C_R3 separates direct evidence chain from meta-chain. No proof or attribution is created.','claim_ceiling':'PURIFICATION_ONLY_NOT_PROOF'})
+          if direct_ready:
+              decision='R17K_R9C_R3_DIRECT_EVIDENCE_CHAIN_AVAILABLE_FOR_LOW_CEILING_TRACE_NARRATIVE_NOT_PROOF'
+              next_step='R9D_LOW_CEILING_TRACE_NARRATIVE_AND_GAP_AUDIT_FROM_DIRECT_EVIDENCE'
+          elif meta_only:
+              decision='R17K_R9C_R3_META_OR_PARTIAL_CHAIN_ONLY_DIRECT_EVIDENCE_AXIS_MISSING_NOT_PROOF'
+              next_step='R9C_R4_UPLOAD_OR_LOCATE_MISSING_DIRECT_AXIS_ARTIFACTS'
           else:
-              decision='R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_INSUFFICIENT_NOT_PROOF'
-              next_step='MANUAL_UPLOAD_REQUIRED_STRICT_ARTIFACTS'
+              decision='R17K_R9C_R3_INSUFFICIENT_DIRECT_EVIDENCE_FOR_TRACE_NOT_PROOF'
+              next_step='MANUAL_UPLOAD_REQUIRED_DIRECT_ARTIFACTS'
           def wcsv(path,rows):
               keys=[]
               for r in rows:
@@ -278,42 +274,51 @@ jobs:
               if not keys: keys=['empty']
               with open(path,'w',newline='',encoding='utf-8') as f:
                   w=csv.DictWriter(f,fieldnames=keys); w.writeheader(); w.writerows(rows)
-          wcsv(OUT/'R17K_R9C_R2_EXTRACTED_FILE_MANIFEST.csv',extracted)
-          wcsv(OUT/'R17K_R9C_R2_STRICT_SELECTED_EVIDENCE.csv',selected)
-          wcsv(OUT/'R17K_R9C_R2_GATES.csv',gates)
-          wcsv(OUT/'R17K_R9C_R2_EXPLORATORY_TRACE_LEDGER.csv',ledger)
-          wcsv(OUT/'R17K_R9C_R2_ALL_STRICT_HITS_RANKED.csv',docs[:1000])
-          (OUT/'R17K_R9C_R2_SCAN_ERRORS.json').write_text(json.dumps(errors,indent=2),encoding='utf-8')
-          report=f'''# ACIRM R17K R9C R2 Strict Trace Synthesis\n\nالحكم: {decision}\n\nسبب R2: تقليل خطر false-positive من R9C_R1. تم تضييق شروط evidence بحيث لا تكفي كلمة عامة مثل frequency، ولا تُفضّل logs/inventories على ملفات DECISION/METRICS/LEDGER.\n\nالسقف محفوظ: EXPLORATORY_TRACE_SYNTHESIS_ONLY / NOT_OFFICIAL_511_PROOF / NOT_PARTICLE_PROOF / NOT_SOURCE_ATTRIBUTION / NOT_ACIRM_PROOF.\n\nالخطوة التالية: {next_step}.\n'''
-          (OUT/'R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_REPORT_AR.md').write_text(report,encoding='utf-8')
-          summary={'run_id':'R17K_R9C_R2_STRICT_TRACE_SYNTHESIS','decision':decision,'proof_allowed':False,'official_backtrace_permission':False,'exploratory_trace_synthesized':ready or partial,'low_ceiling_trace_ready':ready,'source_attribution_allowed':False,'particle_proof_allowed':False,'artifact_zip_count':len(list(BANK.glob('*.zip'))),'extracted_file_count':len(extracted),'strict_hit_file_count':len(docs),'selected_evidence_file_count':len(selected),'strict_group_presence':{g:strict_present(g) for g in ['spi511_response','r9a_trace_open','minus14_precursor','photon_alignment','r9c_anchor','lat_delayed','r21ax_branch','claim_ceiling']},'gates':gates,'trace_ledger':ledger,'top_selected_evidence':selected[:20],'next_step':next_step,'claim_ceiling':['EXPLORATORY_TRACE_SYNTHESIS_ONLY','DIAGNOSTIC_511_RESPONSE_CANDIDATE','NOT_OFFICIAL_511_PROOF','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_ACIRM_PROOF']}
-          (OUT/'R17K_R9C_R2_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
-          sha=hashlib.sha256((OUT/'R17K_R9C_R2_DECISION.json').read_bytes()).hexdigest()
-          (OUT/'R17K_R9C_R2_DECISION_JSON_SHA256.txt').write_text(sha+'  R17K_R9C_R2_DECISION.json\n',encoding='utf-8')
+          wcsv(OUT/'R17K_R9C_R3_EXTRACTED_FILE_MANIFEST.csv',extracted)
+          wcsv(OUT/'R17K_R9C_R3_ACCEPTED_DIRECT_EVIDENCE.csv',accepted)
+          wcsv(OUT/'R17K_R9C_R3_REJECTED_META_CANDIDATES.csv',rejected[:500])
+          wcsv(OUT/'R17K_R9C_R3_GATES.csv',gates)
+          wcsv(OUT/'R17K_R9C_R3_DIRECT_TRACE_LEDGER.csv',ledger)
+          wcsv(OUT/'R17K_R9C_R3_ALL_DIRECT_HITS_RANKED.csv',docs[:1000])
+          (OUT/'R17K_R9C_R3_SCAN_ERRORS.json').write_text(json.dumps(errors,indent=2),encoding='utf-8')
+          report=(
+              '# ACIRM R17K R9C R3 Direct Evidence Purifier\n\n'
+              f'الحكم: {decision}\n\n'
+              'هذه الخلية لا تضيف نتيجة فيزيائية جديدة. وظيفتها فصل direct-evidence chain عن meta-chain.\n\n'
+              'إذا كان الحكم DIRECT_EVIDENCE_CHAIN_AVAILABLE فهذا يعني أن السرد الاستكشافي منخفض السقف ممكن.\n'
+              'إذا كان META_OR_PARTIAL فهذا يعني أن بعض المحاور ما زالت مدعومة بملفات locator/synthesis لا بالقياسات الأصلية.\n\n'
+              'السقف محفوظ: EXPLORATORY_TRACE_PURIFICATION_ONLY / NOT_OFFICIAL_511_PROOF / NOT_PARTICLE_PROOF / NOT_SOURCE_ATTRIBUTION / NOT_ACIRM_PROOF.\n\n'
+              f'الخطوة التالية: {next_step}.\n'
+          )
+          (OUT/'R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER_REPORT_AR.md').write_text(report,encoding='utf-8')
+          summary={'run_id':'R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER','decision':decision,'proof_allowed':False,'official_backtrace_permission':False,'exploratory_trace_direct_evidence_ready':direct_ready,'source_attribution_allowed':False,'particle_proof_allowed':False,'artifact_zip_count':len(list(BANK.glob('*.zip'))),'extracted_file_count':len(extracted),'accepted_direct_evidence_count':len(accepted),'rejected_meta_candidate_count':len(rejected),'axis_presence':{axis:present(axis) for axis in axes_list},'gates':gates,'direct_trace_ledger':ledger,'top_direct_evidence':accepted[:25],'top_rejected_meta':rejected[:15],'next_step':next_step,'claim_ceiling':['EXPLORATORY_TRACE_PURIFICATION_ONLY','DIAGNOSTIC_511_RESPONSE_CANDIDATE','NOT_OFFICIAL_511_PROOF','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_ACIRM_PROOF']}
+          (OUT/'R17K_R9C_R3_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          sha=hashlib.sha256((OUT/'R17K_R9C_R3_DECISION.json').read_bytes()).hexdigest()
+          (OUT/'R17K_R9C_R3_DECISION_JSON_SHA256.txt').write_text(sha+'  R17K_R9C_R3_DECISION.json\n',encoding='utf-8')
           PY
-          python3 scripts/r9c_r2_strict.py > logs/r9c_r2_strict.log 2>&1
-          echo "SYNTHESIS_EXIT=$?" | tee ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_SYNTHESIS_EXIT.txt
+          python3 scripts/r9c_r3_direct_purifier.py > logs/r9c_r3_direct_purifier.log 2>&1
+          echo "PURIFIER_EXIT=$?" | tee ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_PURIFIER_EXIT.txt
 
       - name: Package artifact always
         if: always()
         shell: bash
         run: |
           set +e
-          mkdir -p ACIRM_R17K_R9C_R2_OUTPUTS logs
-          cp logs/*.log ACIRM_R17K_R9C_R2_OUTPUTS/ 2>/dev/null || true
-          find artifact_bank -maxdepth 1 -type f -printf '%p,%s\n' | sort > ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_DOWNLOADED_ARTIFACT_FILE_SIZES.csv 2>/dev/null || true
-          df -h > ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_DF_END.txt
-          free -h > ACIRM_R17K_R9C_R2_OUTPUTS/R17K_R9C_R2_FREE_END.txt
-          zip -r ACIRM_R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_OUTPUT.zip ACIRM_R17K_R9C_R2_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_OUTPUT.zip > ACIRM_R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_OUTPUT.zip ACIRM_R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_OUTPUT.zip.sha256.txt
+          mkdir -p ACIRM_R17K_R9C_R3_OUTPUTS logs
+          cp logs/*.log ACIRM_R17K_R9C_R3_OUTPUTS/ 2>/dev/null || true
+          find artifact_bank -maxdepth 1 -type f -printf '%p,%s\n' | sort > ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_DOWNLOADED_ARTIFACT_FILE_SIZES.csv 2>/dev/null || true
+          df -h > ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_DF_END.txt
+          free -h > ACIRM_R17K_R9C_R3_OUTPUTS/R17K_R9C_R3_FREE_END.txt
+          zip -r ACIRM_R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER_OUTPUT.zip ACIRM_R17K_R9C_R3_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER_OUTPUT.zip > ACIRM_R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER_OUTPUT.zip ACIRM_R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER_OUTPUT.zip.sha256.txt
 
       - name: Upload artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_OUTPUT
+          name: ACIRM_R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER_OUTPUT
           path: |
-            ACIRM_R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_OUTPUT.zip
-            ACIRM_R17K_R9C_R2_STRICT_TRACE_SYNTHESIS_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER_OUTPUT.zip
+            ACIRM_R17K_R9C_R3_DIRECT_EVIDENCE_PURIFIER_OUTPUT.zip.sha256.txt
           retention-days: 7
