@@ -1,293 +1,111 @@
-name: ACIRM R17K R8Y Compact Empirical SPI511
+name: ACIRM R17K R9A Compact Exploratory Trace Ledger SPI511
 
 on:
   workflow_dispatch:
-    inputs:
-      target_start: {required: false, default: '244600170010'}
-      target_end: {required: false, default: '244600210010'}
-      rev_center: {required: false, default: '2446'}
-      bootstrap_n: {required: false, default: '2000'}
 
 permissions:
   contents: read
   actions: write
 
 jobs:
-  r17k-r8y-compact-empirical-spi511:
+  r17k-r9a-compact-exploratory-trace-ledger:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      TARGET_START: ${{ inputs.target_start }}
-      TARGET_END: ${{ inputs.target_end }}
-      REV_CENTER: ${{ inputs.rev_center }}
-      BOOTSTRAP_N: ${{ inputs.bootstrap_n }}
+    timeout-minutes: 30
     steps:
-      - name: Prepare
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          mkdir -p ACIRM_R17K_R8Y_OUTPUTS logs scripts repo/scw repo/ic repo/idx repo/cat repo/aux
-          cat > ACIRM_R17K_R8Y_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R8Y_COMPACT_EMPIRICAL_FALSE_ALARM_BOOTSTRAP_SPI511
-          CACHE_ONLY_NO_NEW_SPI_DOWNLOAD
-          PRIMARY_LOCKED_BAND_508_514_KEV
-          BROAD_507_515_DIAGNOSTIC_ONLY_UNLESS_EMPIRICALLY_GOVERNED
-          TESTS_ROLLING_FALSE_ALARM_PLACEBO_POISSON_BOOTSTRAP
-          BACKTRACE_ONLY_IF_LOCKED_508_514_MODERATE_OR_STRONG
-          DIAGNOSTIC_NOT_PROOF
-          NOT_DISCOVERY
-          NOT_PARTICLE_PROOF
-          NOT_SOURCE_ATTRIBUTION
-          NOT_OFFICIAL_SPI_511_LINE_PROOF
-          EOF
-          printf 'TARGET_START=%s\nTARGET_END=%s\nREV_CENTER=%s\nBOOTSTRAP_N=%s\n' "$TARGET_START" "$TARGET_END" "$REV_CENTER" "$BOOTSTRAP_N" > ACIRM_R17K_R8Y_OUTPUTS/R17K_R8Y_INPUTS.txt
-
-      - name: Restore spectra cache
-        id: restore-wide
-        uses: actions/cache/restore@v4
-        with:
-          path: repo/scw
-          key: acirm-r17k-r8y-compact-rev${{ inputs.rev_center }}-${{ inputs.target_start }}-${{ inputs.target_end }}-v1
-          restore-keys: |
-            acirm-r17k-r8x-cache-only-rev${{ inputs.rev_center }}-
-            acirm-r17k-r8w-r2-rev${{ inputs.rev_center }}-
-            acirm-r17k-r8w-rev${{ inputs.rev_center }}-
-            acirm-r17k-r8v-targeted-rev${{ inputs.rev_center }}-
-            acirm-r17k-r8u-wide-spi-spectra-
-            acirm-r17k-r8t-wide-spi-spectra-
-
-      - name: Restore calibration cache
-        id: restore-tree
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            repo/ic
-            repo/idx
-            repo/cat
-            repo/aux
-            repo/.tree_complete_R17K_R8E_MINIMAL
-          key: acirm-r17k-r8e-minimal-osa-tree-no-full-aux-v1
-          restore-keys: |
-            acirm-r17k-r8e-minimal-osa-tree-
-
-      - name: Install tools
+      - name: Build R9A exploratory trace ledger
         shell: bash
         run: |
           set +e
-          echo "SPECTRA_CACHE_HIT=${{ steps.restore-wide.outputs.cache-hit }}" | tee ACIRM_R17K_R8Y_OUTPUTS/R17K_R8Y_SPECTRA_CACHE_HIT.txt
-          echo "TREE_CACHE_HIT=${{ steps.restore-tree.outputs.cache-hit }}" | tee ACIRM_R17K_R8Y_OUTPUTS/R17K_R8Y_TREE_CACHE_HIT.txt
-          sudo apt-get update -y > logs/apt_update.log 2>&1
-          sudo apt-get install -y zip unzip python3-pip > logs/apt_install.log 2>&1
-          python3 -m pip install -q astropy numpy > logs/pip_install.log 2>&1
-
-      - name: Run compact R8Y empirical test
-        shell: bash
-        run: |
-          set +e
-          cat > scripts/r8y_compact.py <<'PY'
-          import os,re,csv,json,math,random,warnings
+          mkdir -p ACIRM_R17K_R9A_OUTPUTS logs
+          python3 - <<'PY'
+          import csv, json, hashlib, platform
           from pathlib import Path
-          import numpy as np
-          from astropy.io import fits
-          OUT=Path('ACIRM_R17K_R8Y_OUTPUTS'); SCW=Path('repo/scw'); IC=Path('repo/ic')
-          TS=os.environ.get('TARGET_START','244600170010'); TE=os.environ.get('TARGET_END','244600210010'); RC=os.environ.get('REV_CENTER','2446'); BN=int(os.environ.get('BOOTSTRAP_N','2000'))
-          LOCK=(508.,514.); BROAD=(507.,515.); SB1=(490.,500.); SB2=(522.,532.); FAR1=(480.,500.); FAR2=(522.,542.)
-          ERR=[]; CAL=[]; ROW=[]; MET=[]; ROLL=[]; BOOT=[]; BOOTSUM=[]; POIS=[]; PLACE=[]
-          def wcsv(p,rows):
-              ks=[]
-              for r in rows:
-                  for k in r:
-                      if k not in ks: ks.append(k)
-              if not ks: ks=['empty']
-              with open(p,'w',newline='',encoding='utf-8') as f:
-                  w=csv.DictWriter(f,fieldnames=ks); w.writeheader()
-                  for r in rows: w.writerow({k:r.get(k,'') for k in ks})
-          def sf(x):
-              try:
-                  y=float(x); return y if math.isfinite(y) else float('nan')
-              except Exception: return float('nan')
-          def cm(cols,n): return {c.upper():c for c in cols}.get(n.upper())
-          def sid(p):
-              m=re.search(r'(\d{12})\.001',str(p)); return m.group(1) if m else ''
-          def pol(c,x,asc=True):
-              c=np.asarray(c,float).reshape(-1)
-              with warnings.catch_warnings():
-                  warnings.simplefilter('ignore'); return np.polynomial.polynomial.polyval(x,c) if asc else np.polyval(c,x)
-          def inv(c,n,asc=True):
-              e=np.linspace(0,12000,60001); ch=pol(c,e,asc); ok=np.isfinite(ch)
-              if ok.sum()<20: return None
-              ch=ch[ok]; e=e[ok]; ix=np.argsort(ch); ch=ch[ix]; e=e[ix]; ch,u=np.unique(ch,return_index=True); e=e[u]
-              return np.interp(np.arange(n,dtype=float),ch,e,left=np.nan,right=np.nan) if len(ch)>=20 else None
-          def models(ck,kc,n):
-              x=np.arange(n,dtype=float); out=[]
-              if ck is not None:
-                  c=np.asarray(ck,float).reshape(-1)
-                  if c.size==n: out.append(('CHAN_KEV_VECTOR',c))
-                  if 0<c.size<=16: out += [('CHAN_KEV_ASC_POLY',pol(c,x,True)),('CHAN_KEV_DESC_POLY',pol(c,x,False))]
-              if kc is not None:
-                  c=np.asarray(kc,float).reshape(-1)
-                  if 0<c.size<=16:
-                      a=inv(c,n,True); d=inv(c,n,False)
-                      if a is not None: out.append(('KEV_CHAN_ASC_INVERTED',a))
-                      if d is not None: out.append(('KEV_CHAN_DESC_INVERTED',d))
-              return out
-          def score(e,c):
-              e=np.asarray(e,float).reshape(-1); ok=np.isfinite(e)
-              if ok.sum()<20: return None
-              ee=e[ok]; inc=float(np.mean(np.diff(ee)>0)) if len(ee)>1 else 0.
-              if inc<.95 or np.nanmin(ee)>480 or np.nanmax(ee)<542: return None
-              return 100*inc+40+(10 if np.nansum(c)>0 else 0)
-          def edges(e):
-              e=np.asarray(e,float).reshape(-1)
-              if len(e)<3 or not np.all(np.isfinite(e)): return None,None
-              m=(e[:-1]+e[1:])/2; b=np.r_[e[0]-(m[0]-e[0]),m,e[-1]+(e[-1]-m[-1])]
-              return np.minimum(b[:-1],b[1:]),np.maximum(b[:-1],b[1:])
-          def bc(c,lo,hi,band):
-              if lo is None or hi is None: return 0.
-              n=min(len(c),len(lo),len(hi)); c=np.nan_to_num(np.asarray(c[:n],float),nan=0,posinf=0,neginf=0); lo=np.asarray(lo[:n],float); hi=np.asarray(hi[:n],float)
-              f=np.maximum(0,np.minimum(hi,band[1])-np.maximum(lo,band[0]))/np.maximum(1e-12,hi-lo)
-              return float((c*f).sum())
-          def metric(items,line=LOCK,left=SB1,right=SB2):
-              lc=s1=s2=raw=0.; det={}; scw={}
-              for it in items:
-                  raw+=float(np.nansum(it['c'])); v=bc(it['c'],it['lo'],it['hi'],line); a=bc(it['c'],it['lo'],it['hi'],left); b=bc(it['c'],it['lo'],it['hi'],right)
-                  lc+=v; s1+=a; s2+=b; det[it['det']]=det.get(it['det'],0)+v; scw[it['scw']]=scw.get(it['scw'],0)+v
-              side=s1+s2; lw=line[1]-line[0]; sw=(left[1]-left[0])+(right[1]-right[0])
-              exp=side/sw*lw if side>0 else float('nan'); ratio=(lc/lw)/(side/sw) if side>0 else float('inf'); z=(lc-exp)/math.sqrt(exp) if exp and exp>0 else float('nan')
-              return dict(rows=len(items),line_counts=lc,side_counts=side,expected=exp,ratio=ratio,z=z,raw_total_counts=raw,max_detector_share=(max(det.values())/lc if lc>0 and det else float('nan')),max_scw_share=(max(scw.values())/lc if lc>0 and scw else float('nan')))
-          def psf(kf,lam):
-              if not math.isfinite(kf) or not math.isfinite(lam) or lam<=0: return float('nan')
-              k=int(math.ceil(kf)); logp=-lam+k*math.log(lam)-math.lgamma(k+1); term=math.exp(logp); total=term; j=k
-              while j<max(k+10000,int(lam+20*math.sqrt(lam)+200)):
-                  j+=1; term*=lam/j; total+=term
-                  if term<total*1e-14: break
-              return min(1.,max(0.,total))
-          def ntail(z): return 0.5*math.erfc(z/math.sqrt(2)) if math.isfinite(z) else float('nan')
-          def placebo(items,w,target_z):
-              rows=[]
-              for st in np.arange(430,590.1,2):
-                  b=(float(st),float(st+w))
-                  if max(b[0],488)<min(b[1],516) or max(b[0],520)<min(b[1],534): continue
-                  m=metric(items,b,(b[0]-18,b[0]-8),(b[1]+8,b[1]+18)); rows.append(dict(width=w,band_min=b[0],band_max=b[1],z=m['z'],ratio=m['ratio']))
-              zs=[sf(r['z']) for r in rows if math.isfinite(sf(r['z']))]
-              rank=1+sum(1 for z in zs if math.isfinite(target_z) and z>target_z) if zs and math.isfinite(target_z) else ''
-              p=(1+sum(1 for z in zs if math.isfinite(target_z) and z>=target_z))/(len(zs)+1) if zs and math.isfinite(target_z) else float('nan')
-              return rows,rank,len(zs),p,max(zs) if zs else float('nan')
-          def emp(rows,key,tz):
-              vals=[sf(r.get(key)) for r in rows if not r.get('is_target') and not r.get('overlaps_target') and math.isfinite(sf(r.get(key)))]
-              if not vals or not math.isfinite(tz): return dict(control_n=len(vals),rank='',empirical_p=float('nan'),max_control_z=max(vals) if vals else float('nan'))
-              return dict(control_n=len(vals),rank=1+sum(1 for v in vals if v>tz),empirical_p=(1+sum(1 for v in vals if v>=tz))/(len(vals)+1),max_control_z=max(vals))
-          def qsum(vals):
-              vals=[v for v in vals if math.isfinite(v)]
-              if not vals: return dict(n=0,median=float('nan'),q05=float('nan'),q95=float('nan'),prob_ge_2=float('nan'),prob_ge_3=float('nan'))
-              a=np.asarray(vals,float); return dict(n=len(vals),median=float(np.quantile(a,.5)),q05=float(np.quantile(a,.05)),q95=float(np.quantile(a,.95)),prob_ge_2=float(np.mean(a>=2)),prob_ge_3=float(np.mean(a>=3)))
-          for p in sorted(set(list(IC.glob('**/spi_coef_cal_*.fits'))+list(IC.glob('**/*coef*cal*.fits')))):
-              try:
-                  with fits.open(p,memmap=True) as hd:
-                      for h in hd:
-                          cols=list(h.columns.names or []) if hasattr(h,'columns') and h.columns is not None else []
-                          if h.data is None: continue
-                          dc=cm(cols,'DET_ID'); ec=cm(cols,'E_RANGE'); ck=cm(cols,'CHAN_KEV'); kc=cm(cols,'KEV_CHAN'); os0=cm(cols,'OBT_START'); oe0=cm(cols,'OBT_END')
-                          if not (dc and ec and (ck or kc)): continue
-                          for i in range(len(h.data)): CAL.append(dict(file=str(p),det=int(h.data[dc][i]),er=int(h.data[ec][i]),os=sf(h.data[os0][i]) if os0 else float('nan'),oe=sf(h.data[oe0][i]) if oe0 else float('nan'),ck=np.asarray(h.data[ck][i],float).reshape(-1) if ck else None,kc=np.asarray(h.data[kc][i],float).reshape(-1) if kc else None))
-              except Exception as e: ERR.append(dict(stage='cal',file=str(p),error=repr(e)[:250]))
-          def mcal(det,er,mid):
-              rr=[x for x in CAL if x['det']==det and x['er']==er]
-              if not rr: return None
-              inn=[x for x in rr if math.isfinite(mid) and math.isfinite(x['os']) and math.isfinite(x['oe']) and x['os']<=mid<=x['oe']]
-              return inn[0] if inn else sorted(rr,key=lambda x:(x['file'],x['os']))[-1]
-          items=[]; spectra=sorted(SCW.glob('**/spi_spectra.fits.gz'))
-          for p in spectra:
-              scw=sid(p); rev=scw[:4]
-              try:
-                  with fits.open(p,memmap=True) as hd:
-                      for h in hd:
-                          if h.name!='SPI.-ACOF-RAW' or h.data is None: continue
-                          cols=list(h.columns.names or []); dc=cm(cols,'DET_ID'); ec=cm(cols,'E_RANGE'); cc=cm(cols,'COUNTS'); ls=cm(cols,'LOBT_START'); le=cm(cols,'LOBT_END')
-                          if not (dc and ec and cc): continue
-                          for i in range(len(h.data)):
-                              det=int(h.data[dc][i]); er=int(h.data[ec][i]); c=np.asarray(h.data[cc][i],float).reshape(-1); a=sf(h.data[ls][i]) if ls else float('nan'); b=sf(h.data[le][i]) if le else float('nan'); mid=(a+b)/2 if math.isfinite(a) and math.isfinite(b) else float('nan')
-                              ca=mcal(det,er,mid); base=dict(rev=rev,scw=scw,row=i,det=det,er=er,raw=float(np.nansum(c)))
-                              if ca is None: ROW.append({**base,'status':'NO_CAL'}); continue
-                              ranked=[]
-                              for mn,e in models(ca['ck'],ca['kc'],len(c)):
-                                  s=score(e,c)
-                                  if s is not None: ranked.append((s,mn,e))
-                              if not ranked: ROW.append({**base,'status':'NO_MODEL'}); continue
-                              ranked.sort(key=lambda x:x[0],reverse=True); _,mn,e=ranked[0]; lo,hi=edges(e); it={**base,'c':c,'lo':lo,'hi':hi,'model':mn}; items.append(it); mm=metric([it]); ROW.append({**base,'status':'OK','model':mn,'line':mm['line_counts'],'side':mm['side_counts'],'z':mm['z']})
-              except Exception as e: ERR.append(dict(stage='spectra',file=str(p),error=repr(e)[:250]))
-          scws=sorted({x['scw'] for x in items}); target=[s for s in scws if s[:4]==RC and TS<=s<=TE] or [s for s in scws if TS<=s<=TE]; tset=set(target); tgt=[x for x in items if x['scw'] in tset]; width=max(1,len(target))
-          if tgt:
-              for mid,line,left,right in [('LOCKED_508_514',LOCK,SB1,SB2),('BROAD_507_515',BROAD,SB1,SB2),('LOCKED_508_514_FAR',LOCK,FAR1,FAR2),('BROAD_507_515_FAR',BROAD,FAR1,FAR2)]:
-                  mm=metric(tgt,line,left,right); pr,pn,pp,pmax=None,None,None,None; scans,pr,pn,pp,pmax=placebo(tgt,line[1]-line[0],sf(mm['z']))
-                  for r in scans: PLACE.append(dict(metric_id=mid,**r))
-                  MET.append(dict(metric_id=mid,line_min=line[0],line_max=line[1],placebo_rank=pr,placebo_n=pn,placebo_empirical_p=pp,placebo_max_z=pmax,**mm))
-                  POIS.append(dict(metric_id=mid,line_counts=mm['line_counts'],expected=mm['expected'],z=mm['z'],normal_one_sided_p=ntail(sf(mm['z'])),poisson_sf_geq_ceil_line=psf(mm['line_counts'],mm['expected'])))
-              local_revs=set([str(int(RC)-1),RC,str(int(RC)+1)])
-              for scope,pool in [('CENTER_REV_ONLY',[s for s in scws if s[:4]==RC]),('LOCAL_REVS_PM1',[s for s in scws if s[:4] in local_revs]),('ALL_CACHE',scws)]:
-                  if len(pool)<width: continue
-                  for i in range(len(pool)-width+1):
-                      win=pool[i:i+width]; wset=set(win); sub=[x for x in items if x['scw'] in wset]
-                      ml=metric(sub,LOCK); mb=metric(sub,BROAD); ROLL.append(dict(scope=scope,scw_start=win[0],scw_end=win[-1],window_width=width,is_target=(win==target),overlaps_target=(bool(wset&tset) and win!=target),locked_z=ml['z'],locked_ratio=ml['ratio'],broad_z=mb['z'],broad_ratio=mb['ratio']))
-              rng=random.Random(2446511); grouped={s:[x for x in tgt if x['scw']==s] for s in target}
-              for b in range(BN):
-                  sub=[]
-                  for s in [rng.choice(target) for _ in target]: sub.extend(grouped.get(s,[]))
-                  ml=metric(sub,LOCK); mb=metric(sub,BROAD); BOOT.append(dict(type='SCW_RESAMPLE',i=b,locked_z=ml['z'],broad_z=mb['z']))
-              for b in range(BN):
-                  sub=[rng.choice(tgt) for _ in tgt]; ml=metric(sub,LOCK); mb=metric(sub,BROAD); BOOT.append(dict(type='ROW_RESAMPLE_DIAGNOSTIC',i=b,locked_z=ml['z'],broad_z=mb['z']))
-              for bt in ['SCW_RESAMPLE','ROW_RESAMPLE_DIAGNOSTIC']:
-                  for key in ['locked_z','broad_z']: BOOTSUM.append(dict(type=bt,statistic=key,**qsum([sf(r[key]) for r in BOOT if r['type']==bt])))
-          locked=next((r for r in MET if r.get('metric_id')=='LOCKED_508_514'),{}); broad=next((r for r in MET if r.get('metric_id')=='BROAD_507_515'),{})
-          lroll=emp([r for r in ROLL if r.get('scope')=='LOCAL_REVS_PM1'],'locked_z',sf(locked.get('z'))); broll=emp([r for r in ROLL if r.get('scope')=='LOCAL_REVS_PM1'],'broad_z',sf(broad.get('z')))
-          lboot=next((r for r in BOOTSUM if r.get('type')=='SCW_RESAMPLE' and r.get('statistic')=='locked_z'),{}); bboot=next((r for r in BOOTSUM if r.get('type')=='SCW_RESAMPLE' and r.get('statistic')=='broad_z'),{})
-          lz=sf(locked.get('z')); lr=sf(locked.get('ratio')); lrank=locked.get('placebo_rank',''); bz=sf(broad.get('z')); br=sf(broad.get('ratio')); brank=broad.get('placebo_rank',''); lp=sf(lroll.get('empirical_p')); bp=sf(broll.get('empirical_p')); lprob=sf(lboot.get('prob_ge_3')); bprob=sf(bboot.get('prob_ge_3')); maxdet=sf(locked.get('max_detector_share'))
-          notes=[]; back=False
-          if not tgt: dec='R17K_R8Y_TARGET_NOT_FOUND_OR_CACHE_MISS_NO_EMPIRICAL_TEST'; notes.append('target not found')
-          elif lz>=5 and lr>=1.20 and lrank!='' and int(lrank)<=3 and lp<=.01 and lprob>=.80 and maxdet<=.35: dec='R17K_R8Y_LOCKED_508_514_STRONG_EMPIRICAL_VALIDATION_BACKTRACE_READY_NOT_PROOF'; back=True
-          elif lz>=3 and lr>=1.10 and lrank!='' and int(lrank)<=5 and lp<=.05 and lprob>=.50 and maxdet<=.40: dec='R17K_R8Y_LOCKED_508_514_MODERATE_EMPIRICAL_VALIDATION_BACKTRACE_READY_NOT_PROOF'; back=True
-          elif bz>=3 and br>=1.10 and brank!='' and int(brank)<=5 and bp<=.05 and bprob>=.50 and lz>=2.8: dec='R17K_R8Y_BROAD_507_515_EMPIRICALLY_SUPPORTED_MODERATE_LOCKED_SUBTHRESHOLD_NO_BACKTRACE_NOT_PROOF'; notes.append('broad empirically supported, locked remains below z=3')
-          elif lz>=2 and lr>=1.05: dec='R17K_R8Y_ROBUST_WEAK_LOCKED_511_HINT_EMPIRICAL_SUPPORT_INSUFFICIENT_NOT_PROOF'; notes.append('locked remains weak or near-moderate only')
-          else: dec='R17K_R8Y_511_HINT_NOT_EMPIRICALLY_SUPPORTED_NOT_PROOF'
-          if math.isfinite(lp) and lp>.05: notes.append('locked rolling empirical p is not below 0.05')
-          if math.isfinite(lprob) and lprob<.50: notes.append('locked SCW bootstrap does not sustain z>=3 in half of resamples')
-          if math.isfinite(bp) and bp<=.05: notes.append('broad rolling empirical p supports diagnostic broad band')
-          wcsv(OUT/'R17K_R8Y_TARGET_METRICS.csv',MET); wcsv(OUT/'R17K_R8Y_POISSON_TAILS.csv',POIS); wcsv(OUT/'R17K_R8Y_PLACEBO_SCAN.csv',PLACE); wcsv(OUT/'R17K_R8Y_ROLLING_FALSE_ALARM.csv',ROLL); wcsv(OUT/'R17K_R8Y_BOOTSTRAP_SAMPLES.csv',BOOT); wcsv(OUT/'R17K_R8Y_BOOTSTRAP_SUMMARY.csv',BOOTSUM); wcsv(OUT/'R17K_R8Y_ROW_MEASUREMENTS.csv',ROW)
-          (OUT/'R17K_R8Y_ERRORS.json').write_text(json.dumps(ERR,indent=2),encoding='utf-8')
-          (OUT/'R17K_R8Y_THEORY_LINK_NOTE.txt').write_text('R8Y is empirical statistics only. Reverse trace remains blocked unless locked 508-514 itself validates moderate/strong. Broad 507-515 remains diagnostic support.\n',encoding='utf-8')
-          summary=dict(run_id='R17K_R8Y_COMPACT_EMPIRICAL_FALSE_ALARM_BOOTSTRAP_SPI511',decision=dec,proof_allowed=False,backtrace_permission=back,spectra_files_found=len(spectra),calibration_rows_found=len(CAL),calibrated_rows_used=len(items),target_scws=target,target_rows=len(tgt),rolling_window_width=width,locked_metric=locked,broad_metric=broad,locked_local_rolling_empirical=lroll,broad_local_rolling_empirical=broll,locked_scw_bootstrap=lboot,broad_scw_bootstrap=bboot,notes=notes,claim_ceiling=['DIAGNOSTIC_NOT_PROOF','NOT_DISCOVERY','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_OFFICIAL_SPI_511_LINE_PROOF'])
-          (OUT/'R17K_R8Y_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          OUT=Path('ACIRM_R17K_R9A_OUTPUTS')
+          locked={
+            'band':'508-514 keV','z':2.945294,'ratio':1.139377,'placebo_rank':'1/56',
+            'placebo_empirical_p':0.01754,'rolling_empirical_p':0.00465,
+            'poisson_tail':0.00202,'bootstrap_prob_z_ge_3':0.4015,
+            'classification':'LOCKED_508_514_NEAR_MODERATE_SUBTHRESHOLD_CORE'
+          }
+          broad={
+            'band':'507-515 keV','z':3.333244,'ratio':1.136603,'placebo_rank':'1/55',
+            'placebo_empirical_p':0.01786,'rolling_empirical_p':0.00465,
+            'poisson_tail':0.000560,'bootstrap_prob_z_ge_3':0.914,
+            'classification':'EMPIRICALLY_SUPPORTED_GOVERNED_MODERATE_DIAGNOSTIC_511_RESPONSE'
+          }
+          target={
+            'candidate_id':'REV2446_GOVERNED_SPI511_RESPONSE',
+            'target_start_scw':'244600170010','target_end_scw':'244600210010',
+            'target_scw_list':'244600170010;244600180010;244600190010;244600200010;244600210010',
+            'product_first_status':'PASS_EXPLORATORY_PRODUCT_RESPONSE',
+            'official_core_status':'SUBTHRESHOLD_NO_OFFICIAL_BACKTRACE',
+            'exploratory_trace_status':'OPEN_WITH_LOW_CLAIM_CEILING'
+          }
+          ledger=[
+            {'stage':'P0_PRODUCT_FIRST_INPUT','status':'PASS_EXPLORATORY','evidence':'R8Y/R8Z broad 507-515 is empirically supported moderate diagnostic; locked 508-514 is near-moderate but subthreshold','claim_ceiling':'DIAGNOSTIC_NOT_PROOF'},
+            {'stage':'P1_OFFICIAL_CORE_GATE','status':'FAIL_FOR_OFFICIAL_BACKTRACE','evidence':'locked 508-514 z=2.945294 < 3.000000; bootstrap prob(z>=3)=0.4015','claim_ceiling':'NO_OFFICIAL_511_PROOF'},
+            {'stage':'P2_GOVERNED_RESPONSE_GATE','status':'PASS_FOR_EXPLORATORY_TRACE_ONLY','evidence':'broad 507-515 z=3.333244, rolling empirical p=0.00465, SCW bootstrap prob(z>=3)=0.914','claim_ceiling':'GOVERNED_DIAGNOSTIC_RESPONSE_ONLY'},
+            {'stage':'P3_TEMPORAL_PRODUCT_ANCHOR','status':'ANCHOR_DEFINED','evidence':'SCW window 244600170010-244600210010 around rev2446','claim_ceiling':'NO_CAUSAL_PROOF'},
+            {'stage':'P4_REVERSE_TRACE_REQUIREMENT','status':'NEXT_REQUIRED','evidence':'Need external/available photon-alignment or precursor artifact to test gate/source/frequency chain','claim_ceiling':'NO_SOURCE_ATTRIBUTION'},
+            {'stage':'P5_ACIRM_INTERPRETATION','status':'EXPLORATORY_ONLY','evidence':'Can search for temporal/energy precursor and photon alignment, but cannot claim particle production or ACIRM proof from SPI response alone','claim_ceiling':'NOT_ACIRM_PROOF'}
+          ]
+          next_steps=[
+            {'next_id':'R9B','name':'EXISTING_ARTIFACT_BACKTRACE_LOCATOR','purpose':'Search repo/workspace for LAT/photon-alignment/minus14/R9C artifacts that can be used without rerun.'},
+            {'next_id':'R9C','name':'PHOTON_ALIGNMENT_GATE_TEST_IF_ARTIFACTS_FOUND','purpose':'Only if R9B finds usable artifacts, test product->precursor->alignment chain.'},
+            {'next_id':'R9D','name':'SOURCE_GATE_INFERENCE_LOW_CEILING','purpose':'Infer possible gate/source/frequency only after a non-random alignment witness exists.'}
+          ]
+          decision={
+            'run_id':'R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_SPI511',
+            'decision':'R17K_R9A_EXPLORATORY_BACKTRACE_OPENED_FROM_GOVERNED_BROAD_511_RESPONSE_OFFICIAL_BACKTRACE_BLOCKED_NOT_PROOF',
+            'proof_allowed':False,
+            'official_backtrace_permission':False,
+            'exploratory_backtrace_allowed':True,
+            'source_attribution_allowed':False,
+            'particle_proof_allowed':False,
+            'target':target,
+            'locked_508_514':locked,
+            'broad_507_515':broad,
+            'reverse_trace_ledger':ledger,
+            'next_required_steps':next_steps,
+            'claim_ceiling':['EXPLORATORY_BACKTRACE_ONLY','DIAGNOSTIC_511_RESPONSE_CANDIDATE','NOT_OFFICIAL_511_PROOF','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_ACIRM_PROOF'],
+            'runtime_platform':platform.platform()
+          }
+          def wcsv(path, rows):
+            keys=[]
+            for r in rows:
+              for k in r:
+                if k not in keys: keys.append(k)
+            with open(path,'w',newline='',encoding='utf-8') as f:
+              w=csv.DictWriter(f,fieldnames=keys); w.writeheader(); w.writerows(rows)
+          (OUT/'R17K_R9A_DECISION.json').write_text(json.dumps(decision,indent=2),encoding='utf-8')
+          wcsv(OUT/'R17K_R9A_REVERSE_TRACE_LEDGER.csv',ledger)
+          wcsv(OUT/'R17K_R9A_PRODUCT_METRICS.csv',[{'metric':'locked_508_514',**locked},{'metric':'broad_507_515',**broad}])
+          wcsv(OUT/'R17K_R9A_NEXT_STEPS.csv',next_steps)
+          (OUT/'R17K_R9A_THEORY_NOTE_AR.txt').write_text('R9A يفتح فقط مسار الرجوع العكسي الاستكشافي من مرشح 511 العريض المحكوم. لا يثبت 511 رسميًا، ولا يثبت إنتاج جسيمات، ولا يسمح بنسبة مصدر، ولا يثبت ACIRM. الخطوة التالية R9B تبحث عن artifacts موجودة للـ photon alignment / precursor قبل أي استنتاج مصدر أو تردد.\n',encoding='utf-8')
+          (OUT/'R17K_R9A_STATUS.txt').write_text(decision['decision']+'\n',encoding='utf-8')
+          sha=hashlib.sha256((OUT/'R17K_R9A_DECISION.json').read_bytes()).hexdigest()
+          (OUT/'R17K_R9A_DECISION_JSON_SHA256.txt').write_text(sha+'  R17K_R9A_DECISION.json\n',encoding='utf-8')
           PY
-          python3 scripts/r8y_compact.py > logs/r8y_python.log 2>&1
-          echo "PYTHON_EXIT=$?" | tee ACIRM_R17K_R8Y_OUTPUTS/R17K_R8Y_PYTHON_EXIT.txt
-
-      - name: Save spectra cache
-        if: always() && steps.restore-wide.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: repo/scw
-          key: acirm-r17k-r8y-compact-rev${{ inputs.rev_center }}-${{ inputs.target_start }}-${{ inputs.target_end }}-v1
+          echo "PYTHON_EXIT=$?" | tee ACIRM_R17K_R9A_OUTPUTS/R17K_R9A_PYTHON_EXIT.txt
 
       - name: Package artifact always
         if: always()
         shell: bash
         run: |
           set +e
-          mkdir -p ACIRM_R17K_R8Y_OUTPUTS logs
-          cp logs/*.log ACIRM_R17K_R8Y_OUTPUTS/ 2>/dev/null || true
-          find repo/scw -maxdepth 6 -type f -name 'spi_spectra.fits.gz' -printf '%p,%s\n' | sort > ACIRM_R17K_R8Y_OUTPUTS/R17K_R8Y_FINAL_SPECTRA_FILE_SIZES.csv 2>/dev/null || true
-          df -h > ACIRM_R17K_R8Y_OUTPUTS/R17K_R8Y_DF_END.txt
-          free -h > ACIRM_R17K_R8Y_OUTPUTS/R17K_R8Y_FREE_END.txt
-          zip -r ACIRM_R17K_R8Y_COMPACT_EMPIRICAL_SPI511_OUTPUT.zip ACIRM_R17K_R8Y_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R8Y_COMPACT_EMPIRICAL_SPI511_OUTPUT.zip > ACIRM_R17K_R8Y_COMPACT_EMPIRICAL_SPI511_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R8Y_COMPACT_EMPIRICAL_SPI511_OUTPUT.zip ACIRM_R17K_R8Y_COMPACT_EMPIRICAL_SPI511_OUTPUT.zip.sha256.txt
+          mkdir -p ACIRM_R17K_R9A_OUTPUTS logs
+          df -h > ACIRM_R17K_R9A_OUTPUTS/R17K_R9A_DF_END.txt
+          free -h > ACIRM_R17K_R9A_OUTPUTS/R17K_R9A_FREE_END.txt
+          zip -r ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip ACIRM_R17K_R9A_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip > ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip.sha256.txt
 
       - name: Upload artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R8Y_COMPACT_EMPIRICAL_SPI511_OUTPUT
+          name: ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT
           path: |
-            ACIRM_R17K_R8Y_COMPACT_EMPIRICAL_SPI511_OUTPUT.zip
-            ACIRM_R17K_R8Y_COMPACT_EMPIRICAL_SPI511_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip
+            ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip.sha256.txt
           retention-days: 7
