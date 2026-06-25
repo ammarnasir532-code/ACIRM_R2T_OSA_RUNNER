@@ -1,111 +1,312 @@
-name: ACIRM R17K R9A Compact Exploratory Trace Ledger SPI511
+name: ACIRM R17K R9B Existing Artifact Backtrace Locator
 
 on:
   workflow_dispatch:
+    inputs:
+      max_artifacts:
+        required: false
+        default: '40'
+      max_download_mb:
+        required: false
+        default: '250'
+      scan_limit_mb_per_file:
+        required: false
+        default: '3'
 
 permissions:
   contents: read
-  actions: write
+  actions: read
 
 jobs:
-  r17k-r9a-compact-exploratory-trace-ledger:
+  r17k-r9b-existing-artifact-backtrace-locator:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    env:
+      MAX_ARTIFACTS: ${{ inputs.max_artifacts }}
+      MAX_DOWNLOAD_MB: ${{ inputs.max_download_mb }}
+      SCAN_LIMIT_MB_PER_FILE: ${{ inputs.scan_limit_mb_per_file }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+
     steps:
-      - name: Build R9A exploratory trace ledger
+      - name: Checkout repo shallow
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Prepare R9B folders
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ACIRM_R17K_R9B_OUTPUTS logs scripts artifact_bank extracted_artifacts repo_scan
+          cat > ACIRM_R17K_R9B_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
+          R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR
+          SEARCHES EXISTING REPOSITORY FILES AND PRIOR GITHUB ACTIONS ARTIFACTS ONLY
+          NO LAT RERUN
+          NO SPI RERUN
+          NO NEW PHYSICAL CLAIM
+          PURPOSE: locate precursor / photon-alignment / phase / R9C / R21AX artifacts for exploratory reverse trace from R9A governed 511 response
+          EXPLORATORY_BACKTRACE_ONLY
+          NOT_OFFICIAL_511_PROOF
+          NOT_PARTICLE_PROOF
+          NOT_SOURCE_ATTRIBUTION
+          NOT_ACIRM_PROOF
+          EOF
+          printf 'MAX_ARTIFACTS=%s\nMAX_DOWNLOAD_MB=%s\nSCAN_LIMIT_MB_PER_FILE=%s\nGH_REPO=%s\n' "$MAX_ARTIFACTS" "$MAX_DOWNLOAD_MB" "$SCAN_LIMIT_MB_PER_FILE" "$GH_REPO" > ACIRM_R17K_R9B_OUTPUTS/R17K_R9B_INPUTS.txt
+
+      - name: Install minimal tools
         shell: bash
         run: |
           set +e
-          mkdir -p ACIRM_R17K_R9A_OUTPUTS logs
-          python3 - <<'PY'
-          import csv, json, hashlib, platform
+          sudo apt-get update -y > logs/apt_update.log 2>&1
+          sudo apt-get install -y zip unzip python3 > logs/apt_install.log 2>&1
+
+      - name: Download prior GitHub Actions artifacts
+        shell: bash
+        run: |
+          set +e
+          cat > scripts/r9b_fetch_artifacts.py <<'PY'
+          import csv, json, os, time, urllib.request
           from pathlib import Path
-          OUT=Path('ACIRM_R17K_R9A_OUTPUTS')
-          locked={
-            'band':'508-514 keV','z':2.945294,'ratio':1.139377,'placebo_rank':'1/56',
-            'placebo_empirical_p':0.01754,'rolling_empirical_p':0.00465,
-            'poisson_tail':0.00202,'bootstrap_prob_z_ge_3':0.4015,
-            'classification':'LOCKED_508_514_NEAR_MODERATE_SUBTHRESHOLD_CORE'
+          OUT=Path('ACIRM_R17K_R9B_OUTPUTS'); BANK=Path('artifact_bank'); BANK.mkdir(exist_ok=True)
+          repo=os.environ.get('GH_REPO','')
+          token=os.environ.get('GH_TOKEN','')
+          max_art=int(os.environ.get('MAX_ARTIFACTS','40'))
+          max_bytes=int(float(os.environ.get('MAX_DOWNLOAD_MB','250'))*1024*1024)
+          rows=[]; errors=[]; downloaded=0; total=0
+          def req_json(url):
+              r=urllib.request.Request(url,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','User-Agent':'ACIRM-R9B/1.0','X-GitHub-Api-Version':'2022-11-28'})
+              with urllib.request.urlopen(r,timeout=30) as h:
+                  return json.loads(h.read().decode('utf-8','replace'))
+          def dl(url,dest):
+              r=urllib.request.Request(url,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','User-Agent':'ACIRM-R9B/1.0','X-GitHub-Api-Version':'2022-11-28'})
+              with urllib.request.urlopen(r,timeout=60) as h:
+                  data=h.read()
+              dest.write_bytes(data)
+              return len(data)
+          try:
+              if not repo or not token:
+                  raise RuntimeError('missing GH_REPO or GH_TOKEN')
+              page=1; candidates=[]
+              while page<=10 and len(candidates)<max_art*3:
+                  url=f'https://api.github.com/repos/{repo}/actions/artifacts?per_page=100&page={page}'
+                  js=req_json(url)
+                  arts=js.get('artifacts',[])
+                  if not arts: break
+                  for a in arts:
+                      name=a.get('name','') or ''
+                      expired=bool(a.get('expired',False))
+                      if expired: continue
+                      keys=['ACIRM','R17K','R8Y','R8Z','R9A','R21AX','LAT','SPI511','511','PHOTON','TRACE']
+                      if any(k.lower() in name.lower() for k in keys):
+                          candidates.append(a)
+                  page+=1
+              candidates=sorted(candidates,key=lambda a:a.get('created_at',''),reverse=True)
+              for a in candidates:
+                  if downloaded>=max_art or total>=max_bytes: break
+                  name=a.get('name','artifact')
+                  size=int(a.get('size_in_bytes') or 0)
+                  safe=''.join(ch if ch.isalnum() or ch in '._-' else '_' for ch in name)[:160]
+                  dest=BANK/(safe+'__artifact_'+str(a.get('id',''))+'.zip')
+                  row={'artifact_id':a.get('id'),'name':name,'size_in_bytes':size,'created_at':a.get('created_at'),'status':'SKIPPED','path':str(dest)}
+                  if total+size>max_bytes:
+                      row['status']='SKIP_SIZE_CAP'; rows.append(row); continue
+                  try:
+                      n=dl(a.get('archive_download_url'),dest)
+                      total+=n; downloaded+=1
+                      row.update({'status':'OK','downloaded_bytes':n})
+                  except Exception as e:
+                      row.update({'status':'DOWNLOAD_FAIL','error':repr(e)[:240]})
+                      errors.append(row.copy())
+                  rows.append(row)
+                  time.sleep(0.1)
+          except Exception as e:
+              errors.append({'stage':'list_or_download','error':repr(e)[:500]})
+          def wcsv(path, rs):
+              keys=[]
+              for r in rs:
+                  for k in r:
+                      if k not in keys: keys.append(k)
+              if not keys: keys=['empty']
+              with open(path,'w',newline='',encoding='utf-8') as f:
+                  w=csv.DictWriter(f,fieldnames=keys); w.writeheader(); w.writerows(rs)
+          wcsv(OUT/'R17K_R9B_ARTIFACT_DOWNLOAD_MANIFEST.csv',rows)
+          (OUT/'R17K_R9B_ARTIFACT_DOWNLOAD_ERRORS.json').write_text(json.dumps(errors,indent=2),encoding='utf-8')
+          summary={'downloaded_artifact_count':downloaded,'downloaded_bytes':total,'candidate_count_seen':len(rows),'error_count':len(errors)}
+          (OUT/'R17K_R9B_ARTIFACT_DOWNLOAD_SUMMARY.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          PY
+          python3 scripts/r9b_fetch_artifacts.py > logs/r9b_fetch_artifacts.log 2>&1
+          echo "FETCH_EXIT=$?" | tee ACIRM_R17K_R9B_OUTPUTS/R17K_R9B_FETCH_EXIT.txt
+
+      - name: Extract and scan artifacts
+        shell: bash
+        run: |
+          set +e
+          cat > scripts/r9b_scan.py <<'PY'
+          import csv, json, os, re, zipfile
+          from pathlib import Path
+          OUT=Path('ACIRM_R17K_R9B_OUTPUTS'); BANK=Path('artifact_bank'); EXT=Path('extracted_artifacts')
+          EXT.mkdir(exist_ok=True)
+          limit=int(float(os.environ.get('SCAN_LIMIT_MB_PER_FILE','3'))*1024*1024)
+          errors=[]; extracted=[]; file_hits=[]; group_counts={}
+          KEYWORDS={
+            'spi511_response':['R8Y','R8Z','R9A','511','508-514','507-515','governed','broad','Poisson_tail','bootstrap_prob_z_ge_3','EMPIRICALLY_SUPPORTED'],
+            'minus14_precursor':['minus14','MINUS14','-14','preparatory','shoulder','precursor','P1','P2','phase-pair'],
+            'photon_alignment':['photon alignment','PHOTON_ALIGNMENT','alignment','phase alignment','phase','packet_N','2239.664','f_R9C','frequency'],
+            'lat_delayed':['LAT','Fermi','30-100','plus21','+21','delayed','photon','P5','TS'],
+            'r9c_anchor':['R9C','Cyg X-1','CygX-1','Cygnus','M_eff','f_raw','f_R9C'],
+            'r21ax_branch':['R21AX','R7E','R7F','R6G','R6H','R6I','R6M','R7A','R7G'],
+            'claim_ceiling':['NOT_PROOF','NOT_DISCOVERY','NOT_SOURCE_ATTRIBUTION','NOT_PARTICLE_PROOF','DIAGNOSTIC_NOT_PROOF','EXPLORATORY']
           }
-          broad={
-            'band':'507-515 keV','z':3.333244,'ratio':1.136603,'placebo_rank':'1/55',
-            'placebo_empirical_p':0.01786,'rolling_empirical_p':0.00465,
-            'poisson_tail':0.000560,'bootstrap_prob_z_ge_3':0.914,
-            'classification':'EMPIRICALLY_SUPPORTED_GOVERNED_MODERATE_DIAGNOSTIC_511_RESPONSE'
-          }
-          target={
-            'candidate_id':'REV2446_GOVERNED_SPI511_RESPONSE',
-            'target_start_scw':'244600170010','target_end_scw':'244600210010',
-            'target_scw_list':'244600170010;244600180010;244600190010;244600200010;244600210010',
-            'product_first_status':'PASS_EXPLORATORY_PRODUCT_RESPONSE',
-            'official_core_status':'SUBTHRESHOLD_NO_OFFICIAL_BACKTRACE',
-            'exploratory_trace_status':'OPEN_WITH_LOW_CLAIM_CEILING'
-          }
-          ledger=[
-            {'stage':'P0_PRODUCT_FIRST_INPUT','status':'PASS_EXPLORATORY','evidence':'R8Y/R8Z broad 507-515 is empirically supported moderate diagnostic; locked 508-514 is near-moderate but subthreshold','claim_ceiling':'DIAGNOSTIC_NOT_PROOF'},
-            {'stage':'P1_OFFICIAL_CORE_GATE','status':'FAIL_FOR_OFFICIAL_BACKTRACE','evidence':'locked 508-514 z=2.945294 < 3.000000; bootstrap prob(z>=3)=0.4015','claim_ceiling':'NO_OFFICIAL_511_PROOF'},
-            {'stage':'P2_GOVERNED_RESPONSE_GATE','status':'PASS_FOR_EXPLORATORY_TRACE_ONLY','evidence':'broad 507-515 z=3.333244, rolling empirical p=0.00465, SCW bootstrap prob(z>=3)=0.914','claim_ceiling':'GOVERNED_DIAGNOSTIC_RESPONSE_ONLY'},
-            {'stage':'P3_TEMPORAL_PRODUCT_ANCHOR','status':'ANCHOR_DEFINED','evidence':'SCW window 244600170010-244600210010 around rev2446','claim_ceiling':'NO_CAUSAL_PROOF'},
-            {'stage':'P4_REVERSE_TRACE_REQUIREMENT','status':'NEXT_REQUIRED','evidence':'Need external/available photon-alignment or precursor artifact to test gate/source/frequency chain','claim_ceiling':'NO_SOURCE_ATTRIBUTION'},
-            {'stage':'P5_ACIRM_INTERPRETATION','status':'EXPLORATORY_ONLY','evidence':'Can search for temporal/energy precursor and photon alignment, but cannot claim particle production or ACIRM proof from SPI response alone','claim_ceiling':'NOT_ACIRM_PROOF'}
-          ]
-          next_steps=[
-            {'next_id':'R9B','name':'EXISTING_ARTIFACT_BACKTRACE_LOCATOR','purpose':'Search repo/workspace for LAT/photon-alignment/minus14/R9C artifacts that can be used without rerun.'},
-            {'next_id':'R9C','name':'PHOTON_ALIGNMENT_GATE_TEST_IF_ARTIFACTS_FOUND','purpose':'Only if R9B finds usable artifacts, test product->precursor->alignment chain.'},
-            {'next_id':'R9D','name':'SOURCE_GATE_INFERENCE_LOW_CEILING','purpose':'Infer possible gate/source/frequency only after a non-random alignment witness exists.'}
-          ]
-          decision={
-            'run_id':'R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_SPI511',
-            'decision':'R17K_R9A_EXPLORATORY_BACKTRACE_OPENED_FROM_GOVERNED_BROAD_511_RESPONSE_OFFICIAL_BACKTRACE_BLOCKED_NOT_PROOF',
+          for k in KEYWORDS: group_counts[k]=0
+          def safe_name(s): return ''.join(ch if ch.isalnum() or ch in '._-' else '_' for ch in s)[:140]
+          def extract_zip(zpath, dest, depth=0):
+              if depth>3: return
+              try:
+                  with zipfile.ZipFile(zpath) as z:
+                      for m in z.infolist()[:2000]:
+                          if m.is_dir(): continue
+                          name=m.filename
+                          if '..' in Path(name).parts: continue
+                          if m.file_size>25*1024*1024: continue
+                          out=dest/safe_name(name.replace('/','__'))
+                          out.parent.mkdir(parents=True,exist_ok=True)
+                          try:
+                              out.write_bytes(z.read(m))
+                              extracted.append({'zip':str(zpath),'member':name,'size':m.file_size,'path':str(out)})
+                              if out.suffix.lower()=='.zip':
+                                  nd=dest/(out.stem+'_unzipped')
+                                  nd.mkdir(exist_ok=True)
+                                  extract_zip(out,nd,depth+1)
+                          except Exception as e:
+                              errors.append({'stage':'member_extract','zip':str(zpath),'member':name,'error':repr(e)[:220]})
+              except Exception as e:
+                  errors.append({'stage':'zip_extract','zip':str(zpath),'error':repr(e)[:220]})
+          for z in sorted(BANK.glob('*.zip')):
+              d=EXT/safe_name(z.stem); d.mkdir(exist_ok=True)
+              extract_zip(z,d,0)
+
+          scan_roots=[EXT,Path('.')]
+          allowed={'.txt','.md','.json','.csv','.log','.yml','.yaml','.tex'}
+          seen=set()
+          for root in scan_roots:
+              for p in root.rglob('*'):
+                  if not p.is_file(): continue
+                  sp=str(p)
+                  if '/.git/' in sp or sp.startswith('.git/'): continue
+                  if '/artifact_bank/' in sp: continue
+                  if p.suffix.lower() not in allowed: continue
+                  try:
+                      sz=p.stat().st_size
+                      if sz>limit: continue
+                      key=str(p.resolve())
+                      if key in seen: continue
+                      seen.add(key)
+                      txt=p.read_text(encoding='utf-8',errors='replace')
+                      lower=txt.lower()
+                      hits={}; score=0; snippets=[]
+                      for g,ks in KEYWORDS.items():
+                          gh=0
+                          for kw in ks:
+                              c=lower.count(kw.lower())
+                              if c: gh+=c
+                          if gh:
+                              hits[g]=gh; group_counts[g]+=gh; score+=gh
+                      if score:
+                          for term in ['R17K_R8Y','R17K_R8Z','R17K_R9A','minus14','PHOTON_ALIGNMENT','R9C','R21AX','507-515','508-514','LAT']:
+                              i=lower.find(term.lower())
+                              if i>=0:
+                                  snippets.append(txt[max(0,i-120):min(len(txt),i+220)].replace('\n',' ')[:360])
+                          file_hits.append({'path':sp,'size':sz,'score':score,'groups':';'.join(sorted(hits)),'hits_json':json.dumps(hits,sort_keys=True),'snippet':' || '.join(snippets[:3])})
+                  except Exception as e:
+                      errors.append({'stage':'scan_file','path':str(p),'error':repr(e)[:200]})
+          file_hits=sorted(file_hits,key=lambda r:r['score'],reverse=True)
+          def wcsv(path, rows):
+              keys=[]
+              for r in rows:
+                  for k in r:
+                      if k not in keys: keys.append(k)
+              if not keys: keys=['empty']
+              with open(path,'w',newline='',encoding='utf-8') as f:
+                  w=csv.DictWriter(f,fieldnames=keys); w.writeheader(); w.writerows(rows)
+          wcsv(OUT/'R17K_R9B_EXTRACTED_FILE_MANIFEST.csv',extracted)
+          wcsv(OUT/'R17K_R9B_ARTIFACT_HITS_RANKED.csv',file_hits[:500])
+          (OUT/'R17K_R9B_SCAN_ERRORS.json').write_text(json.dumps(errors,indent=2),encoding='utf-8')
+          has_511=group_counts.get('spi511_response',0)>0
+          has_precursor=group_counts.get('minus14_precursor',0)>0
+          has_alignment=group_counts.get('photon_alignment',0)>0
+          has_r9c=group_counts.get('r9c_anchor',0)>0
+          has_lat=group_counts.get('lat_delayed',0)>0
+          has_r21=group_counts.get('r21ax_branch',0)>0
+          if not extracted and len(list(BANK.glob('*.zip')))==0:
+              decision='R17K_R9B_NO_PRIOR_GITHUB_ARTIFACTS_ACCESSIBLE_NEED_MANUAL_UPLOAD_OR_REPO_COMMIT'
+              ready=False
+          elif has_511 and has_precursor and (has_alignment or has_r9c or has_lat):
+              decision='R17K_R9B_EXISTING_ARTIFACTS_FOUND_FOR_EXPLORATORY_PRODUCT_TO_PRECURSOR_ALIGNMENT_TRACE_READY_LOW_CEILING'
+              ready=True
+          elif has_511 and (has_precursor or has_alignment or has_r9c or has_lat or has_r21):
+              decision='R17K_R9B_PARTIAL_EXISTING_ARTIFACT_CHAIN_FOUND_TRACE_PREPARATION_READY_LOW_CEILING'
+              ready=True
+          elif has_511:
+              decision='R17K_R9B_511_RESPONSE_ARTIFACT_FOUND_BUT_NO_PRECURSOR_ALIGNMENT_ARTIFACT_FOUND'
+              ready=False
+          else:
+              decision='R17K_R9B_NO_USABLE_511_BACKTRACE_ARTIFACT_CHAIN_FOUND_IN_ACCESSIBLE_FILES'
+              ready=False
+          top=file_hits[:25]
+          trace_inputs=[]
+          for r in top:
+              groups=r.get('groups','')
+              if any(g in groups for g in ['spi511_response','minus14_precursor','photon_alignment','lat_delayed','r9c_anchor','r21ax_branch']):
+                  trace_inputs.append({'path':r['path'],'score':r['score'],'groups':groups,'use':'candidate_trace_input','snippet':r.get('snippet','')})
+          wcsv(OUT/'R17K_R9B_CANDIDATE_TRACE_INPUTS.csv',trace_inputs[:80])
+          summary={
+            'run_id':'R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR',
+            'decision':decision,
             'proof_allowed':False,
             'official_backtrace_permission':False,
-            'exploratory_backtrace_allowed':True,
+            'exploratory_trace_preparation_ready':ready,
             'source_attribution_allowed':False,
-            'particle_proof_allowed':False,
-            'target':target,
-            'locked_508_514':locked,
-            'broad_507_515':broad,
-            'reverse_trace_ledger':ledger,
-            'next_required_steps':next_steps,
-            'claim_ceiling':['EXPLORATORY_BACKTRACE_ONLY','DIAGNOSTIC_511_RESPONSE_CANDIDATE','NOT_OFFICIAL_511_PROOF','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_ACIRM_PROOF'],
-            'runtime_platform':platform.platform()
+            'downloaded_zip_count':len(list(BANK.glob('*.zip'))),
+            'extracted_file_count':len(extracted),
+            'scanned_hit_file_count':len(file_hits),
+            'keyword_group_counts':group_counts,
+            'has_spi511_response_artifact':has_511,
+            'has_minus14_precursor_artifact':has_precursor,
+            'has_photon_alignment_artifact':has_alignment,
+            'has_r9c_anchor_artifact':has_r9c,
+            'has_lat_delayed_artifact':has_lat,
+            'has_r21ax_branch_artifact':has_r21,
+            'top_candidate_files':top[:10],
+            'next_step':'R9C_COMPACT_TRACE_SYNTHESIS_FROM_R9B_INPUTS' if ready else 'UPLOAD_OR_COMMIT_REQUIRED_ARTIFACTS_THEN_REPEAT_R9B',
+            'claim_ceiling':['EXPLORATORY_TRACE_PREPARATION_ONLY','DIAGNOSTIC_511_RESPONSE_CANDIDATE','NOT_OFFICIAL_511_PROOF','NOT_PARTICLE_PROOF','NOT_SOURCE_ATTRIBUTION','NOT_ACIRM_PROOF']
           }
-          def wcsv(path, rows):
-            keys=[]
-            for r in rows:
-              for k in r:
-                if k not in keys: keys.append(k)
-            with open(path,'w',newline='',encoding='utf-8') as f:
-              w=csv.DictWriter(f,fieldnames=keys); w.writeheader(); w.writerows(rows)
-          (OUT/'R17K_R9A_DECISION.json').write_text(json.dumps(decision,indent=2),encoding='utf-8')
-          wcsv(OUT/'R17K_R9A_REVERSE_TRACE_LEDGER.csv',ledger)
-          wcsv(OUT/'R17K_R9A_PRODUCT_METRICS.csv',[{'metric':'locked_508_514',**locked},{'metric':'broad_507_515',**broad}])
-          wcsv(OUT/'R17K_R9A_NEXT_STEPS.csv',next_steps)
-          (OUT/'R17K_R9A_THEORY_NOTE_AR.txt').write_text('R9A يفتح فقط مسار الرجوع العكسي الاستكشافي من مرشح 511 العريض المحكوم. لا يثبت 511 رسميًا، ولا يثبت إنتاج جسيمات، ولا يسمح بنسبة مصدر، ولا يثبت ACIRM. الخطوة التالية R9B تبحث عن artifacts موجودة للـ photon alignment / precursor قبل أي استنتاج مصدر أو تردد.\n',encoding='utf-8')
-          (OUT/'R17K_R9A_STATUS.txt').write_text(decision['decision']+'\n',encoding='utf-8')
-          sha=hashlib.sha256((OUT/'R17K_R9A_DECISION.json').read_bytes()).hexdigest()
-          (OUT/'R17K_R9A_DECISION_JSON_SHA256.txt').write_text(sha+'  R17K_R9A_DECISION.json\n',encoding='utf-8')
+          (OUT/'R17K_R9B_DECISION.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          (OUT/'R17K_R9B_THEORY_NOTE_AR.txt').write_text('R9B لا يثبت شيئًا ولا يعيد تشغيل LAT/SPI. وظيفته فقط تحديد هل توجد artifacts كافية لبدء تركيب رجوع عكسي استكشافي من مرشح 511 المحكوم في R9A. إذا وجد 511 + precursor/alignment/R9C/LAT artifacts فالخطوة R9C تركيب سلسلة منخفضة السقف.\n',encoding='utf-8')
           PY
-          echo "PYTHON_EXIT=$?" | tee ACIRM_R17K_R9A_OUTPUTS/R17K_R9A_PYTHON_EXIT.txt
+          python3 scripts/r9b_scan.py > logs/r9b_scan.log 2>&1
+          echo "SCAN_EXIT=$?" | tee ACIRM_R17K_R9B_OUTPUTS/R17K_R9B_SCAN_EXIT.txt
 
       - name: Package artifact always
         if: always()
         shell: bash
         run: |
           set +e
-          mkdir -p ACIRM_R17K_R9A_OUTPUTS logs
-          df -h > ACIRM_R17K_R9A_OUTPUTS/R17K_R9A_DF_END.txt
-          free -h > ACIRM_R17K_R9A_OUTPUTS/R17K_R9A_FREE_END.txt
-          zip -r ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip ACIRM_R17K_R9A_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip > ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip.sha256.txt
+          mkdir -p ACIRM_R17K_R9B_OUTPUTS logs
+          cp logs/*.log ACIRM_R17K_R9B_OUTPUTS/ 2>/dev/null || true
+          find artifact_bank -maxdepth 1 -type f -printf '%p,%s\n' | sort > ACIRM_R17K_R9B_OUTPUTS/R17K_R9B_DOWNLOADED_ARTIFACT_FILE_SIZES.csv 2>/dev/null || true
+          df -h > ACIRM_R17K_R9B_OUTPUTS/R17K_R9B_DF_END.txt
+          free -h > ACIRM_R17K_R9B_OUTPUTS/R17K_R9B_FREE_END.txt
+          zip -r ACIRM_R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR_OUTPUT.zip ACIRM_R17K_R9B_OUTPUTS > logs/zip_output.log 2>&1
+          sha256sum ACIRM_R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR_OUTPUT.zip > ACIRM_R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR_OUTPUT.zip.sha256.txt
+          ls -lh ACIRM_R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR_OUTPUT.zip ACIRM_R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR_OUTPUT.zip.sha256.txt
 
       - name: Upload artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT
+          name: ACIRM_R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR_OUTPUT
           path: |
-            ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip
-            ACIRM_R17K_R9A_COMPACT_EXPLORATORY_TRACE_LEDGER_OUTPUT.zip.sha256.txt
+            ACIRM_R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR_OUTPUT.zip
+            ACIRM_R17K_R9B_EXISTING_ARTIFACT_BACKTRACE_LOCATOR_OUTPUT.zip.sha256.txt
           retention-days: 7
