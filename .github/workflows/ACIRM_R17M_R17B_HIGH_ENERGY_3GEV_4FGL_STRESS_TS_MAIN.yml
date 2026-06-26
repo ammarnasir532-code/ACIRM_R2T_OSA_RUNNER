@@ -1,0 +1,975 @@
+name: ACIRM R17B high energy 3GeV limited 4FGL TS FermiBottle run
+
+on:
+  workflow_dispatch:
+
+jobs:
+  r17a-high-energy-1gev-limited-4fgl-ts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Host preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p acirm_r17a data results logs final_artifact pfiles
+          echo "HOST_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee logs/HOST_PREFLIGHT.txt
+          uname -a | tee -a logs/HOST_PREFLIGHT.txt
+          df -h | tee -a logs/HOST_PREFLIGHT.txt
+          docker --version | tee -a logs/HOST_PREFLIGHT.txt
+
+      - name: Write self-contained R17B files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p acirm_r17a data results logs final_artifact pfiles
+
+          cat > acirm_r17a/write_failure.py <<'PY'
+          import json, pathlib, sys, datetime
+          stage = sys.argv[1] if len(sys.argv) > 1 else "UNKNOWN_STAGE"
+          detail = sys.argv[2] if len(sys.argv) > 2 else ""
+          pathlib.Path("results").mkdir(exist_ok=True)
+          out = {
+              "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+              "decision": "R17B_HIGH_ENERGY_3GEV_PRE_TS_OR_FERMITOOLS_STAGE_FAILED_LOGS_READY_NOT_PROOF",
+              "failed_stage": stage,
+              "detail": detail,
+              "claim_ceiling": [
+                  "NO_TS_CONFIRMED_IF_GTLIKE_NOT_OK",
+                  "HIGH_ENERGY_3GEV_LIMITED_4FGL_STRESS_TEST",
+                  "CATALOG_SPECTRA_SIMPLIFIED_TO_POWERLAW_FOR_ROBUSTNESS",
+                  "NOT_PUBLISHABLE_TS",
+                  "NOT_PROOF"
+              ]
+          }
+          pathlib.Path("results/R17B_PRELIMINARY_RESULT.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+          PY
+
+          cat > acirm_r17a/parse_results.py <<'PY'
+          import pathlib, json, re, datetime, xml.etree.ElementTree as ET
+
+          RESULTS = pathlib.Path("results")
+          LOGS = pathlib.Path("logs")
+          GTLIKE_LOG = LOGS / "gtlike_afterglow.log"
+          FIT_XML = RESULTS / "fit_afterglow_output.xml"
+          STAGE = RESULTS / "R17B_STAGE_STATUS.tsv"
+          R11_REFERENCE_TS = 390.148
+
+          def utc_now():
+              return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+          gtlike_status = (RESULTS / "GTLIKE_EXIT_STATUS.txt").read_text(errors="replace").strip() if (RESULTS / "GTLIKE_EXIT_STATUS.txt").exists() else "MISSING"
+          log_text = GTLIKE_LOG.read_text(errors="replace") if GTLIKE_LOG.exists() else ""
+
+          def search_float(pattern, text, default=None, flags=re.S):
+              m = re.search(pattern, text, flags)
+              if not m:
+                  return default
+              try:
+                  return float(m.group(1))
+              except Exception:
+                  return default
+
+          def search_pair(pattern, text, flags=re.S):
+              m = re.search(pattern, text, flags)
+              if not m:
+                  return None, None
+              try:
+                  return float(m.group(1)), float(m.group(2))
+              except Exception:
+                  return None, None
+
+          src_block = ""
+          m = re.search(r"GRB221009A_ACIRM_LOCKED:\s*(.*?)(?:\n\s*\n|\Z)", log_text, re.S)
+          if m:
+              src_block = m.group(1)
+
+          ts_value = search_float(r"GRB221009A_ACIRM_LOCKED:.*?TS value:\s*([0-9.eE+-]+)", log_text)
+          photon_flux, photon_flux_err = search_pair(r"GRB221009A_ACIRM_LOCKED:.*?Photon flux:\s*([0-9.eE+-]+)\s*\+/-\s*([0-9.eE+-]+)", log_text)
+          index_value, index_err = search_pair(r"GRB221009A_ACIRM_LOCKED:.*?Index:\s*([+-]?[0-9.eE+-]+)\s*\+/-\s*([0-9.eE+-]+)", log_text)
+          neg_log_like = search_float(r"minimum function Value:\s*([0-9.eE+-]+)", log_text)
+          model_events = search_float(r"Model events:\s*([0-9.eE+-]+)", log_text)
+          observed_counts = search_float(r"Observed counts:\s*([0-9.eE+-]+)", log_text)
+          n_sources_total = None
+          m = re.search(r"Computing TS values for each source \((\d+) total\)", log_text)
+          if m:
+              n_sources_total = int(m.group(1))
+
+          source_rows = []
+          if FIT_XML.exists():
+              try:
+                  root = ET.parse(FIT_XML).getroot()
+                  for src in root.findall("source"):
+                      row = {"name": src.attrib.get("name"), "type": src.attrib.get("type"), "TS_attribute": src.attrib.get("TS") or src.attrib.get("ts")}
+                      spec = src.find("spectrum")
+                      if spec is not None:
+                          row["spectrum_type"] = spec.attrib.get("type")
+                          for par in spec.findall("parameter"):
+                              pname = par.attrib.get("name")
+                              if pname in ["Prefactor", "Index", "Scale", "Normalization"]:
+                                  row[pname + "_value"] = par.attrib.get("value")
+                                  row[pname + "_free"] = par.attrib.get("free")
+                                  row[pname + "_error"] = par.attrib.get("error")
+                      source_rows.append(row)
+              except Exception as e:
+                  source_rows.append({"parse_error": repr(e)})
+
+          warnings = [line.strip() for line in log_text.splitlines() if "WARNING" in line or "warning" in line]
+          errors = [line.strip() for line in log_text.splitlines() if "ERROR" in line or "Exception" in line or "Traceback" in line]
+          candidate_lines = []
+          for line in log_text.splitlines():
+              low = line.lower()
+              if "grb221009a" in low or "test statistic" in low or re.search(r"\bts\b", low) or "photon flux" in low or "model events" in low or "observed counts" in low or "warning" in low or "exception" in low or "error" in low or "minuit" in low:
+                  candidate_lines.append(line[:800])
+
+          stage_rows = []
+          if STAGE.exists():
+              for line in STAGE.read_text(errors="replace").splitlines()[1:]:
+                  parts = line.split("\t")
+                  if len(parts) >= 3:
+                      stage_rows.append({"utc": parts[0], "stage": parts[1], "status": parts[2]})
+
+          ts_delta = None
+          ts_ratio = None
+          if ts_value is not None:
+              ts_delta = ts_value - R11_REFERENCE_TS
+              ts_ratio = ts_value / R11_REFERENCE_TS if R11_REFERENCE_TS else None
+
+          decision = "R17B_HIGH_ENERGY_3GEV_LIMITED_4FGL_STRESS_TEST_TS_COMPLETED_REQUIRES_R19_AUDIT_NOT_PROOF" if gtlike_status == "0" and FIT_XML.exists() and ts_value is not None else "R17B_HIGH_ENERGY_3GEV_LIMITED_4FGL_STRESS_TEST_INCOMPLETE_OR_FAILED_LOGS_READY_NOT_PROOF"
+
+          out = {
+              "created_utc": utc_now(),
+              "decision": decision,
+              "gtlike_exit_status": gtlike_status,
+              "fit_xml_exists": FIT_XML.exists(),
+              "srcmaps_exists": (RESULTS / "srcmaps_afterglow.fits").exists(),
+              "r11_reference_starter_ts": R11_REFERENCE_TS,
+              "r17a_grb_ts_value": ts_value,
+              "ts_delta_vs_r11": ts_delta,
+              "ts_ratio_vs_r11": ts_ratio,
+              "photon_flux": photon_flux,
+              "photon_flux_error": photon_flux_err,
+              "index": index_value,
+              "index_error": index_err,
+              "negative_log_likelihood": neg_log_like,
+              "observed_counts": observed_counts,
+              "model_events": model_events,
+              "n_sources_total_reported_by_gtlike": n_sources_total,
+              "n_fit_xml_sources": len(source_rows),
+              "warnings": warnings[:100],
+              "errors": errors[:100],
+              "stage_rows": stage_rows,
+              "source_rows_from_fit_xml": source_rows,
+              "candidate_log_lines": candidate_lines[:300],
+              "claim_ceiling": [
+                  "HIGH_ENERGY_3GEV_LIMITED_4FGL_STRESS_TEST",
+                  "4FGL_SOURCES_WITHIN_6DEG_INCLUDED",
+                  "ONLY_SOURCES_WITHIN_3DEG_FREED",
+                  "CATALOG_SPECTRA_SIMPLIFIED_TO_POWERLAW_FOR_ROBUSTNESS",
+                  "NOT_FULL_CATALOG_LIKELIHOOD",
+                  "NOT_FULL_SYSTEMATICS",
+                  "NOT_PUBLISHABLE_TS",
+                  "NOT_SOURCE_ATTRIBUTION_PROOF",
+                  "NO_ACIRM_EXTERNAL_PROOF",
+                  "NOT_PROOF"
+              ]
+          }
+          (RESULTS / "R17B_PRELIMINARY_RESULT.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+          print(json.dumps(out, indent=2))
+          PY
+
+          cat > acirm_r17a/package_results.py <<'PY'
+          from pathlib import Path
+          import zipfile, hashlib, json, datetime, csv
+
+          ROOT = Path(".")
+          FINAL = ROOT / "final_artifact"
+          FINAL.mkdir(exist_ok=True)
+
+          def sha256_file(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for b in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(b)
+              return h.hexdigest()
+
+          result_path = ROOT / "results" / "R17B_PRELIMINARY_RESULT.json"
+          if not result_path.exists():
+              docker_status = (ROOT / "results" / "DOCKER_EXIT_STATUS.txt").read_text(errors="replace").strip() if (ROOT / "results" / "DOCKER_EXIT_STATUS.txt").exists() else "MISSING"
+              out = {
+                  "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+                  "decision": "R17B_DOCKER_OR_PRE_TS_STAGE_DID_NOT_COMPLETE_LOGS_READY_NOT_PROOF",
+                  "docker_exit_status": docker_status,
+                  "claim_ceiling": ["NO_TS_CONFIRMED", "LOGS_ONLY", "NOT_PROOF"]
+              }
+              (ROOT / "results").mkdir(exist_ok=True)
+              result_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+
+          zip_path = FINAL / "ACIRM_R17M_R17B_HIGH_ENERGY_3GEV_4FGL_STRESS_TS_FERMITOOLS_RESULTS.zip"
+          manifest = []
+          with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+              for folder in ["acirm_r17a", "results", "logs"]:
+                  p = ROOT / folder
+                  if not p.exists():
+                      continue
+                  for f in sorted(p.rglob("*")):
+                      if not f.is_file():
+                          continue
+                      if f.suffix.lower() in [".fits", ".fit", ".gz"] and f.stat().st_size > 10_000_000:
+                          manifest.append({"file": str(f), "size_bytes": f.stat().st_size, "included": False, "reason": "large_fits_excluded_from_slim_artifact"})
+                          continue
+                      z.write(f, arcname=str(f))
+                      manifest.append({"file": str(f), "size_bytes": f.stat().st_size, "included": True, "sha256": sha256_file(f)})
+
+          sha = sha256_file(zip_path)
+          (FINAL / (zip_path.name + ".sha256.txt")).write_text(sha + "  " + zip_path.name + "\n", encoding="utf-8")
+          with open(FINAL / "R17B_ARTIFACT_MANIFEST.csv", "w", newline="", encoding="utf-8") as fp:
+              fields = ["file", "size_bytes", "included", "sha256", "reason"]
+              w = csv.DictWriter(fp, fieldnames=fields, extrasaction="ignore")
+              w.writeheader()
+              w.writerows(manifest)
+          status = {
+              "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+              "zip": str(zip_path),
+              "sha256": sha,
+              "decision_source": "results/R17B_PRELIMINARY_RESULT.json",
+              "claim": "R17B_HIGH_ENERGY_3GEV_4FGL_STRESS_TS_ARTIFACT_READY_NOT_PROOF"
+          }
+          (FINAL / "R17B_ARTIFACT_STATUS.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
+          print("ZIP", zip_path)
+          print("SHA256", sha)
+          PY
+
+          cat > results/R17B_MODEL_GRB221009A_LIMITED_NEARBY_4FGL_FROM_R15A_R2.xml <<'XML'
+          <?xml version="1.0" ?>
+          <source_library title="R15A source library: GRB + limited nearby 4FGL + diffuse">
+              <source name="GRB221009A_ACIRM_LOCKED" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="1" max="1e5" min="1e-8" name="Prefactor" scale="1e-10" value="1.0" />
+                <parameter free="1" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.0" />
+                <parameter free="0" max="500000.0" min="100.0" name="Scale" scale="1.0" value="1000.0" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="288.2646" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="19.7735" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1908.9+2103" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="1" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="2.1117857" />
+                <parameter free="1" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.3101933" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1822.213" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="287.23870850" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="21.06040001" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1921.1+1930" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="1" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.83013132" />
+                <parameter free="1" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.3863924" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="2603.1375" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="290.29278564" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="19.51169968" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1917.0+2245" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.23083669" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.322732" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="3204.4651" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="289.26879883" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="22.76379967" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1926.1+2059" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="2.6247204" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.6704206" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1407.953" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="291.53158569" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="20.99480057" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1906.1+1651" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.37191485" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.1817684" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="3369.2073" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="286.54080200" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="16.86479950" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1858.5+1953" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.17971112" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.2788954" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="3289.1067" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="284.63150024" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="19.89209938" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1912.0+1612" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="1.9550872" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5966003" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1595.3206" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="288.02059937" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="16.20210075" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1925.2+1729" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="2.7901799" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.541167" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="2028.8662" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="291.32168579" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="17.48469925" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1907.2+2323" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="4.4178046" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.7084584" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="877.09381" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="286.81259155" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="23.38570023" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1925.1+1707" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.63636305" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.4543309" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="3542.502" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="291.28948975" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="17.12249947" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1913.2+2342" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="1.3608435" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5264401" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1433.5459" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="288.31610107" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="23.71660042" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1928.4+1801c" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="1.372498" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.490752" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="2683.2051" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="292.11151123" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="18.01919937" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1922.2+2314" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.51133004" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.2044208" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="3296.2412" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="290.56619263" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="23.24769974" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1929.8+1832" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.53083057" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.3925314" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="3486.533" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="292.45410156" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="18.54990005" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1930.5+1853" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.076061051" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.0729673" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="7656.6074" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="292.64389038" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="18.89539909" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1919.1+2354" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="2.2868418" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.4003713" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1578.4564" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="289.78118896" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="23.90270042" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1929.0+1729" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="8.5975606" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5613461" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1809.6818" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="292.25588989" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="17.49029922" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1854.5+2050" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.00025282324" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-1.0824739" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="101550.3" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="283.64410400" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="20.83970070" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1856.5+1735" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="5.5501513" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5393579" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1135.8435" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="284.13870239" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="17.59989929" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1925.2+1618e" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.9318965" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.163182" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="5875.6831" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="291.30999756" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="16.29999924" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1932.3+1916" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="29.714319" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.524826" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1610.2981" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="293.07611084" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="19.26849937" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1931.0+1754c" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="2.1709089" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5073183" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1979.4791" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="292.75939941" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="17.91580009" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1932.4+1846" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.23201267" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.36939" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="4499.9106" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="293.10888672" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="18.78210068" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1925.2+1600c" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="3.8476375" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5896335" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1435.8365" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="291.30239868" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="16.00550079" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1926.4+1602" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.74939654" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.4320743" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="3896.3162" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="291.62451172" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="16.03809929" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1859.0+2329" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.46893885" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.2619469" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="2593.7246" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="284.77151489" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="23.49930000" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1911.8+1447" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.027500708" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-1.9360993" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="10523.08" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="287.96978760" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="14.79599953" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1934.3+1859" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="5.5885683" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.603699" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1427.6598" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="293.58480835" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="18.99790001" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1859.8+1545" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.057281285" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.1079674" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="5224.4624" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="284.97479248" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="15.76589966" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1931.1+1656" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="14.504106" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5396769" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1535.2787" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="292.78469849" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="16.94400024" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1932.2+2221" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="1.3983941" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5088103" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="2068.0027" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="293.06500244" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="22.36160088" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1935.2+2029" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="11.948513" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.6528194" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1406.5896" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="293.81790161" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="20.49080086" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1925.3+1522c" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="6.4761933" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.6555314" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1514.8842" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="291.33441162" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="15.37010002" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1922.4+1453c" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="3.3993411" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.606698" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1895.2037" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="290.62240601" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="14.88990021" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1902.8+1451" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="0.20847116" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.2736835" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="3574.9319" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="285.70581055" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="14.86489964" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1936.6+1921" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="2.5630664" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5565581" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="1822.834" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="294.16250610" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="19.35379982" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1849.2+2106" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="4.1385967" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.6591375" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="870.79346" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="282.30349731" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="21.10740089" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1922.7+1428c" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="5.300099" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.537106" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="2049.8557" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="290.69900513" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="14.47259998" />
+              </spatialModel>
+            </source>
+              <source name="R15A_4FGL_SRC_4FGL_J1920.9+1408" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="0" max="1e7" min="1e-8" name="Prefactor" scale="1.0e-13" value="2.8952543" />
+                <parameter free="0" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.5762742" />
+                <parameter free="0" max="1000000.0" min="10.0" name="Scale" scale="1.0" value="2326.8108" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="290.23739624" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="14.14910030" />
+              </spatialModel>
+            </source>
+              <source name="iso_P8R3_SOURCE_V3_v1" type="DiffuseSource">
+              <spectrum apply_edisp="false" file="ISO_DIFFUSE_PLACEHOLDER" type="FileFunction">
+                <parameter free="1" max="10" min="0.01" name="Normalization" scale="1" value="1" />
+              </spectrum>
+              <spatialModel type="ConstantValue">
+                <parameter free="0" max="10.0" min="0.0" name="Value" scale="1.0" value="1.0" />
+              </spatialModel>
+            </source>
+              <source name="gll_iem_v07" type="DiffuseSource">
+              <spectrum type="PowerLaw">
+                <parameter free="1" max="10.0" min="0.0" name="Prefactor" scale="1.0" value="1.0" />
+                <parameter free="0" max="1" min="-1" name="Index" scale="1.0" value="1.0" />
+                <parameter free="0" max="1e6" min="20" name="Scale" scale="1.0" value="100" />
+              </spectrum>
+              <spatialModel file="GAL_DIFFUSE_PLACEHOLDER" type="MapCubeFunction">
+                <parameter free="0" max="1000.0" min="0.001" name="Normalization" scale="1.0" value="1.0" />
+              </spatialModel>
+            </source>
+          </source_library>
+          XML
+
+          cat > acirm_r17a/run_inside_fermibottle.sh <<'BASH'
+          #!/usr/bin/env bash
+          set -Eeo pipefail
+          mkdir -p data results logs pfiles
+          exec > >(tee logs/CONTAINER_STDOUT.log) 2> >(tee logs/CONTAINER_STDERR.log >&2)
+          stage_file="results/R17B_STAGE_STATUS.tsv"
+          echo -e "utc\tstage\tstatus" > "$stage_file"
+          stage() { echo -e "$(date -u +%Y-%m-%dT%H:%M:%SZ)\t$1\t$2" | tee -a "$stage_file"; }
+          fail_stage() { stage "$1" "FAIL"; python acirm_r17a/write_failure.py "$1" "$2" || true; exit "${3:-20}"; }
+
+          stage "container_start" "START"
+          cd /work || fail_stage "workdir" "cannot cd /work" 21
+          test -f /work/acirm_r17a/run_inside_fermibottle.sh || fail_stage "mounted_files" "run script not visible under /work/acirm_r17a" 22
+          test -f /work/results/R17B_MODEL_GRB221009A_LIMITED_NEARBY_4FGL_FROM_R15A_R2.xml || fail_stage "model_xml" "embedded R17B 4FGL model xml missing" 23
+          stage "mounted_files" "OK"
+
+          export HOME="${HOME:-/home/fermi}"
+          export PFILES="/work/pfiles"
+          export HEADASPROMPT="/dev/null"
+          mkdir -p "$PFILES" "$HOME" || true
+
+          stage "environment_setup" "START"
+          set +u
+          if [ -f /opt/anaconda/etc/profile.d/conda.sh ]; then
+            source /opt/anaconda/etc/profile.d/conda.sh >> logs/CONDA_ACTIVATE.txt 2>&1 || true
+            conda activate fermi >> logs/CONDA_ACTIVATE.txt 2>&1 || true
+          fi
+          GTSELECT_PATH="$(find /opt /usr/local /home -type f -name gtselect 2>/dev/null | head -n 1 || true)"
+          if [ -n "$GTSELECT_PATH" ]; then
+            export PATH="$(dirname "$GTSELECT_PATH"):$PATH"
+          fi
+          FERMI_SHARE="$(find /opt /usr/local /home -type d -path '*/share/fermitools' 2>/dev/null | head -n 1 || true)"
+          if [ -n "$FERMI_SHARE" ]; then
+            export FERMI_DIR="$FERMI_SHARE"
+          fi
+          ALIAS_FILE="$(find /opt /usr/local /home /work -path '*/caldb/software/tools/alias_config.fits' 2>/dev/null | head -n 1 || true)"
+          if [ -z "$ALIAS_FILE" ]; then
+            fail_stage "caldb_alias" "alias_config.fits not found under container paths" 24
+          fi
+          CALDB_DIR="$(dirname "$(dirname "$(dirname "$ALIAS_FILE")")")"
+          export CALDB="$CALDB_DIR"
+          export CALDBCONFIG="$CALDB/software/tools/caldb.config"
+          export CALDBALIAS="$CALDB/software/tools/alias_config.fits"
+          mkdir -p /refdata/fermi 2>/dev/null || true
+          if [ ! -e /refdata/fermi/caldb ]; then
+            ln -s "$CALDB" /refdata/fermi/caldb 2>/dev/null || true
+          fi
+          {
+            echo "PATH=$PATH"
+            echo "FERMI_DIR=${FERMI_DIR:-}"
+            echo "CALDB=$CALDB"
+            echo "CALDBCONFIG=$CALDBCONFIG"
+            echo "CALDBALIAS=$CALDBALIAS"
+            echo "ALIAS_FILE=$ALIAS_FILE"
+            ls -lah "$CALDB/software/tools" || true
+            ls -lah /refdata/fermi/caldb/software/tools 2>/dev/null || true
+          } > logs/CALDB_ENVIRONMENT_FIX.txt
+          stage "environment_setup" "OK"
+
+          stage "tool_check" "START"
+          missing=0
+          for tool in gtselect gtmktime gtbin gtltcube gtexpcube2 gtsrcmaps gtlike curl python; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "MISSING_TOOL=$tool" | tee -a logs/TOOL_CHECK.txt
+              missing=1
+            else
+              echo "$tool=$(command -v "$tool")" | tee -a logs/TOOL_CHECK.txt
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            fail_stage "environment_tools" "required Fermitools command missing" 25
+          fi
+          stage "tool_check" "OK"
+
+          PHOTON_URL="https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/weekly/photon/lat_photon_weekly_w749_p305_v001.fits"
+          PHOTON="data/lat_photon_weekly_w749_p305_v001.fits"
+          SC_PRIMARY_URL="https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/weekly/spacecraft/lat_spacecraft_weekly_w749_p310_v001.fits"
+          SC_DIR="https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/weekly/spacecraft/"
+          SPACECRAFT="data/lat_spacecraft_weekly_w749.fits"
+
+          stage "download_photon" "START"
+          if [ ! -s "$PHOTON" ]; then
+            timeout 45m curl -fL --retry 5 --retry-delay 10 --connect-timeout 30 "$PHOTON_URL" -o "$PHOTON" || fail_stage "download_photon" "curl photon failed" 26
+          fi
+          stage "download_photon" "OK"
+
+          stage "download_spacecraft" "START"
+          if [ ! -s "$SPACECRAFT" ]; then
+            if ! timeout 20m curl -fL --retry 3 --retry-delay 10 --connect-timeout 30 "$SC_PRIMARY_URL" -o "$SPACECRAFT"; then
+              echo "Primary spacecraft URL failed; trying directory fallback" | tee -a logs/SPACECRAFT_FALLBACK.log
+              timeout 3m curl -fL --retry 3 --connect-timeout 30 "$SC_DIR" -o logs/spacecraft_dir.html || fail_stage "download_spacecraft" "cannot list spacecraft directory" 27
+              SC_FALLBACK=$(python - <<'PY'
+          import re, pathlib, urllib.parse
+          html = pathlib.Path('logs/spacecraft_dir.html').read_text(errors='replace')
+          links = re.findall(r'href=["\']([^"\']+)["\']', html, flags=re.I)
+          hits = []
+          for h in links:
+              name = urllib.parse.unquote(h.rstrip('/').split('/')[-1])
+              low = name.lower()
+              if 'w749' in low and low.endswith(('.fits', '.fit', '.fits.gz', '.fit.gz')):
+                  hits.append(h)
+          print(hits[0] if hits else '')
+          PY
+          )
+              if [ -z "$SC_FALLBACK" ]; then
+                fail_stage "download_spacecraft" "no w749 spacecraft file found in directory listing" 28
+              fi
+              SC_URL="${SC_DIR}${SC_FALLBACK}"
+              timeout 20m curl -fL --retry 3 --retry-delay 10 --connect-timeout 30 "$SC_URL" -o "$SPACECRAFT" || fail_stage "download_spacecraft" "fallback spacecraft download failed" 29
+            fi
+          fi
+          stage "download_spacecraft" "OK"
+
+          stage "download_manifest" "START"
+          python - <<'PY'
+          import hashlib, json, pathlib, datetime
+          rows = []
+          for label, path in [('photon', 'data/lat_photon_weekly_w749_p305_v001.fits'), ('spacecraft', 'data/lat_spacecraft_weekly_w749.fits')]:
+              p = pathlib.Path(path)
+              h = hashlib.sha256()
+              if p.exists():
+                  with open(p, 'rb') as f:
+                      for b in iter(lambda: f.read(1024*1024), b''):
+                          h.update(b)
+              rows.append({'label': label, 'file': str(p), 'exists': p.exists(), 'size_bytes': p.stat().st_size if p.exists() else None, 'sha256': h.hexdigest() if p.exists() else None})
+          out = {'created_utc': datetime.datetime.utcnow().replace(microsecond=0).isoformat()+'Z', 'downloads': rows, 'claim': 'DOWNLOAD_MANIFEST_NOT_TS'}
+          pathlib.Path('results/R17B_DOWNLOAD_MANIFEST.json').write_text(json.dumps(out, indent=2))
+          PY
+          stage "download_manifest" "OK"
+
+          stage "resolve_diffuse" "START"
+          GAL=$(find /opt /usr/local /home /work -name gll_iem_v07.fits 2>/dev/null | head -n 1 || true)
+          ISO=$(find /opt /usr/local /home /work -name iso_P8R3_SOURCE_V3_v1.txt 2>/dev/null | head -n 1 || true)
+          if [ -z "$GAL" ] || [ -z "$ISO" ]; then
+            fail_stage "resolve_diffuse" "diffuse model files not found in FermiBottle" 30
+          fi
+          sed "s#GAL_DIFFUSE_PLACEHOLDER#$GAL#g; s#ISO_DIFFUSE_PLACEHOLDER#$ISO#g" \
+            results/R17B_MODEL_GRB221009A_LIMITED_NEARBY_4FGL_FROM_R15A_R2.xml > results/R17B_MODEL_RUNTIME.xml
+          printf '{"gll_iem_v07":"%s","iso_P8R3_SOURCE_V3_v1":"%s","claim":"DIFFUSE_RESOLUTION_NOT_TS"}\n' "$GAL" "$ISO" > results/R17B_DIFFUSE_MODEL_STATUS.json
+          stage "resolve_diffuse" "OK"
+
+          RA="288.2646"
+          DEC="19.7735"
+          RAD="12.0"
+          EMIN="3000.0"
+          EMAX="500000.0"
+          ZMAX="90.0"
+          EVCLASS="128"
+          EVTYPE="3"
+          IRFS="P8R3_SOURCE_V3"
+          NXPIX="240"
+          NYPIX="240"
+          BINSZ="0.1"
+          EXP_NXPIX="720"
+          EXP_NYPIX="720"
+          EXP_BINSZ="0.1"
+          ENUMBINS="30"
+          TMIN="687014824.98753"
+          TMAX="687187024.98753"
+          MODEL="results/R17B_MODEL_RUNTIME.xml"
+
+          stage "gtselect" "START"
+          timeout 30m gtselect infile="$PHOTON" outfile="results/events_afterglow_selected.fits" ra="$RA" dec="$DEC" rad="$RAD" \
+            tmin="$TMIN" tmax="$TMAX" emin="$EMIN" emax="$EMAX" zmax="$ZMAX" evclass="$EVCLASS" evtype="$EVTYPE" \
+            clobber=yes chatter=4 || fail_stage "gtselect" "gtselect failed" 31
+          stage "gtselect" "OK"
+
+          stage "gtmktime" "START"
+          timeout 30m gtmktime scfile="$SPACECRAFT" filter="(DATA_QUAL>0)&&(LAT_CONFIG==1)" roicut=yes \
+            evfile="results/events_afterglow_selected.fits" outfile="results/events_afterglow_gti.fits" \
+            clobber=yes chatter=4 || fail_stage "gtmktime" "gtmktime failed" 32
+          stage "gtmktime" "OK"
+
+          stage "gtbin" "START"
+          timeout 30m gtbin evfile="results/events_afterglow_gti.fits" scfile="$SPACECRAFT" outfile="results/ccube_afterglow.fits" algorithm=CCUBE \
+            nxpix="$NXPIX" nypix="$NYPIX" binsz="$BINSZ" coordsys=CEL xref="$RA" yref="$DEC" axisrot=0 proj=AIT \
+            ebinalg=LOG emin="$EMIN" emax="$EMAX" enumbins="$ENUMBINS" clobber=yes chatter=4 || fail_stage "gtbin" "gtbin failed" 33
+          stage "gtbin" "OK"
+
+          stage "gtltcube" "START"
+          timeout 75m gtltcube evfile="results/events_afterglow_gti.fits" scfile="$SPACECRAFT" outfile="results/ltcube_afterglow.fits" \
+            dcostheta=0.025 binsz=1 clobber=yes chatter=4 || fail_stage "gtltcube" "gtltcube failed or timed out" 34
+          stage "gtltcube" "OK"
+
+          stage "gtexpcube2" "START"
+          timeout 75m gtexpcube2 infile="results/ltcube_afterglow.fits" cmap=none outfile="results/bexpmap_afterglow.fits" irfs="$IRFS" evtype="$EVTYPE" \
+            nxpix="$EXP_NXPIX" nypix="$EXP_NYPIX" binsz="$EXP_BINSZ" coordsys=CEL xref="$RA" yref="$DEC" axisrot=0 proj=AIT \
+            ebinalg=LOG emin="$EMIN" emax="$EMAX" enumbins="$ENUMBINS" clobber=yes chatter=4 || fail_stage "gtexpcube2" "gtexpcube2 failed or timed out" 35
+          stage "gtexpcube2" "OK"
+
+          stage "gtsrcmaps" "START"
+          timeout 180m gtsrcmaps scfile="$SPACECRAFT" expcube="results/ltcube_afterglow.fits" cmap="results/ccube_afterglow.fits" \
+            srcmdl="$MODEL" bexpmap="results/bexpmap_afterglow.fits" outfile="results/srcmaps_afterglow.fits" irfs="$IRFS" evtype="$EVTYPE" \
+            clobber=yes chatter=4 || fail_stage "gtsrcmaps" "gtsrcmaps failed or timed out" 36
+          stage "gtsrcmaps" "OK"
+
+          stage "gtlike" "START"
+          set +e
+          timeout 120m gtlike statistic=BINNED optimizer=NEWMINUIT \
+            cmap="results/srcmaps_afterglow.fits" scfile="$SPACECRAFT" \
+            expcube="results/ltcube_afterglow.fits" bexpmap="results/bexpmap_afterglow.fits" \
+            srcmdl="$MODEL" sfile="results/fit_afterglow_output.xml" irfs="$IRFS" chatter=4 \
+            > logs/gtlike_afterglow.log 2>&1
+          GTLIKE_STATUS=$?
+          set -e
+          echo "$GTLIKE_STATUS" > results/GTLIKE_EXIT_STATUS.txt
+          if [ "$GTLIKE_STATUS" -ne 0 ]; then
+            python acirm_r17a/write_failure.py "gtlike" "gtlike failed or timed out with status $GTLIKE_STATUS" || true
+            stage "gtlike" "FAIL"
+            exit 37
+          fi
+          stage "gtlike" "OK"
+
+          python acirm_r17a/parse_results.py || python acirm_r17a/write_failure.py "parse_results" "parse failed" || true
+          stage "complete" "OK"
+          BASH
+          chmod +x acirm_r17a/run_inside_fermibottle.sh
+
+          python -m py_compile acirm_r17a/write_failure.py acirm_r17a/parse_results.py acirm_r17a/package_results.py
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          ET.parse("results/R17B_MODEL_GRB221009A_LIMITED_NEARBY_4FGL_FROM_R15A_R2.xml")
+          print("R17B_MODEL_XML_PARSE_OK")
+          PY
+          bash -n acirm_r17a/run_inside_fermibottle.sh
+
+      - name: Pull FermiBottle image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull fssc/fermibottle:latest | tee logs/DOCKER_PULL.log
+          docker image inspect fssc/fermibottle:latest > logs/DOCKER_IMAGE_INSPECT.json
+
+      - name: Run R17B high energy 3GeV limited 4FGL TS inside FermiBottle
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p data results logs final_artifact pfiles
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v "$PWD":/work \
+            -w /work \
+            fssc/fermibottle:latest \
+            -lc 'cd /work && echo CONTAINER_PWD=$(pwd) && ls -lah /work && ls -lah /work/acirm_r17a && bash /work/acirm_r17a/run_inside_fermibottle.sh' \
+            > logs/DOCKER_RUN_STDOUT.log 2> logs/DOCKER_RUN_STDERR.log
+          DOCKER_STATUS=$?
+          echo "$DOCKER_STATUS" > results/DOCKER_EXIT_STATUS.txt
+          sudo chown -R "$USER:$USER" "$PWD" || true
+          echo "DOCKER_STATUS=$DOCKER_STATUS"
+          exit 0
+
+      - name: Package R17B results always
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          sudo chown -R "$USER:$USER" "$PWD" || true
+          python3 acirm_r17a/package_results.py
+          ls -lah final_artifact || true
+
+      - name: Upload R17B artifact always
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ACIRM_R17M_R17B_HIGH_ENERGY_3GEV_4FGL_STRESS_TS_FERMITOOLS_RESULTS
+          path: final_artifact/
+          if-no-files-found: warn
