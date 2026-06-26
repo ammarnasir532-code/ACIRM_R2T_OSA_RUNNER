@@ -1,10 +1,10 @@
-name: ACIRM R13B R10 FermiBottle expmap boundary fix hardened run
+name: ACIRM R13B R11 FermiBottle gtlike cmap bexpmap fix hardened run
 
 on:
   workflow_dispatch:
 
 jobs:
-  r13b-r10-expmap-boundary-fix:
+  r13b-r11-gtlike-cmap-bexpmap-fix:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -19,7 +19,7 @@ jobs:
           df -h | tee -a logs/HOST_PREFLIGHT.txt
           docker --version | tee -a logs/HOST_PREFLIGHT.txt
 
-      - name: Write self-contained R13B R10 files
+      - name: Write self-contained R13B R11 files
         shell: bash
         run: |
           set -euo pipefail
@@ -32,12 +32,12 @@ jobs:
           pathlib.Path("results").mkdir(exist_ok=True)
           out = {
               "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-              "decision": "R13B_R10_PRE_TS_OR_FERMITOOLS_STAGE_FAILED_LOGS_READY_NOT_PROOF",
+              "decision": "R13B_R11_PRE_TS_OR_FERMITOOLS_STAGE_FAILED_LOGS_READY_NOT_PROOF",
               "failed_stage": stage,
               "detail": detail,
               "claim_ceiling": ["NO_TS_CONFIRMED", "FAILURE_LOGS_ONLY", "NOT_PROOF"]
           }
-          pathlib.Path("results/R13B_R10_PRELIMINARY_RESULT.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+          pathlib.Path("results/R13B_R11_PRELIMINARY_RESULT.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
           PY
 
           cat > acirm_r13b/parse_results.py <<'PY'
@@ -61,7 +61,7 @@ jobs:
               low = line.lower()
               if "grb221009a" in low or "test statistic" in low or re.search(r"\bts\b", low) or "error" in low or "exception" in low:
                   candidate_lines.append(line[:700])
-          decision = "R13B_R10_FERMITOOLS_STARTER_TS_ATTEMPT_COMPLETED_REQUIRES_R14_AUDIT_NOT_PROOF" if gtlike_status == "0" and fit_xml.exists() else "R13B_R10_FERMITOOLS_STARTER_TS_ATTEMPT_INCOMPLETE_OR_FAILED_LOGS_READY_NOT_PROOF"
+          decision = "R13B_R11_FERMITOOLS_STARTER_TS_ATTEMPT_COMPLETED_REQUIRES_R14_AUDIT_NOT_PROOF" if gtlike_status == "0" and fit_xml.exists() else "R13B_R11_FERMITOOLS_STARTER_TS_ATTEMPT_INCOMPLETE_OR_FAILED_LOGS_READY_NOT_PROOF"
           out = {
               "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
               "decision": decision,
@@ -72,7 +72,7 @@ jobs:
               "candidate_log_lines": candidate_lines[:200],
               "claim_ceiling": ["STARTER_MODEL_ONLY", "NEARBY_4FGL_SOURCES_NOT_INCLUDED", "NOT_PUBLISHABLE_TS", "NOT_PROOF"]
           }
-          (results / "R13B_R10_PRELIMINARY_RESULT.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+          (results / "R13B_R11_PRELIMINARY_RESULT.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
           PY
 
           cat > acirm_r13b/package_results.py <<'PY'
@@ -87,18 +87,18 @@ jobs:
                   for b in iter(lambda: f.read(1024 * 1024), b""):
                       h.update(b)
               return h.hexdigest()
-          result_path = ROOT / "results" / "R13B_R10_PRELIMINARY_RESULT.json"
+          result_path = ROOT / "results" / "R13B_R11_PRELIMINARY_RESULT.json"
           if not result_path.exists():
               docker_status = (ROOT / "results" / "DOCKER_EXIT_STATUS.txt").read_text(errors="replace").strip() if (ROOT / "results" / "DOCKER_EXIT_STATUS.txt").exists() else "MISSING"
               out = {
                   "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-                  "decision": "R13B_R10_DOCKER_OR_PRE_TS_STAGE_DID_NOT_COMPLETE_LOGS_READY_NOT_PROOF",
+                  "decision": "R13B_R11_DOCKER_OR_PRE_TS_STAGE_DID_NOT_COMPLETE_LOGS_READY_NOT_PROOF",
                   "docker_exit_status": docker_status,
                   "claim_ceiling": ["NO_TS_CONFIRMED", "LOGS_ONLY", "NOT_PROOF"]
               }
               (ROOT / "results").mkdir(exist_ok=True)
               result_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
-          zip_path = FINAL / "ACIRM_R17M_R13B_R10_EXPMAP_BOUNDARY_FIX_FERMITOOLS_RESULTS.zip"
+          zip_path = FINAL / "ACIRM_R17M_R13B_R11_GTLIKE_CMAP_BEXPMAP_FIX_FERMITOOLS_RESULTS.zip"
           manifest = []
           with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
               for folder in ["acirm_r13b", "results", "logs"]:
@@ -115,7 +115,7 @@ jobs:
                       manifest.append({"file": str(f), "size_bytes": f.stat().st_size, "included": True, "sha256": sha256_file(f)})
           sha = sha256_file(zip_path)
           (FINAL / (zip_path.name + ".sha256.txt")).write_text(sha + "  " + zip_path.name + "\n", encoding="utf-8")
-          with open(FINAL / "R13B_R10_ARTIFACT_MANIFEST.csv", "w", newline="", encoding="utf-8") as fp:
+          with open(FINAL / "R13B_R11_ARTIFACT_MANIFEST.csv", "w", newline="", encoding="utf-8") as fp:
               fields = ["file", "size_bytes", "included", "sha256", "reason"]
               w = csv.DictWriter(fp, fieldnames=fields, extrasaction="ignore")
               w.writeheader()
@@ -124,10 +124,10 @@ jobs:
               "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
               "zip": str(zip_path),
               "sha256": sha,
-              "decision_source": "results/R13B_R10_PRELIMINARY_RESULT.json",
-              "claim": "R13B_R10_ARTIFACT_READY_LOGS_OR_STARTER_TS_NOT_PROOF"
+              "decision_source": "results/R13B_R11_PRELIMINARY_RESULT.json",
+              "claim": "R13B_R11_ARTIFACT_READY_LOGS_OR_STARTER_TS_NOT_PROOF"
           }
-          (FINAL / "R13B_R10_ARTIFACT_STATUS.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
+          (FINAL / "R13B_R11_ARTIFACT_STATUS.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
           print("ZIP", zip_path)
           print("SHA256", sha)
           PY
@@ -172,7 +172,7 @@ jobs:
           set -Eeo pipefail
           mkdir -p data results logs pfiles
           exec > >(tee logs/CONTAINER_STDOUT.log) 2> >(tee logs/CONTAINER_STDERR.log >&2)
-          stage_file="results/R13B_R10_STAGE_STATUS.tsv"
+          stage_file="results/R13B_R11_STAGE_STATUS.tsv"
           echo -e "utc\tstage\tstatus" > "$stage_file"
           stage() { echo -e "$(date -u +%Y-%m-%dT%H:%M:%SZ)\t$1\t$2" | tee -a "$stage_file"; }
           fail_stage() { stage "$1" "FAIL"; python acirm_r13b/write_failure.py "$1" "$2" || true; exit "${3:-20}"; }
@@ -188,8 +188,6 @@ jobs:
           mkdir -p "$PFILES" "$HOME" || true
 
           stage "environment_setup" "START"
-          # R8 fix: FermiBottle conda activate can reference unset variables under nounset.
-          # Keep nounset disabled inside the container script so Conda activation cannot abort.
           set +u
           if [ -f /opt/anaconda/etc/profile.d/conda.sh ]; then
             source /opt/anaconda/etc/profile.d/conda.sh >> logs/CONDA_ACTIVATE.txt 2>&1 || true
@@ -294,7 +292,7 @@ jobs:
                           h.update(b)
               rows.append({'label': label, 'file': str(p), 'exists': p.exists(), 'size_bytes': p.stat().st_size if p.exists() else None, 'sha256': h.hexdigest() if p.exists() else None})
           out = {'created_utc': datetime.datetime.utcnow().replace(microsecond=0).isoformat()+'Z', 'downloads': rows, 'claim': 'DOWNLOAD_MANIFEST_NOT_TS'}
-          pathlib.Path('results/R13B_R10_DOWNLOAD_MANIFEST.json').write_text(json.dumps(out, indent=2))
+          pathlib.Path('results/R13B_R11_DOWNLOAD_MANIFEST.json').write_text(json.dumps(out, indent=2))
           PY
           stage "download_manifest" "OK"
 
@@ -306,7 +304,7 @@ jobs:
           fi
           sed "s#GAL_DIFFUSE_PLACEHOLDER#$GAL#g; s#ISO_DIFFUSE_PLACEHOLDER#$ISO#g" \
             acirm_r13b/R13B_STARTER_MODEL_GRB221009A_DIFFUSE_ONLY_PENDING_4FGL.xml > results/R13B_MODEL_RUNTIME.xml
-          printf '{"gll_iem_v07":"%s","iso_P8R3_SOURCE_V3_v1":"%s","claim":"DIFFUSE_RESOLUTION_NOT_TS"}\n' "$GAL" "$ISO" > results/R13B_R10_DIFFUSE_MODEL_STATUS.json
+          printf '{"gll_iem_v07":"%s","iso_P8R3_SOURCE_V3_v1":"%s","claim":"DIFFUSE_RESOLUTION_NOT_TS"}\n' "$GAL" "$ISO" > results/R13B_R11_DIFFUSE_MODEL_STATUS.json
           stage "resolve_diffuse" "OK"
 
           RA="288.2646"
@@ -366,8 +364,10 @@ jobs:
 
           stage "gtlike" "START"
           set +e
-          timeout 90m gtlike statistic=BINNED optimizer=NEWMINUIT evfile="results/srcmaps_afterglow.fits" scfile="$SPACECRAFT" \
-            expcube="results/ltcube_afterglow.fits" srcmdl="$MODEL" sfile="results/fit_afterglow_output.xml" irfs="$IRFS" \
+          timeout 90m gtlike statistic=BINNED optimizer=NEWMINUIT \
+            cmap="results/srcmaps_afterglow.fits" scfile="$SPACECRAFT" \
+            expcube="results/ltcube_afterglow.fits" bexpmap="results/bexpmap_afterglow.fits" \
+            srcmdl="$MODEL" sfile="results/fit_afterglow_output.xml" irfs="$IRFS" chatter=4 \
             > logs/gtlike_afterglow.log 2>&1
           GTLIKE_STATUS=$?
           set -e
@@ -394,7 +394,7 @@ jobs:
           docker pull fssc/fermibottle:latest | tee logs/DOCKER_PULL.log
           docker image inspect fssc/fermibottle:latest > logs/DOCKER_IMAGE_INSPECT.json
 
-      - name: Run R13B R10 inside FermiBottle with expanded exposure-map boundary fix
+      - name: Run R13B R11 inside FermiBottle with gtlike cmap bexpmap fix
         shell: bash
         continue-on-error: true
         run: |
@@ -413,7 +413,7 @@ jobs:
           echo "DOCKER_STATUS=$DOCKER_STATUS"
           exit 0
 
-      - name: Package R13B R10 results always
+      - name: Package R13B R11 results always
         if: always()
         shell: bash
         run: |
@@ -422,10 +422,10 @@ jobs:
           python3 acirm_r13b/package_results.py
           ls -lah final_artifact || true
 
-      - name: Upload R13B R10 artifact always
+      - name: Upload R13B R11 artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17M_R13B_R10_EXPMAP_BOUNDARY_FIX_FERMITOOLS_RESULTS
+          name: ACIRM_R17M_R13B_R11_GTLIKE_CMAP_BEXPMAP_FIX_FERMITOOLS_RESULTS
           path: final_artifact/
           if-no-files-found: warn
