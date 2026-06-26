@@ -1,10 +1,10 @@
-name: ACIRM R15A 4FGL nearby model builder no TS audit
+name: ACIRM R15A R2 4FGL FSSC catalog model builder no TS audit
 
 on:
   workflow_dispatch:
 
 jobs:
-  r15a-4fgl-nearby-model-builder:
+  r15a-r2-4fgl-fssc-catalog-model-builder:
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -305,7 +305,7 @@ jobs:
               (ROOT / 'results').mkdir(exist_ok=True)
               summary_path.write_text(json.dumps({'created_utc': dt.datetime.utcnow().replace(microsecond=0).isoformat()+'Z','decision': 'R15A_FAILED_BEFORE_SUMMARY_LOGS_READY_NOT_PROOF','claim_ceiling': ['NO_TS_COMPUTED', 'LOGS_ONLY', 'NOT_PROOF']}, indent=2), encoding='utf-8')
 
-          zip_path = FINAL / 'ACIRM_R17M_R15A_4FGL_NEARBY_MODEL_BUILDER_NO_TS_AUDIT_PACKAGE.zip'
+          zip_path = FINAL / 'ACIRM_R17M_R15A_R2_4FGL_FSSC_CATALOG_MODEL_BUILDER_NO_TS_AUDIT_PACKAGE.zip'
           manifest = []
           with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as z:
               for folder in ['acirm_r15a', 'results', 'logs']:
@@ -326,7 +326,7 @@ jobs:
               fields = ['file','size_bytes','included','sha256','reason']
               w = csv.DictWriter(fp, fieldnames=fields, extrasaction='ignore')
               w.writeheader(); w.writerows(manifest)
-          status = {'created_utc': dt.datetime.utcnow().replace(microsecond=0).isoformat()+'Z','zip': str(zip_path),'sha256': sha,'decision_source': 'results/R15A_AUDIT_SUMMARY.json','claim': 'R15A_4FGL_MODEL_BUILDER_ARTIFACT_READY_NO_TS_NOT_PROOF'}
+          status = {'created_utc': dt.datetime.utcnow().replace(microsecond=0).isoformat()+'Z','zip': str(zip_path),'sha256': sha,'decision_source': 'results/R15A_AUDIT_SUMMARY.json','claim': 'R15A_R2_4FGL_FSSC_CATALOG_MODEL_BUILDER_ARTIFACT_READY_NO_TS_NOT_PROOF'}
           (FINAL / 'R15A_ARTIFACT_STATUS.json').write_text(json.dumps(status, indent=2), encoding='utf-8')
           print('ZIP', zip_path)
           print('SHA256', sha)
@@ -341,31 +341,56 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install astropy numpy
 
-      - name: Download 4FGL catalog
+      - name: Download 4FGL catalog from FSSC access paths
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p data logs
           CATALOG="data/gll_psc_4fgl.fit"
+          TMP_CATALOG="data/gll_psc_4fgl.tmp.fit"
           : > logs/4FGL_DOWNLOAD_ATTEMPTS.log
           urls=(
-            "https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/catalogs/4FGL/gll_psc_v35.fit"
-            "https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/catalogs/4FGL/gll_psc_v34.fit"
-            "https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/catalogs/4FGL/gll_psc_v33.fit"
-            "https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/catalogs/4FGL/gll_psc_v32.fit"
-            "https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/catalogs/4FGL/gll_psc_v31.fit"
+            "https://fermi.gsfc.nasa.gov/ssc/data/access/lat/14yr_catalog/gll_psc_v32.fit"
+            "https://fermi.gsfc.nasa.gov/ssc/data/access/lat/12yr_catalog/gll_psc_v28.fit"
+            "https://fermi.gsfc.nasa.gov/ssc/data/access/lat/10yr_catalog/gll_psc_v27.fit"
+            "https://fermi.gsfc.nasa.gov/ssc/data/access/lat/8yr_catalog/gll_psc_v20.fit"
           )
           ok=0
           for url in "${urls[@]}"; do
             echo "TRY $url" | tee -a logs/4FGL_DOWNLOAD_ATTEMPTS.log
-            if timeout 20m curl -fL --retry 4 --retry-delay 8 --connect-timeout 30 "$url" -o "$CATALOG"; then
-              echo "OK $url" | tee -a logs/4FGL_DOWNLOAD_ATTEMPTS.log
-              ok=1
-              break
+            rm -f "$TMP_CATALOG"
+            if timeout 25m curl -fL --retry 5 --retry-delay 8 --connect-timeout 30 "$url" -o "$TMP_CATALOG"; then
+              if python3 - "$TMP_CATALOG" <<'PY'
+          import sys
+          from astropy.io import fits
+          p = sys.argv[1]
+          with fits.open(p, memmap=True) as hdul:
+              ok = False
+              for hdu in hdul:
+                  names = list(getattr(getattr(hdu, 'data', None), 'names', []) or [])
+                  low = {n.lower() for n in names}
+                  if 'raj2000' in low and 'dej2000' in low:
+                      ok = True
+                      break
+              if not ok:
+                  raise SystemExit('NO_RAJ2000_DEJ2000_TABLE')
+          PY
+              then
+                mv "$TMP_CATALOG" "$CATALOG"
+                echo "OK_VALID_FITS $url" | tee -a logs/4FGL_DOWNLOAD_ATTEMPTS.log
+                echo "$url" > logs/4FGL_CATALOG_URL_USED.txt
+                ok=1
+                break
+              else
+                echo "DOWNLOAD_NOT_VALID_4FGL_FITS $url" | tee -a logs/4FGL_DOWNLOAD_ATTEMPTS.log
+              fi
+            else
+              echo "CURL_FAILED $url" | tee -a logs/4FGL_DOWNLOAD_ATTEMPTS.log
             fi
           done
+          rm -f "$TMP_CATALOG"
           if [ "$ok" -ne 1 ] || [ ! -s "$CATALOG" ]; then
-            echo "FAILED_TO_DOWNLOAD_4FGL_CATALOG" | tee -a logs/4FGL_DOWNLOAD_ATTEMPTS.log
+            echo "FAILED_TO_DOWNLOAD_VALID_4FGL_CATALOG" | tee -a logs/4FGL_DOWNLOAD_ATTEMPTS.log
             exit 10
           fi
           sha256sum "$CATALOG" | tee logs/4FGL_CATALOG_SHA256.txt
@@ -393,6 +418,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17M_R15A_4FGL_NEARBY_MODEL_BUILDER_NO_TS_AUDIT_PACKAGE
+          name: ACIRM_R17M_R15A_R2_4FGL_FSSC_CATALOG_MODEL_BUILDER_NO_TS_AUDIT_PACKAGE
           path: final_artifact/
           if-no-files-found: warn
