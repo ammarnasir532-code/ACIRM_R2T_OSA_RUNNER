@@ -1,520 +1,462 @@
-name: ACIRM R17K R9C R5 Old Chat Handoff Direct Axis Repair
+name: ACIRM R13B R5 single-file FermiBottle hardened run
 
 on:
   workflow_dispatch:
-    inputs:
-      max_artifacts:
-        required: false
-        default: '160'
-      max_download_mb:
-        required: false
-        default: '700'
-      scan_limit_mb_per_file:
-        required: false
-        default: '10'
-
-permissions:
-  contents: read
-  actions: read
 
 jobs:
-  r17k-r9c-r5-old-chat-handoff-direct-axis-repair:
+  r13b-r5-single-file-fermitools:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
-    env:
-      MAX_ARTIFACTS: ${{ inputs.max_artifacts }}
-      MAX_DOWNLOAD_MB: ${{ inputs.max_download_mb }}
-      SCAN_LIMIT_MB_PER_FILE: ${{ inputs.scan_limit_mb_per_file }}
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+    timeout-minutes: 360
+
     steps:
-      - name: Checkout repo shallow
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Prepare and install tools
+      - name: Host preflight
         shell: bash
         run: |
-          set +e
-          mkdir -p ACIRM_R17K_R9C_R5_OUTPUTS logs scripts artifact_bank extracted_artifacts
-          cat > ACIRM_R17K_R9C_R5_OUTPUTS/CLAIM_CEILING.txt <<'EOF'
-          R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR
-          PURPOSE: recover missing minus14_direct and R9C anchor axes from old-chat handoff / light-result artifacts.
-          USES PRIOR GITHUB ACTIONS ARTIFACTS AND COMMITTED FILES ONLY.
-          NO LAT RERUN / NO SPI RERUN / NO NEW EVENT FIT.
-          ACCEPTED CEILING IF FOUND: DIRECT_HANDOFF_LEDGER_SUPPORT / NOT_RAW_RECOMPUTATION.
-          NOT_OFFICIAL_511_PROOF / NOT_PARTICLE_PROOF / NOT_SOURCE_ATTRIBUTION / NOT_ACIRM_PROOF.
-          EOF
-          printf 'MAX_ARTIFACTS=%s\nMAX_DOWNLOAD_MB=%s\nSCAN_LIMIT_MB_PER_FILE=%s\nGH_REPO=%s\n' "$MAX_ARTIFACTS" "$MAX_DOWNLOAD_MB" "$SCAN_LIMIT_MB_PER_FILE" "$GH_REPO" > ACIRM_R17K_R9C_R5_OUTPUTS/R17K_R9C_R5_INPUTS.txt
-          sudo apt-get update -y > logs/apt_update.log 2>&1
-          sudo apt-get install -y zip unzip ca-certificates python3 curl > logs/apt_install.log 2>&1
+          set -euo pipefail
+          mkdir -p acirm_r13b data results logs final_artifact
+          echo "HOST_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee logs/HOST_PREFLIGHT.txt
+          uname -a | tee -a logs/HOST_PREFLIGHT.txt
+          df -h | tee -a logs/HOST_PREFLIGHT.txt
+          docker --version | tee -a logs/HOST_PREFLIGHT.txt
 
-      - name: Download, extract, and repair old-chat handoff axes
+      - name: Write self-contained R13B R5 files
         shell: bash
         run: |
-          set +e
-          cat > scripts/r9c_r5_old_chat_repair.py <<'PY'
-          import csv, json, os, re, zipfile, hashlib, subprocess, urllib.request
-          from pathlib import Path
+          set -euo pipefail
+          mkdir -p acirm_r13b data results logs final_artifact
 
-          OUT = Path('ACIRM_R17K_R9C_R5_OUTPUTS')
-          BANK = Path('artifact_bank')
-          EXT = Path('extracted_artifacts')
-          BANK.mkdir(exist_ok=True)
-          EXT.mkdir(exist_ok=True)
-
-          token = os.environ.get('GH_TOKEN', '')
-          repo = os.environ.get('GH_REPO', '')
-          max_art = int(os.environ.get('MAX_ARTIFACTS', '160'))
-          cap = int(float(os.environ.get('MAX_DOWNLOAD_MB', '700')) * 1024 * 1024)
-          scan_limit = int(float(os.environ.get('SCAN_LIMIT_MB_PER_FILE', '10')) * 1024 * 1024)
-
-          artifact_re = re.compile(
-              r'ACIRM|R21AX|R7G|R3P|R3B|R3C|R3D|R3E|R2G|R7E|R7F|R6G|R6H|R6I|R6M|'
-              r'minus14|preparatory|shoulder|phase.?pair|FULL_MEMORY|WORKING_NOTES|TEXT_ONLY|HANDOFF|'
-              r'THEORY_EQUATIONS|R9C|R10|R13M|R13|R16T|LAT|P5|plus21|SPI511|511',
-              re.I,
-          )
-          target_old_names = [
-              'ACIRM_R21AX_R7G_R3P_FULL_MEMORY_AND_WORKING_NOTES_AR.txt',
-              'ACIRM_R21AX_R7G_R3P_TEXT_ONLY_HANDOFF_20260617.zip',
-              'ACIRM_R21AX_R7G_R3P_COMPLETE_NEW_CHAT_HANDOFF_20260617.zip',
-              'ACIRM_R21AX_R7G_R2G_LAT_INTERNAL_PROOF_LOCK_AND_SPI511_BRIDGE.zip',
-              'ACIRM_R21AX_R7G_TO_NEW_CHAT_COMPLETE_HANDOFF_20260614_FULL_MEMORY_AND_WORKING_NOTES_AR.txt',
-              'ACIRM_FULL_THEORY_EQUATIONS_RESULTS_TECHNICAL_CURRENT_20260618.tex',
-              'ACIRM_FULL_MEMORY_WORKFLOW_NEXTCHAT_HANDOFF_CURRENT_20260618.tex',
-              'ACIRM_R21AX_R7E_R3B_PHASE_PAIR_PREPARATORY_SHOULDER_PLUS21_RATE_EXCESS_REAUDIT_FROM_R7E_R3A_RESULTS.zip',
-              'ACIRM_R13M_R9C_THEORY_R10_OPERATIONAL_LAW_AND_VALIDATION_PROTOCOL_PACKAGE.zip',
-              'ACIRM_R10_THEORY_LAW_HANDOFF_PACKAGE.zip',
-              'ACIRM_R10_FULL_EXPERIMENTAL_LEDGER_APPENDIX_PACKAGE.zip',
-              'ACIRM_MULTI_GRAIN_RESONANCE_FINAL_WORKING_LAW_R9C.tex',
-          ]
-          old_name_re = re.compile('|'.join(re.escape(x) for x in target_old_names), re.I)
-          accepted = []
-          rejected = []
-          allhits = []
-          manifest = []
-          extracted = []
-          errors = []
-
-          def safe(s):
-              return re.sub(r'[^A-Za-z0-9._-]+', '_', str(s))[:190]
-
-          def wcsv(path, rows):
-              keys = []
-              for row in rows:
-                  for key in row:
-                      if key not in keys:
-                          keys.append(key)
-              if not keys:
-                  keys = ['empty']
-              with open(path, 'w', newline='', encoding='utf-8') as f:
-                  writer = csv.DictWriter(f, fieldnames=keys)
-                  writer.writeheader()
-                  writer.writerows(rows)
-
-          def api_json(url):
-              req = urllib.request.Request(
-                  url,
-                  headers={
-                      'Authorization': 'Bearer ' + token,
-                      'Accept': 'application/vnd.github+json',
-                      'X-GitHub-Api-Version': '2022-11-28',
-                      'User-Agent': 'ACIRM-R9C-R5/1.0',
-                  },
-              )
-              with urllib.request.urlopen(req, timeout=30) as response:
-                  return json.loads(response.read().decode('utf-8', 'replace'))
-
-          downloaded = 0
-          total = 0
-          candidates = 0
-          try:
-              for page in range(1, 21):
-                  if downloaded >= max_art or total >= cap:
-                      break
-                  js = api_json(f'https://api.github.com/repos/{repo}/actions/artifacts?per_page=100&page={page}')
-                  artifacts = js.get('artifacts', [])
-                  if not artifacts:
-                      break
-                  for artifact in artifacts:
-                      if downloaded >= max_art or total >= cap:
-                          break
-                      name = artifact.get('name', '') or ''
-                      if artifact.get('expired') or not artifact_re.search(name):
-                          continue
-                      candidates += 1
-                      size = int(artifact.get('size_in_bytes') or 0)
-                      dest = BANK / (safe(name) + '__artifact_' + str(artifact.get('id')) + '.zip')
-                      row = {
-                          'artifact_id': artifact.get('id'),
-                          'name': name,
-                          'size_in_bytes': size,
-                          'created_at': artifact.get('created_at'),
-                          'path': str(dest),
-                      }
-                      if total + size > cap:
-                          row['status'] = 'SKIP_SIZE_CAP'
-                          manifest.append(row)
-                          continue
-                      cmd = [
-                          'curl', '-fL', '--retry', '2', '--retry-delay', '2',
-                          '-H', 'Authorization: Bearer ' + token,
-                          '-H', 'Accept: application/vnd.github+json',
-                          '-H', 'X-GitHub-Api-Version: 2022-11-28',
-                          artifact.get('archive_download_url', ''), '-o', str(dest),
-                      ]
-                      cp = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
-                      if cp.returncode == 0:
-                          try:
-                              with zipfile.ZipFile(dest) as zf:
-                                  bad = zf.testzip()
-                              if bad:
-                                  raise RuntimeError('bad member ' + str(bad))
-                              nbytes = dest.stat().st_size
-                              total += nbytes
-                              downloaded += 1
-                              row.update({'status': 'OK', 'downloaded_bytes': nbytes})
-                          except Exception as exc:
-                              dest.unlink(missing_ok=True)
-                              row.update({'status': 'ZIP_FAIL', 'error': repr(exc)[:260]})
-                              errors.append(row.copy())
-                      else:
-                          dest.unlink(missing_ok=True)
-                          row.update({'status': 'DOWNLOAD_FAIL', 'error': (cp.stderr or cp.stdout)[-260:]})
-                          errors.append(row.copy())
-                      manifest.append(row)
-          except Exception as exc:
-              errors.append({'stage': 'artifact_list_or_download', 'error': repr(exc)[:700]})
-
-          for zpath in Path('.').glob('**/*ACIRM*.zip'):
-              if 'artifact_bank' in zpath.parts or 'extracted_artifacts' in zpath.parts:
-                  continue
-              try:
-                  dest = BANK / ('COMMITTED_' + safe(zpath.name))
-                  dest.write_bytes(zpath.read_bytes())
-              except Exception as exc:
-                  errors.append({'stage': 'copy_committed_zip', 'path': str(zpath), 'error': repr(exc)[:260]})
-
-          def extract_zip(zpath, dest, depth=0):
-              if depth > 5:
-                  return
-              try:
-                  with zipfile.ZipFile(zpath) as zf:
-                      bad = zf.testzip()
-                      if bad:
-                          errors.append({'stage': 'zip_test', 'zip': str(zpath), 'bad': bad})
-                      for member in zf.infolist()[:6000]:
-                          if member.is_dir() or member.file_size > 80 * 1024 * 1024:
-                              continue
-                          if '..' in Path(member.filename).parts:
-                              continue
-                          out = dest / safe(member.filename.replace('/', '__'))
-                          out.parent.mkdir(parents=True, exist_ok=True)
-                          try:
-                              out.write_bytes(zf.read(member))
-                              extracted.append({
-                                  'zip': str(zpath),
-                                  'member': member.filename,
-                                  'size': member.file_size,
-                                  'path': str(out),
-                              })
-                              if out.suffix.lower() == '.zip':
-                                  nested = dest / (out.stem + '_unzipped')
-                                  nested.mkdir(exist_ok=True)
-                                  extract_zip(out, nested, depth + 1)
-                          except Exception as exc:
-                              errors.append({'stage': 'member_extract', 'zip': str(zpath), 'member': member.filename, 'error': repr(exc)[:260]})
-              except Exception as exc:
-                  errors.append({'stage': 'zip_extract', 'zip': str(zpath), 'error': repr(exc)[:260]})
-
-          for zpath in sorted(BANK.glob('*.zip')):
-              dest = EXT / safe(zpath.stem)
-              dest.mkdir(exist_ok=True)
-              extract_zip(zpath, dest, 0)
-
-          allowed_suffix = {'.txt', '.md', '.json', '.csv', '.log', '.yml', '.yaml', '.tex'}
-          hard_meta_bad = [
-              'r9b_', 'r9c_r1', 'r9c_r2', 'r9c_r3', 'r9c_r4', 'locator', 'purifier',
-              'download_manifest', 'extracted_file_manifest', 'file_sizes', 'inventory',
-              'df_end', 'free_end', 'apt_', 'pip_', 'curl', 'unzip_test', 'scan_errors', '_errors',
-          ]
-          preferred_terms = [
-              'handoff', 'full_memory', 'working_notes', 'theory_equations', 'text_only', 'decision',
-              'summary', 'ledger', 'report', 'audit', 'metrics', 'results', 'law', 'r10', 'r9c',
-          ]
-
-          def source_quality(path):
-              plower = str(path).lower()
-              if any(t in plower for t in hard_meta_bad):
-                  return 'META_REJECT'
-              if old_name_re.search(str(path)):
-                  return 'OLD_CHAT_TARGET_NAME'
-              if any(t in plower for t in preferred_terms):
-                  return 'HANDOFF_OR_LEDGER'
-              return 'GENERAL_TEXT'
-
-          def snippet(text, terms):
-              lower = text.lower()
-              out = []
-              for term in terms:
-                  idx = lower.find(term.lower())
-                  if idx >= 0:
-                      out.append(text[max(0, idx - 240):min(len(text), idx + 520)].replace('\n', ' ')[:800])
-              return ' || '.join(out[:6])
-
-          minus_strict_terms = [
-              'minus14', 'minus 14', 'phase-pair', 'phase pair', 'preparatory shoulder',
-              'preparatory', 'shoulder', 'positive_ts_count', 'controls = 0/12', '0/12',
-              'rate_ratio', '2.881769', 'internal specificity', 'layer2c_final',
-              'R21AX_R7E_R3E_FINAL_INTERNAL_LEDGER_PROOF'.lower(),
-              'R21AX_R7F_INTEGRATED_P1_P6_SYNTHESIS'.lower(),
-              'R2G_LAT_INTERNAL_PROOF_LOCK'.lower(),
-          ]
-          minus_path_terms = [
-              'r21ax', 'r7g', 'r3p', 'r2g', 'r3b', 'r3c', 'r3d', 'r3e', 'r7e', 'r7f',
-              'r6g', 'r6h', 'r6i', 'r6m', 'text_only', 'full_memory', 'working_notes',
-          ]
-          r9c_strict_terms = [
-              'f_r9c', '2239.664', '2239', 'packet_n', 'm_eff', 'f_raw', 'z1^2',
-              '30.248912', 'cyg x-1', 'cygx-1', 'cygnus', 'r10 operational law',
-              'multi grain resonance', 'ACIRM_R13M_R9C_THEORY_R10_OPERATIONAL_LAW'.lower(),
-          ]
-          r9c_path_terms = ['r9c', 'r10', 'r13m', 'theory', 'law', 'handoff', 'multi_grain']
-          alignment_terms = ['photon alignment', 'photon_alignment', 'phase alignment', 'packet_n', 'rayleigh', 'z2', 'z1^2']
-          ceiling_terms = ['not_proof', 'not_discovery', 'not_source_attribution', 'not_particle_proof', 'not_acirm_proof', 'exploratory']
-
-          def classify(path, text):
-              lower = text.lower()
-              plower = str(path).lower()
-              q = source_quality(path)
-              axes = []
-              reasons = []
-
-              minus_path = any(t in plower for t in minus_path_terms) or old_name_re.search(str(path)) is not None
-              minus_content = any(t.lower() in lower for t in minus_strict_terms)
-              minus_metric = any(t in lower for t in ['ts', 'rank', 'control', 'ledger', 'decision', 'audit', 'summary', 'rate', 'ratio', 'p_value', 'p-value', 'poisson'])
-              if q != 'META_REJECT' and minus_path and minus_content and minus_metric:
-                  axes.append('minus14_direct_handoff')
-                  reasons.append('old-chat/R21AX handoff or ledger supports minus14/preparatory axis')
-
-              light_r7g = re.search(r'r21ax.*r7g.*r3[bcde]|r21ax.*r7g.*r3p.*r2g', plower) is not None
-              if q != 'META_REJECT' and light_r7g and any(t in lower for t in ['summary', 'final_status', 'scientific_status', 'not_proof', 'ledger', 'r21ax']):
-                  axes.append('minus14_light_handoff_index')
-                  reasons.append('R21AX R7G/R3B-R3E/R2G light-result artifact is present as handoff-index support only')
-
-              r9c_path = any(t in plower for t in r9c_path_terms) or old_name_re.search(str(path)) is not None
-              r9c_content = ('r9c' in lower) and any(t.lower() in lower for t in r9c_strict_terms)
-              if q != 'META_REJECT' and r9c_path and r9c_content:
-                  axes.append('r9c_anchor_direct_handoff')
-                  reasons.append('R9C/R10 direct handoff/law file contains f_R9C/frequency/packet/source-anchor metadata')
-
-              if q != 'META_REJECT' and any(t in lower for t in alignment_terms) and (r9c_content or 'alignment' in lower):
-                  axes.append('photon_alignment_handoff')
-                  reasons.append('alignment/phase metric language appears in accepted handoff source')
-
-              if any(t in lower for t in ceiling_terms):
-                  axes.append('claim_ceiling')
-                  reasons.append('explicit claim ceiling')
-              return sorted(set(axes)), '; '.join(sorted(set(reasons))), q
-
-          terms_for_snippet = [
-              'minus14', 'minus 14', '-14', 'preparatory shoulder', 'phase-pair', 'positive_ts_count',
-              'controls = 0/12', '2.881769', 'R21AX_R7E_R3E', 'R21AX_R7F', 'R2G', 'LAYER2C_FINAL',
-              'R9C', 'f_R9C', '2239.664', 'packet_N', 'Z1^2', '30.248912', 'Cyg X-1', 'NOT_PROOF',
-          ]
-
-          for path in EXT.rglob('*'):
-              if not path.is_file() or path.suffix.lower() not in allowed_suffix:
-                  continue
-              try:
-                  if path.stat().st_size > scan_limit:
-                      continue
-                  text = path.read_text(encoding='utf-8', errors='replace')
-                  axes, reasons, quality = classify(path, text)
-                  if not axes:
-                      continue
-                  non_ceiling = [a for a in axes if a != 'claim_ceiling']
-                  score = 35 * len(non_ceiling)
-                  if quality == 'OLD_CHAT_TARGET_NAME':
-                      score += 45
-                  elif quality == 'HANDOFF_OR_LEDGER':
-                      score += 25
-                  elif quality == 'GENERAL_TEXT':
-                      score += 5
-                  else:
-                      score -= 60
-                  row = {
-                      'path': str(path),
-                      'size': path.stat().st_size,
-                      'quality': quality,
-                      'axes': ';'.join(axes),
-                      'score': score,
-                      'reasons': reasons,
-                      'snippet': snippet(text, terms_for_snippet),
-                  }
-                  allhits.append(row)
-                  if quality == 'META_REJECT' and non_ceiling:
-                      rejected.append({**row, 'reject_reason': 'R9B/R9C/meta/log/inventory cannot repair direct axes'})
-                  else:
-                      accepted.append(row)
-              except Exception as exc:
-                  errors.append({'stage': 'scan', 'path': str(path), 'error': repr(exc)[:300]})
-
-          accepted = sorted(accepted, key=lambda r: (r['quality'] == 'OLD_CHAT_TARGET_NAME', r['quality'] == 'HANDOFF_OR_LEDGER', r['score']), reverse=True)
-          rejected = sorted(rejected, key=lambda r: r['score'], reverse=True)
-          allhits = sorted(allhits, key=lambda r: r['score'], reverse=True)
-
-          def rows(axis):
-              return [r for r in accepted if axis in r.get('axes', '').split(';')]
-
-          def present(axis):
-              return bool(rows(axis))
-
-          minus_direct = present('minus14_direct_handoff')
-          minus_light = present('minus14_light_handoff_index')
-          r9c_anchor = present('r9c_anchor_direct_handoff')
-          alignment = present('photon_alignment_handoff')
-          ceiling = present('claim_ceiling')
-
-          gates = [
-              {'gate_id': 'G0_ARTIFACT_EXTRACTION', 'status': 'PASS' if extracted else 'MISS', 'detail': f'extracted_file_count={len(extracted)}'},
-              {'gate_id': 'G1_MINUS14_DIRECT_OLD_CHAT_HANDOFF', 'status': 'PASS' if minus_direct else 'MISS', 'detail': 'requires old-chat/full-memory/R21AX ledger text with minus14/preparatory metrics'},
-              {'gate_id': 'G1B_MINUS14_LIGHT_HANDOFF_INDEX', 'status': 'PASS' if minus_light else 'MISS', 'detail': 'light-result artifact index only; not raw recomputation'},
-              {'gate_id': 'G2_R9C_ANCHOR_DIRECT_HANDOFF', 'status': 'PASS' if r9c_anchor else 'MISS', 'detail': 'requires R9C/R10/f_R9C/2239.664/packet metadata'},
-              {'gate_id': 'G3_PHOTON_ALIGNMENT_HANDOFF', 'status': 'PASS' if alignment else 'MISS', 'detail': 'supporting handoff-level alignment language'},
-              {'gate_id': 'G4_CLAIM_CEILING_PRESENT', 'status': 'PASS' if ceiling else 'MISS', 'detail': 'not-proof/exploratory ceiling'},
-              {'gate_id': 'G5_SOURCE_ATTRIBUTION_ALLOWED', 'status': 'BLOCKED', 'detail': 'forbidden'},
-              {'gate_id': 'G6_PARTICLE_PROOF_ALLOWED', 'status': 'BLOCKED', 'detail': 'forbidden'},
-          ]
-          if minus_direct and r9c_anchor:
-              decision = 'R17K_R9C_R5_OLD_CHAT_DIRECT_HANDOFF_AXES_REPAIRED_READY_FOR_R9D_LOW_CEILING_NOT_PROOF'
-              next_step = 'R9D_LOW_CEILING_TRACE_NARRATIVE_AND_GAP_AUDIT_FROM_DIRECT_HANDOFF_LEDGER_SUPPORT'
-              ready = True
-          elif minus_light and r9c_anchor and not minus_direct:
-              decision = 'R17K_R9C_R5_R9C_ANCHOR_FOUND_MINUS14_LIGHT_INDEX_ONLY_NEEDS_OLD_CHAT_TEXT_HANDOFF_NOT_PROOF'
-              next_step = 'LOCATE_FULL_MEMORY_OR_TEXT_ONLY_MINUS14_HANDOFF_FILE'
-              ready = False
-          elif r9c_anchor and not minus_direct:
-              decision = 'R17K_R9C_R5_R9C_ANCHOR_REPAIRED_MINUS14_DIRECT_HANDOFF_STILL_MISSING_NOT_PROOF'
-              next_step = 'LOCATE_R21AX_R7G_R3P_TEXT_ONLY_OR_R7E_R3B_HANDOFF'
-              ready = False
-          elif minus_direct and not r9c_anchor:
-              decision = 'R17K_R9C_R5_MINUS14_HANDOFF_REPAIRED_R9C_ANCHOR_STILL_MISSING_NOT_PROOF'
-              next_step = 'LOCATE_R9C_R10_HANDOFF_OR_COMMIT_AVAILABLE_R10_PACKAGE'
-              ready = False
-          else:
-              decision = 'R17K_R9C_R5_OLD_CHAT_DIRECT_HANDOFF_AXES_NOT_FOUND_MANUAL_UPLOAD_REQUIRED_NOT_PROOF'
-              next_step = 'UPLOAD_OR_COMMIT_OLD_CHAT_HANDOFF_FILES_LISTED_IN_R9C_R5_MISSING_FILES'
-              ready = False
-
-          axis_rows = []
-          for axis in ['minus14_direct_handoff', 'minus14_light_handoff_index', 'r9c_anchor_direct_handoff', 'photon_alignment_handoff', 'claim_ceiling']:
-              for row in rows(axis)[:15]:
-                  axis_rows.append({'axis': axis, **row})
-
-          missing_files = []
-          if not minus_direct:
-              for name in target_old_names[:8]:
-                  missing_files.append({'needed_for': 'minus14_direct_handoff', 'filename': name})
-          if not r9c_anchor:
-              for name in target_old_names[8:]:
-                  missing_files.append({'needed_for': 'r9c_anchor_direct_handoff', 'filename': name})
-
-          ledger = [
-              {'trace_order': 0, 'stage': 'minus14_old_chat_direct_handoff', 'status': 'PASS' if minus_direct else ('INDEX_ONLY' if minus_light else 'MISS'), 'claim_ceiling': 'DIRECT_HANDOFF_LEDGER_SUPPORT_NOT_RAW_RECOMPUTATION'},
-              {'trace_order': 1, 'stage': 'r9c_anchor_direct_handoff', 'status': 'PASS' if r9c_anchor else 'MISS', 'claim_ceiling': 'R9C_R10_HANDOFF_SUPPORT_NOT_SOURCE_ATTRIBUTION'},
-              {'trace_order': 2, 'stage': 'alignment_handoff_support', 'status': 'PASS' if alignment else 'MISS', 'claim_ceiling': 'HANDOFF_SUPPORT_ONLY'},
-              {'trace_order': 3, 'stage': 'r9d_permission', 'status': 'READY_LOW_CEILING' if ready else 'BLOCKED_OR_PARTIAL', 'claim_ceiling': 'NOT_PROOF_NOT_ATTRIBUTION'},
-          ]
-
-          wcsv(OUT / 'R17K_R9C_R5_ARTIFACT_DOWNLOAD_MANIFEST.csv', manifest)
-          wcsv(OUT / 'R17K_R9C_R5_EXTRACTED_FILE_MANIFEST.csv', extracted)
-          wcsv(OUT / 'R17K_R9C_R5_ACCEPTED_OLD_CHAT_DIRECT_EVIDENCE.csv', accepted)
-          wcsv(OUT / 'R17K_R9C_R5_REJECTED_META_CANDIDATES.csv', rejected[:800])
-          wcsv(OUT / 'R17K_R9C_R5_AXIS_EVIDENCE_TOP.csv', axis_rows)
-          wcsv(OUT / 'R17K_R9C_R5_GATES.csv', gates)
-          wcsv(OUT / 'R17K_R9C_R5_ALL_HITS.csv', allhits[:1200])
-          wcsv(OUT / 'R17K_R9C_R5_MISSING_FILES_IF_ANY.csv', missing_files)
-          wcsv(OUT / 'R17K_R9C_R5_TRACE_LEDGER.csv', ledger)
-          (OUT / 'R17K_R9C_R5_SCAN_ERRORS.json').write_text(json.dumps(errors, indent=2), encoding='utf-8')
-          (OUT / 'R17K_R9C_R5_ARTIFACT_DOWNLOAD_SUMMARY.json').write_text(json.dumps({
-              'downloaded_artifact_count': downloaded,
-              'downloaded_bytes': total,
-              'candidate_count_seen': candidates,
-              'error_count': len([e for e in errors if str(e.get('stage', '')).startswith('artifact')]),
-              'method': 'github_api_plus_curl_L_deep_old_chat_handoff_search',
-          }, indent=2), encoding='utf-8')
-          report = (
-              '# ACIRM R17K R9C R5 Old Chat Handoff Direct Axis Repair\n\n'
-              f'الحكم: {decision}\n\n'
-              'هذه الخلية تبحث أعمق من R9C_R4: لا تكتفي بأسماء artifacts الحديثة، بل تبحث عن old-chat handoff / full-memory / text-only / theory-equations files.\n'
-              'إذا تم إصلاح المحور فالسقف هو DIRECT_HANDOFF_LEDGER_SUPPORT فقط، وليس raw recomputation ولا proof.\n\n'
-              f'الخطوة التالية: {next_step}.\n'
-          )
-          (OUT / 'R17K_R9C_R5_OLD_CHAT_HANDOFF_REPAIR_REPORT_AR.md').write_text(report, encoding='utf-8')
-          summary = {
-              'run_id': 'R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR',
-              'decision': decision,
-              'proof_allowed': False,
-              'official_backtrace_permission': False,
-              'low_ceiling_trace_ready_after_old_chat_repair': ready,
-              'source_attribution_allowed': False,
-              'particle_proof_allowed': False,
-              'artifact_zip_count': len(list(BANK.glob('*.zip'))),
-              'extracted_file_count': len(extracted),
-              'accepted_direct_evidence_count': len(accepted),
-              'rejected_meta_candidate_count': len(rejected),
-              'axis_presence': {
-                  'minus14_direct_handoff': minus_direct,
-                  'minus14_light_handoff_index': minus_light,
-                  'r9c_anchor_direct_handoff': r9c_anchor,
-                  'photon_alignment_handoff': alignment,
-                  'claim_ceiling': ceiling,
-              },
-              'gates': gates,
-              'trace_ledger': ledger,
-              'top_minus14_direct_handoff': rows('minus14_direct_handoff')[:12],
-              'top_minus14_light_handoff_index': rows('minus14_light_handoff_index')[:12],
-              'top_r9c_anchor_direct_handoff': rows('r9c_anchor_direct_handoff')[:12],
-              'next_step': next_step,
-              'claim_ceiling': [
-                  'DIRECT_HANDOFF_LEDGER_SUPPORT',
-                  'NOT_RAW_RECOMPUTATION',
-                  'NOT_OFFICIAL_511_PROOF',
-                  'NOT_PARTICLE_PROOF',
-                  'NOT_SOURCE_ATTRIBUTION',
-                  'NOT_ACIRM_PROOF',
-              ],
+          cat > acirm_r13b/R13B_RUN_CONFIG.json <<'JSON'
+          {
+            "run_id": "ACIRM_R17M_R13B_R5_SINGLE_FILE_FERMITOOLS_HARDENED_RUN_NO_PROOF",
+            "target": {
+              "name": "GRB 221009A / BOAT",
+              "gbm_trigger": "bn221009553",
+              "ra_deg": 288.2646,
+              "dec_deg": 19.7735,
+              "utc_trigger": "2022-10-09T13:16:59.99Z"
+            },
+            "trigger_met": 687014224.98753,
+            "primary_window": {
+              "name": "AFTERGLOW_PRIMARY_600S_2D",
+              "tmin_rel_s": 600.0,
+              "tmax_rel_s": 172800.0,
+              "tmin_met": 687014824.98753,
+              "tmax_met": 687187024.98753
+            },
+            "lat_selection": {
+              "evclass": 128,
+              "evtype": 3,
+              "irfs": "P8R3_SOURCE_V3",
+              "roi_deg": 12.0,
+              "emin_mev": 100.0,
+              "emax_mev": 500000.0,
+              "zmax_deg": 90.0,
+              "binsz_deg": 0.1,
+              "npix": 240,
+              "enumbins": 30,
+              "coordsys": "CEL",
+              "proj": "AIT"
+            },
+            "lat_inputs": {
+              "photon_url": "https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/weekly/photon/lat_photon_weekly_w749_p305_v001.fits",
+              "spacecraft_url_primary": "https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/weekly/spacecraft/lat_spacecraft_weekly_w749_p310_v001.fits",
+              "spacecraft_directory": "https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/weekly/spacecraft/"
+            },
+            "locked_context": {
+              "r12_decision": "R12_GBM_R6_PLUS_LAT_397GEV_STANDARD_OFFSOURCE_SUPPORT_LOCKED_STRONG_EXTERNAL_OPERATIONAL_SUPPORT_NOT_PROOF",
+              "gbm_locked_period_s": 265.254,
+              "gbm_locked_frequency_hz": 0.003769971423616609,
+              "lat_standard_witness_energy_gev": 397.6781875,
+              "lat_standard_witness_time_s": 33552.96854388714,
+              "lat_standard_witness_sep_deg": 0.0154991242889778,
+              "prompt_lat_cluster_used_as_standard_support": false
+            },
+            "claim_ceiling": [
+              "STARTER_MODEL_ONLY",
+              "NEARBY_4FGL_SOURCES_NOT_INCLUDED",
+              "NOT_PUBLISHABLE_TS",
+              "NO_SOURCE_ATTRIBUTION_PROOF",
+              "NO_ACIRM_EXTERNAL_PROOF",
+              "NOT_PROOF"
+            ]
           }
-          (OUT / 'R17K_R9C_R5_DECISION.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
-          sha = hashlib.sha256((OUT / 'R17K_R9C_R5_DECISION.json').read_bytes()).hexdigest()
-          (OUT / 'R17K_R9C_R5_DECISION_JSON_SHA256.txt').write_text(sha + '  R17K_R9C_R5_DECISION.json\n', encoding='utf-8')
-          PY
-          python3 scripts/r9c_r5_old_chat_repair.py > logs/r9c_r5_old_chat_repair.log 2>&1
-          echo "REPAIR_EXIT=$?" | tee ACIRM_R17K_R9C_R5_OUTPUTS/R17K_R9C_R5_REPAIR_EXIT.txt
+          JSON
 
-      - name: Package artifact always
+          cat > acirm_r13b/R13B_STARTER_MODEL_GRB221009A_DIFFUSE_ONLY_PENDING_4FGL.xml <<'XML'
+          <?xml version="1.0" ?>
+          <source_library title="source library">
+            <source name="GRB221009A_ACIRM_LOCKED" type="PointSource">
+              <spectrum type="PowerLaw">
+                <parameter free="1" max="1e5" min="1e-8" name="Prefactor" scale="1e-10" value="1.0" />
+                <parameter free="1" max="0.0" min="-5.0" name="Index" scale="1.0" value="-2.0" />
+                <parameter free="0" max="500000.0" min="100.0" name="Scale" scale="1.0" value="1000.0" />
+              </spectrum>
+              <spatialModel type="SkyDirFunction">
+                <parameter free="0" max="360.0" min="0.0" name="RA" scale="1.0" value="288.2646" />
+                <parameter free="0" max="90.0" min="-90.0" name="DEC" scale="1.0" value="19.7735" />
+              </spatialModel>
+            </source>
+            <source name="iso_P8R3_SOURCE_V3_v1" type="DiffuseSource">
+              <spectrum apply_edisp="false" file="$(FERMI_DIR)/refdata/fermi/galdiffuse/iso_P8R3_SOURCE_V3_v1.txt" type="FileFunction">
+                <parameter free="1" max="10" min="0.01" name="Normalization" scale="1" value="1" />
+              </spectrum>
+              <spatialModel type="ConstantValue">
+                <parameter free="0" max="10.0" min="0.0" name="Value" scale="1.0" value="1.0" />
+              </spatialModel>
+            </source>
+            <source name="gll_iem_v07" type="DiffuseSource">
+              <spectrum type="PowerLaw">
+                <parameter free="1" max="10.0" min="0.0" name="Prefactor" scale="1.0" value="1.0" />
+                <parameter free="0" max="1" min="-1" name="Index" scale="1.0" value="1.0" />
+                <parameter free="0" max="1e6" min="20" name="Scale" scale="1.0" value="100" />
+              </spectrum>
+              <spatialModel file="$(FERMI_DIR)/refdata/fermi/galdiffuse/gll_iem_v07.fits" type="MapCubeFunction">
+                <parameter free="0" max="1000.0" min="0.001" name="Normalization" scale="1.0" value="1.0" />
+              </spatialModel>
+            </source>
+          </source_library>
+          XML
+
+          cat > acirm_r13b/write_failure.py <<'PY'
+          import json, pathlib, sys, datetime, os
+          stage = sys.argv[1] if len(sys.argv) > 1 else "UNKNOWN_STAGE"
+          detail = sys.argv[2] if len(sys.argv) > 2 else ""
+          pathlib.Path("results").mkdir(exist_ok=True)
+          out = {
+              "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+              "decision": "R13B_R5_PRE_TS_OR_FERMITOOLS_STAGE_FAILED_LOGS_READY_NOT_PROOF",
+              "failed_stage": stage,
+              "detail": detail,
+              "docker_exit_status_file": "results/DOCKER_EXIT_STATUS.txt",
+              "claim_ceiling": [
+                  "NO_TS_CONFIRMED",
+                  "FAILURE_LOGS_ONLY",
+                  "NOT_SOURCE_ATTRIBUTION_PROOF",
+                  "NOT_ACIRM_PROOF",
+                  "NOT_PROOF"
+              ]
+          }
+          pathlib.Path("results/R13B_R5_PRELIMINARY_RESULT.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+          PY
+
+          cat > acirm_r13b/parse_results.py <<'PY'
+          import pathlib, json, re, datetime, xml.etree.ElementTree as ET
+          results = pathlib.Path("results")
+          logs = pathlib.Path("logs")
+          gtlike_status_path = results / "GTLIKE_EXIT_STATUS.txt"
+          gtlike_status = gtlike_status_path.read_text(errors="replace").strip() if gtlike_status_path.exists() else "MISSING"
+          log_path = logs / "gtlike_afterglow.log"
+          log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
+          fit_xml = results / "fit_afterglow_output.xml"
+          source_rows = []
+          if fit_xml.exists():
+              try:
+                  root = ET.parse(fit_xml).getroot()
+                  for src in root.findall("source"):
+                      source_rows.append({
+                          "name": src.attrib.get("name"),
+                          "TS_attribute": src.attrib.get("TS") or src.attrib.get("ts")
+                      })
+              except Exception as e:
+                  source_rows.append({"parse_error": repr(e)})
+          candidate_lines = []
+          for line in log_text.splitlines():
+              low = line.lower()
+              if "grb221009a" in low or "test statistic" in low or re.search(r"\bts\b", low) or "error" in low or "exception" in low:
+                  candidate_lines.append(line[:700])
+          decision = "R13B_R5_FERMITOOLS_STARTER_TS_ATTEMPT_COMPLETED_REQUIRES_R14_AUDIT_NOT_PROOF" if gtlike_status == "0" and fit_xml.exists() else "R13B_R5_FERMITOOLS_STARTER_TS_ATTEMPT_INCOMPLETE_OR_FAILED_LOGS_READY_NOT_PROOF"
+          out = {
+              "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+              "decision": decision,
+              "gtlike_exit_status": gtlike_status,
+              "fit_xml_exists": fit_xml.exists(),
+              "srcmaps_exists": (results / "srcmaps_afterglow.fits").exists(),
+              "source_rows_from_fit_xml": source_rows,
+              "candidate_log_lines": candidate_lines[:200],
+              "claim_ceiling": [
+                  "STARTER_MODEL_ONLY",
+                  "NEARBY_4FGL_SOURCES_NOT_INCLUDED",
+                  "NOT_PUBLISHABLE_TS",
+                  "NOT_SOURCE_ATTRIBUTION_PROOF",
+                  "NO_ACIRM_EXTERNAL_PROOF",
+                  "NOT_PROOF"
+              ]
+          }
+          (results / "R13B_R5_PRELIMINARY_RESULT.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+          PY
+
+          cat > acirm_r13b/package_results.py <<'PY'
+          from pathlib import Path
+          import zipfile, hashlib, json, datetime, csv
+          ROOT = Path(".")
+          FINAL = ROOT / "final_artifact"
+          FINAL.mkdir(exist_ok=True)
+          def sha256_file(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for b in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(b)
+              return h.hexdigest()
+          result_path = ROOT / "results" / "R13B_R5_PRELIMINARY_RESULT.json"
+          if not result_path.exists():
+              docker_status = (ROOT / "results" / "DOCKER_EXIT_STATUS.txt").read_text(errors="replace").strip() if (ROOT / "results" / "DOCKER_EXIT_STATUS.txt").exists() else "MISSING"
+              out = {
+                  "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+                  "decision": "R13B_R5_DOCKER_OR_PRE_TS_STAGE_DID_NOT_COMPLETE_LOGS_READY_NOT_PROOF",
+                  "docker_exit_status": docker_status,
+                  "claim_ceiling": ["NO_TS_CONFIRMED", "LOGS_ONLY", "NOT_PROOF"]
+              }
+              (ROOT / "results").mkdir(exist_ok=True)
+              result_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+          zip_path = FINAL / "ACIRM_R17M_R13B_R5_SINGLE_FILE_FERMITOOLS_HARDENED_RESULTS.zip"
+          manifest = []
+          with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+              for folder in ["acirm_r13b", "results", "logs"]:
+                  p = ROOT / folder
+                  if not p.exists():
+                      continue
+                  for f in sorted(p.rglob("*")):
+                      if not f.is_file():
+                          continue
+                      if f.suffix.lower() in [".fits", ".fit", ".gz"] and f.stat().st_size > 10_000_000:
+                          manifest.append({"file": str(f), "size_bytes": f.stat().st_size, "included": False, "reason": "large_fits_excluded_from_slim_artifact"})
+                          continue
+                      z.write(f, arcname=str(f))
+                      manifest.append({"file": str(f), "size_bytes": f.stat().st_size, "included": True, "sha256": sha256_file(f)})
+          sha = sha256_file(zip_path)
+          (FINAL / (zip_path.name + ".sha256.txt")).write_text(sha + "  " + zip_path.name + "\n", encoding="utf-8")
+          with open(FINAL / "R13B_R5_ARTIFACT_MANIFEST.csv", "w", newline="", encoding="utf-8") as fp:
+              fields = ["file", "size_bytes", "included", "sha256", "reason"]
+              w = csv.DictWriter(fp, fieldnames=fields, extrasaction="ignore")
+              w.writeheader()
+              w.writerows(manifest)
+          status = {
+              "created_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+              "zip": str(zip_path),
+              "sha256": sha,
+              "decision_source": "results/R13B_R5_PRELIMINARY_RESULT.json",
+              "claim": "R13B_R5_ARTIFACT_READY_LOGS_OR_STARTER_TS_NOT_PROOF"
+          }
+          (FINAL / "R13B_R5_ARTIFACT_STATUS.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
+          print("ZIP", zip_path)
+          print("SHA256", sha)
+          PY
+
+          cat > acirm_r13b/run_inside_fermibottle.sh <<'BASH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          mkdir -p data results logs
+          exec > >(tee logs/CONTAINER_STDOUT.log) 2> >(tee logs/CONTAINER_STDERR.log >&2)
+          stage_file="results/R13B_R5_STAGE_STATUS.tsv"
+          echo -e "utc\tstage\tstatus" > "$stage_file"
+          stage() { echo -e "$(date -u +%Y-%m-%dT%H:%M:%SZ)\t$1\t$2" | tee -a "$stage_file"; }
+          fail_stage() { stage "$1" "FAIL"; python acirm_r13b/write_failure.py "$1" "$2" || true; exit "${3:-20}"; }
+
+          stage "container_start" "START"
+          cd /work || fail_stage "workdir" "cannot cd /work" 21
+          test -f /work/acirm_r13b/run_inside_fermibottle.sh || fail_stage "mounted_files" "run script not visible under /work/acirm_r13b" 22
+          stage "mounted_files" "OK"
+
+          if ! command -v gtselect >/dev/null 2>&1; then
+            if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
+              source /opt/conda/etc/profile.d/conda.sh
+              conda activate fermi || true
+              conda activate fermitools || true
+            fi
+          fi
+
+          missing=0
+          for tool in gtselect gtmktime gtbin gtltcube gtexpcube2 gtsrcmaps gtlike curl python; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "MISSING_TOOL=$tool" | tee -a logs/TOOL_CHECK.txt
+              missing=1
+            else
+              echo "$tool=$(command -v "$tool")" | tee -a logs/TOOL_CHECK.txt
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            fail_stage "environment_tools" "required Fermitools command missing" 23
+          fi
+          stage "environment_tools" "OK"
+
+          PHOTON_URL="https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/weekly/photon/lat_photon_weekly_w749_p305_v001.fits"
+          PHOTON="data/lat_photon_weekly_w749_p305_v001.fits"
+          SC_PRIMARY_URL="https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/weekly/spacecraft/lat_spacecraft_weekly_w749_p310_v001.fits"
+          SC_DIR="https://heasarc.gsfc.nasa.gov/FTP/fermi/data/lat/weekly/spacecraft/"
+          SPACECRAFT="data/lat_spacecraft_weekly_w749.fits"
+
+          stage "download_photon" "START"
+          if [ ! -s "$PHOTON" ]; then
+            timeout 45m curl -fL --retry 5 --retry-delay 10 --connect-timeout 30 "$PHOTON_URL" -o "$PHOTON" || fail_stage "download_photon" "curl photon failed" 24
+          fi
+          stage "download_photon" "OK"
+
+          stage "download_spacecraft" "START"
+          if [ ! -s "$SPACECRAFT" ]; then
+            if ! timeout 20m curl -fL --retry 3 --retry-delay 10 --connect-timeout 30 "$SC_PRIMARY_URL" -o "$SPACECRAFT"; then
+              echo "Primary spacecraft URL failed; trying directory fallback" | tee -a logs/SPACECRAFT_FALLBACK.log
+              timeout 3m curl -fL --retry 3 --connect-timeout 30 "$SC_DIR" -o logs/spacecraft_dir.html || fail_stage "download_spacecraft" "cannot list spacecraft directory" 25
+              SC_FALLBACK=$(python - <<'PY'
+          import re, pathlib, urllib.parse
+          html = pathlib.Path('logs/spacecraft_dir.html').read_text(errors='replace')
+          links = re.findall(r'href=["\']([^"\']+)["\']', html, flags=re.I)
+          hits = []
+          for h in links:
+              name = urllib.parse.unquote(h.rstrip('/').split('/')[-1])
+              low = name.lower()
+              if 'w749' in low and low.endswith(('.fits', '.fit', '.fits.gz', '.fit.gz')):
+                  hits.append(h)
+          print(hits[0] if hits else '')
+          PY
+          )
+              if [ -z "$SC_FALLBACK" ]; then
+                fail_stage "download_spacecraft" "no w749 spacecraft file found in directory listing" 26
+              fi
+              SC_URL="${SC_DIR}${SC_FALLBACK}"
+              timeout 20m curl -fL --retry 3 --retry-delay 10 --connect-timeout 30 "$SC_URL" -o "$SPACECRAFT" || fail_stage "download_spacecraft" "fallback spacecraft download failed" 27
+            fi
+          fi
+          stage "download_spacecraft" "OK"
+
+          python - <<'PY'
+          import hashlib, json, pathlib, datetime
+          rows = []
+          for label, path in [('photon', 'data/lat_photon_weekly_w749_p305_v001.fits'), ('spacecraft', 'data/lat_spacecraft_weekly_w749.fits')]:
+              p = pathlib.Path(path)
+              h = hashlib.sha256()
+              if p.exists():
+                  with open(p, 'rb') as f:
+                      for b in iter(lambda: f.read(1024*1024), b''):
+                          h.update(b)
+              rows.append({'label': label, 'file': str(p), 'exists': p.exists(), 'size_bytes': p.stat().st_size if p.exists() else None, 'sha256': h.hexdigest() if p.exists() else None})
+          out = {'created_utc': datetime.datetime.utcnow().replace(microsecond=0).isoformat()+'Z', 'downloads': rows, 'claim': 'DOWNLOAD_MANIFEST_NOT_TS'}
+          pathlib.Path('results/R13B_R5_DOWNLOAD_MANIFEST.json').write_text(json.dumps(out, indent=2))
+          PY
+
+          stage "resolve_diffuse" "START"
+          GAL=$(find /opt /usr/local /home /work -name gll_iem_v07.fits 2>/dev/null | head -n 1 || true)
+          ISO=$(find /opt /usr/local /home /work -name iso_P8R3_SOURCE_V3_v1.txt 2>/dev/null | head -n 1 || true)
+          if [ -z "$GAL" ] || [ -z "$ISO" ]; then
+            fail_stage "resolve_diffuse" "diffuse model files not found in FermiBottle" 28
+          fi
+          sed "s#\$(FERMI_DIR)/refdata/fermi/galdiffuse/gll_iem_v07.fits#$GAL#g; s#\$(FERMI_DIR)/refdata/fermi/galdiffuse/iso_P8R3_SOURCE_V3_v1.txt#$ISO#g" \
+            acirm_r13b/R13B_STARTER_MODEL_GRB221009A_DIFFUSE_ONLY_PENDING_4FGL.xml > results/R13B_MODEL_RUNTIME.xml
+          printf '{"gll_iem_v07":"%s","iso_P8R3_SOURCE_V3_v1":"%s","claim":"DIFFUSE_RESOLUTION_NOT_TS"}\n' "$GAL" "$ISO" > results/R13B_R5_DIFFUSE_MODEL_STATUS.json
+          stage "resolve_diffuse" "OK"
+
+          RA="288.2646"
+          DEC="19.7735"
+          RAD="12.0"
+          EMIN="100.0"
+          EMAX="500000.0"
+          ZMAX="90.0"
+          EVCLASS="128"
+          EVTYPE="3"
+          IRFS="P8R3_SOURCE_V3"
+          NXPIX="240"
+          NYPIX="240"
+          BINSZ="0.1"
+          ENUMBINS="30"
+          TMIN="687014824.98753"
+          TMAX="687187024.98753"
+          MODEL="results/R13B_MODEL_RUNTIME.xml"
+
+          stage "gtselect" "START"
+          timeout 30m gtselect infile="$PHOTON" outfile="results/events_afterglow_selected.fits" ra="$RA" dec="$DEC" rad="$RAD" \
+            tmin="$TMIN" tmax="$TMAX" emin="$EMIN" emax="$EMAX" zmax="$ZMAX" evclass="$EVCLASS" evtype="$EVTYPE" \
+            clobber=yes chatter=4 || fail_stage "gtselect" "gtselect failed" 31
+          stage "gtselect" "OK"
+
+          stage "gtmktime" "START"
+          timeout 30m gtmktime scfile="$SPACECRAFT" filter="(DATA_QUAL>0)&&(LAT_CONFIG==1)" roicut=yes \
+            evfile="results/events_afterglow_selected.fits" outfile="results/events_afterglow_gti.fits" \
+            clobber=yes chatter=4 || fail_stage "gtmktime" "gtmktime failed" 32
+          stage "gtmktime" "OK"
+
+          stage "gtbin" "START"
+          timeout 30m gtbin evfile="results/events_afterglow_gti.fits" scfile="$SPACECRAFT" outfile="results/ccube_afterglow.fits" algorithm=CCUBE \
+            nxpix="$NXPIX" nypix="$NYPIX" binsz="$BINSZ" coordsys=CEL xref="$RA" yref="$DEC" axisrot=0 proj=AIT \
+            ebinalg=LOG emin="$EMIN" emax="$EMAX" enumbins="$ENUMBINS" clobber=yes chatter=4 || fail_stage "gtbin" "gtbin failed" 33
+          stage "gtbin" "OK"
+
+          stage "gtltcube" "START"
+          timeout 75m gtltcube evfile="results/events_afterglow_gti.fits" scfile="$SPACECRAFT" outfile="results/ltcube_afterglow.fits" \
+            dcostheta=0.025 binsz=1 clobber=yes chatter=4 || fail_stage "gtltcube" "gtltcube failed or timed out" 34
+          stage "gtltcube" "OK"
+
+          stage "gtexpcube2" "START"
+          timeout 75m gtexpcube2 infile="results/ltcube_afterglow.fits" cmap=none outfile="results/bexpmap_afterglow.fits" irfs="$IRFS" \
+            nxpix="$NXPIX" nypix="$NYPIX" binsz="$BINSZ" coordsys=CEL xref="$RA" yref="$DEC" axisrot=0 proj=AIT \
+            ebinalg=LOG emin="$EMIN" emax="$EMAX" enumbins="$ENUMBINS" clobber=yes chatter=4 || fail_stage "gtexpcube2" "gtexpcube2 failed or timed out" 35
+          stage "gtexpcube2" "OK"
+
+          stage "gtsrcmaps" "START"
+          timeout 90m gtsrcmaps scfile="$SPACECRAFT" expcube="results/ltcube_afterglow.fits" cmap="results/ccube_afterglow.fits" \
+            srcmdl="$MODEL" bexpmap="results/bexpmap_afterglow.fits" outfile="results/srcmaps_afterglow.fits" irfs="$IRFS" \
+            clobber=yes chatter=4 || fail_stage "gtsrcmaps" "gtsrcmaps failed or timed out" 36
+          stage "gtsrcmaps" "OK"
+
+          stage "gtlike" "START"
+          set +e
+          timeout 90m gtlike statistic=BINNED optimizer=NEWMINUIT evfile="results/srcmaps_afterglow.fits" scfile="$SPACECRAFT" \
+            expcube="results/ltcube_afterglow.fits" srcmdl="$MODEL" sfile="results/fit_afterglow_output.xml" irfs="$IRFS" \
+            > logs/gtlike_afterglow.log 2>&1
+          GTLIKE_STATUS=$?
+          set -e
+          echo "$GTLIKE_STATUS" > results/GTLIKE_EXIT_STATUS.txt
+          if [ "$GTLIKE_STATUS" -ne 0 ]; then
+            python acirm_r13b/write_failure.py "gtlike" "gtlike failed or timed out with status $GTLIKE_STATUS" || true
+            stage "gtlike" "FAIL"
+            exit 37
+          fi
+          stage "gtlike" "OK"
+
+          python acirm_r13b/parse_results.py || python acirm_r13b/write_failure.py "parse_results" "parse failed" || true
+          stage "complete" "OK"
+          BASH
+          chmod +x acirm_r13b/run_inside_fermibottle.sh
+
+          bash -n acirm_r13b/run_inside_fermibottle.sh
+          python -m py_compile acirm_r13b/write_failure.py acirm_r13b/parse_results.py acirm_r13b/package_results.py
+
+      - name: Pull FermiBottle image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull fssc/fermibottle:latest | tee logs/DOCKER_PULL.log
+          docker image inspect fssc/fermibottle:latest > logs/DOCKER_IMAGE_INSPECT.json
+
+      - name: Run R13B R5 inside FermiBottle
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p data results logs final_artifact
+          docker run --rm \
+            -v "$PWD":/work \
+            -w /work \
+            fssc/fermibottle:latest \
+            bash -lc 'cd /work && echo CONTAINER_PWD=$(pwd) && ls -lah /work && ls -lah /work/acirm_r13b && bash /work/acirm_r13b/run_inside_fermibottle.sh' \
+            > logs/DOCKER_RUN_STDOUT.log 2> logs/DOCKER_RUN_STDERR.log
+          DOCKER_STATUS=$?
+          echo "$DOCKER_STATUS" > results/DOCKER_EXIT_STATUS.txt
+          sudo chown -R "$USER:$USER" "$PWD" || true
+          echo "DOCKER_STATUS=$DOCKER_STATUS"
+          exit 0
+
+      - name: Package R13B R5 results always
         if: always()
         shell: bash
         run: |
           set +e
-          mkdir -p ACIRM_R17K_R9C_R5_OUTPUTS logs
-          cp logs/*.log ACIRM_R17K_R9C_R5_OUTPUTS/ 2>/dev/null || true
-          find artifact_bank -maxdepth 1 -type f -printf '%p,%s\n' | sort > ACIRM_R17K_R9C_R5_OUTPUTS/R17K_R9C_R5_DOWNLOADED_ARTIFACT_FILE_SIZES.csv 2>/dev/null || true
-          df -h > ACIRM_R17K_R9C_R5_OUTPUTS/R17K_R9C_R5_DF_END.txt
-          free -h > ACIRM_R17K_R9C_R5_OUTPUTS/R17K_R9C_R5_FREE_END.txt
-          zip -r ACIRM_R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR_OUTPUT.zip ACIRM_R17K_R9C_R5_OUTPUTS > logs/zip_output.log 2>&1
-          sha256sum ACIRM_R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR_OUTPUT.zip > ACIRM_R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR_OUTPUT.zip.sha256.txt
-          ls -lh ACIRM_R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR_OUTPUT.zip ACIRM_R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR_OUTPUT.zip.sha256.txt
+          sudo chown -R "$USER:$USER" "$PWD" || true
+          python3 acirm_r13b/package_results.py
+          ls -lah final_artifact || true
 
-      - name: Upload artifact always
+      - name: Upload R13B R5 artifact always
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ACIRM_R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR_OUTPUT
-          path: |
-            ACIRM_R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR_OUTPUT.zip
-            ACIRM_R17K_R9C_R5_OLD_CHAT_HANDOFF_DIRECT_AXIS_REPAIR_OUTPUT.zip.sha256.txt
-          retention-days: 7
+          name: ACIRM_R17M_R13B_R5_SINGLE_FILE_FERMITOOLS_HARDENED_RESULTS
+          path: final_artifact/
+          if-no-files-found: warn
