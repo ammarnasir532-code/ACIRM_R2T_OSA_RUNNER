@@ -1,10 +1,10 @@
-name: ACIRM R22F R10B R7 SPI511 og_create noninteractive repair
+name: ACIRM R22F R10B R8 SPI511 og_create no-bogus-params validation
 
 on:
   workflow_dispatch:
 
 jobs:
-  r22f-r10b-r7-spi511-ogcreate-noninteractive-repair:
+  r22f-r10b-r8-spi511-ogcreate-no-bogus-params-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -16,7 +16,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RUN_ID="R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_REPAIR_EXECUTION"
+          RUN_ID="R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION"
           CACHE="ACIRM_CACHE_R10B_R4"
           echo "RUN_ID=${RUN_ID}" >> "$GITHUB_ENV"
           echo "CACHE=${CACHE}" >> "$GITHUB_ENV"
@@ -27,9 +27,9 @@ jobs:
           echo "not_started" > "$RUN_ID/RUN_STAGE.txt"
           cat > "$RUN_ID/LOCK.json" <<'JSON'
           {
-            "run_id": "R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_REPAIR_EXECUTION",
-            "parent_result": "R22F_R10B_R6_OG_CREATE_FAILED_AFTER_VALIDATED_NOTTY_AND_ABSOLUTE_DOL_NO_THEORY_FAILURE",
-            "critical_repair": "Call osa-container wrapper with raw command string and pass og_create instrument=SPI mode=h noninteractively.",
+            "run_id": "R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION",
+            "parent_result": "R22F_R10B_R7_OG_CREATE_NONINTERACTIVE_REPAIR_FAILED_BOGUS_MODE_PARAMETER_NO_THEORY_FAILURE",
+            "critical_repair": "Remove unsupported og_create mode/clobber parameters; use only parameters shown by plist og_create.",
             "instrument": "INTEGRAL_SPI",
             "revision": "2504",
             "line_band_keV": [508.0, 514.0],
@@ -46,7 +46,7 @@ jobs:
               "250400060010",
               "250400050010"
             ],
-            "claim_ceiling": "OGCREATE_NONINTERACTIVE_REPAIR_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
+            "claim_ceiling": "OGCREATE_NO_BOGUS_PARAMS_VALIDATION_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
             "no_rescue_rules": [
               "No energy-band change after results.",
               "No SCW drop after results.",
@@ -105,7 +105,7 @@ jobs:
           du -sh "$CACHE" 2>/dev/null | tee "$RUN_ID/logs/cache_size.log" || true
           cat "$RUN_ID/scw_dol.list" | tee "$RUN_ID/logs/scw_dol_list.log"
           if [ "$missing" != "0" ]; then
-            echo "CACHE_INCOMPLETE_NO_HEAVY_REDOWNLOAD_IN_R7" | tee "$RUN_ID/logs/cache_incomplete_no_go.log"
+            echo "CACHE_INCOMPLETE_NO_HEAVY_REDOWNLOAD_IN_R8" | tee "$RUN_ID/logs/cache_incomplete_no_go.log"
           fi
 
       - name: Fetch and patch OSA wrapper no-TTY
@@ -172,12 +172,12 @@ jobs:
           SH
           chmod +x "$RUN_ID/scripts/osa_command_bootstrap.sh"
 
-          cat > "$RUN_ID/scripts/r10b_r7_extract_line_sideband.py" <<'PY'
+          cat > "$RUN_ID/scripts/r10b_r8_extract_line_sideband.py" <<'PY'
           import json, csv
           from pathlib import Path
           import numpy as np
 
-          RUN_ID="R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_REPAIR_EXECUTION"
+          RUN_ID="R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION"
           ROOT=Path.cwd(); OUT=ROOT/RUN_ID
           LINE=(508.0,514.0); LOW=(490.0,500.0); HIGH=(522.0,532.0); MIN_RATIO=1.2
           rows=[]
@@ -269,12 +269,12 @@ jobs:
           export WORKDIR="$PWD"
           xvfb-run -a bash ./osa-container.notty.sh docker '
             set +e
-            echo "INSIDE_R7_PREFLIGHT"
+            echo "INSIDE_R8_PREFLIGHT"
             echo "PWD=$(pwd)"
             echo "REP_BASE_PROD=$REP_BASE_PROD"
             echo "CURRENT_IC=$CURRENT_IC"
             ls -ld /data/scw /data/aux /data/ic /data/idx 2>/dev/null || true
-            bash /home/integral/R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_REPAIR_EXECUTION/scripts/osa_command_bootstrap.sh
+            bash /home/integral/R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION/scripts/osa_command_bootstrap.sh
           ' 2>&1 | tee "$RUN_ID/logs/osa_command_preflight.log"
           rc=${PIPESTATUS[0]}
           echo "$rc" > "$RUN_ID/logs/osa_command_preflight_exit_code.txt"
@@ -301,26 +301,34 @@ jobs:
           export WORKDIR="$PWD"
           xvfb-run -a bash ./osa-container.notty.sh docker '
             set +e
-            cd /home/integral/R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_REPAIR_EXECUTION || exit 80
+            cd /home/integral/R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION || exit 80
             bash scripts/osa_command_bootstrap.sh || exit 91
             echo "PWD=$(pwd)"
             echo "--- scw_dol.list ---"
             cat scw_dol.list
-            rm -rf obs r10b_r7_og og_spi.fits 2>/dev/null || true
+            rm -rf obs r10b_r8_og og_spi.fits 2>/dev/null || true
             echo "--- plist og_create before run ---"
             plist og_create 2>&1 | head -120 || true
-            echo "--- og_create named-parameter attempt ---"
-            og_create idxSwg="scw_dol.list" instrument="SPI" ogid="r10b_r7_og" baseDir="." mode=h clobber=yes
+            echo "--- og_create named-parameter attempt: plist-supported parameters only ---"
+            # R8 repair: R7 failed because mode=h and clobber=yes are not in og_create.par.
+            # Do not pass unsupported PIL parameters.
+            og_create idxSwg="scw_dol.list" instrument="SPI" ogid="r10b_r8_og" baseDir="."
             rc=$?
             echo "og_create_named_rc=$rc"
             if [ "$rc" != "0" ]; then
-              echo "--- og_create positional fallback ---"
-              og_create scw_dol.list SPI r10b_r7_og ./ mode=h clobber=yes
+              echo "--- og_create positional fallback without mode/clobber ---"
+              og_create scw_dol.list SPI r10b_r8_og ./
               rc=$?
               echo "og_create_positional_rc=$rc"
             fi
             echo "--- outputs after og_create ---"
-            find . -maxdepth 5 -type f | sort | head -400
+            find . -maxdepth 7 -type f | sort | tee logs/outputs_after_og_create.txt | head -600
+            og_file="$(find . -maxdepth 7 \( -name 'og_spi.fits' -o -name '*og*.fits' \) -type f | head -1)"
+            if [ "$rc" = "0" ] && [ -n "$og_file" ]; then
+              echo "OG_FILE_FOUND=$og_file" | tee logs/og_file_found.txt
+              exit 0
+            fi
+            echo "OG_FILE_NOT_FOUND_OR_RC_NONZERO rc=$rc og_file=$og_file"
             exit $rc
           ' 2>&1 | tee "$RUN_ID/logs/og_create.log"
           rc=${PIPESTATUS[0]}
@@ -348,7 +356,7 @@ jobs:
           export WORKDIR="$PWD"
           xvfb-run -a bash ./osa-container.notty.sh docker '
             set +e
-            cd /home/integral/R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_REPAIR_EXECUTION || exit 80
+            cd /home/integral/R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION || exit 80
             bash scripts/osa_command_bootstrap.sh || exit 92
             echo "--- available OG files ---"
             find . -maxdepth 5 \( -name "*og*.fits" -o -name "og_spi.fits" -o -name "*.fits" \) -type f | sort | tee logs/available_fits_before_spi.txt
@@ -359,11 +367,28 @@ jobs:
             fi
             echo "USING_OG_FILE=$og_file"
             echo "--- plist spi_science_analysis before run ---"
-            plist spi_science_analysis 2>&1 | head -160 || true
-            timeout 90m spi_science_analysis obs_group="$og_file" mode=h
+            plist spi_science_analysis 2>&1 | tee logs/plist_spi_science_analysis.txt | head -220 || true
+            # R8 safety: do not pass unsupported parameters and do not force interactive prompts.
+            # Try only parameter names that actually appear in the current par file.
+            param=""
+            if grep -Eq '^[[:space:]]*ogDOL[[:space:]=]' logs/plist_spi_science_analysis.txt; then
+              param="ogDOL"
+            elif grep -Eq '^[[:space:]]*obs_group[[:space:]=]' logs/plist_spi_science_analysis.txt; then
+              param="obs_group"
+            elif grep -Eq '^[[:space:]]*inOG[[:space:]=]' logs/plist_spi_science_analysis.txt; then
+              param="inOG"
+            elif grep -Eq '^[[:space:]]*OG_DOL[[:space:]=]' logs/plist_spi_science_analysis.txt; then
+              param="OG_DOL"
+            fi
+            if [ -z "$param" ]; then
+              echo "SPI_ANALYSIS_PARAM_UNKNOWN_SKIP_TO_AVOID_INTERACTIVE_FAILURE"
+              exit 76
+            fi
+            echo "SPI_ANALYSIS_USING_PARAM=$param"
+            timeout 90m spi_science_analysis "$param=$og_file"
             rc=$?
             echo "spi_science_analysis_rc=$rc"
-            find . -maxdepth 8 -type f | sort | head -700
+            find . -maxdepth 8 -type f | sort | tee logs/outputs_after_spi_science_analysis.txt | head -900
             exit $rc
           ' 2>&1 | tee "$RUN_ID/logs/spi_science_analysis.log"
           echo ${PIPESTATUS[0]} > "$RUN_ID/logs/spi_science_analysis_exit_code.txt"
@@ -377,7 +402,7 @@ jobs:
           set +e
           echo "line_sideband_extract" > "$RUN_ID/RUN_STAGE.txt"
           python3 -m pip install -q astropy numpy pandas
-          python3 "$RUN_ID/scripts/r10b_r7_extract_line_sideband.py" 2>&1 | tee "$RUN_ID/logs/line_sideband_extract.log"
+          python3 "$RUN_ID/scripts/r10b_r8_extract_line_sideband.py" 2>&1 | tee "$RUN_ID/logs/line_sideband_extract.log"
           echo ${PIPESTATUS[0]} > "$RUN_ID/logs/line_sideband_extract_exit_code.txt"
 
       - name: Build final guarded package
@@ -388,7 +413,7 @@ jobs:
           python3 - <<'PY'
           import json, csv, hashlib
           from pathlib import Path
-          RUN_ID="R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_REPAIR_EXECUTION"
+          RUN_ID="R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION"
           OUT=Path(RUN_ID)
           def read_exit(name):
               p=OUT/"logs"/name
@@ -412,21 +437,21 @@ jobs:
           valid=int(line.get("valid_ratio_rows",0) or 0)
           best=line.get("best_candidate")
           if swg_missing != 0:
-              decision="R22F_R10B_R7_CACHE_INCOMPLETE_NO_HEAVY_REDOWNLOAD_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R8_CACHE_INCOMPLETE_NO_HEAVY_REDOWNLOAD_NO_THEORY_FAILURE"
           elif patch not in (0,None):
-              decision="R22F_R10B_R7_NOTTY_PATCH_VALIDATION_FAILED_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R8_NOTTY_PATCH_VALIDATION_FAILED_NO_THEORY_FAILURE"
           elif not preflight:
-              decision="R22F_R10B_R7_OSA_PREFLIGHT_FAILED_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R8_OSA_PREFLIGHT_FAILED_NO_THEORY_FAILURE"
           elif not og_pass:
-              decision="R22F_R10B_R7_OG_CREATE_NONINTERACTIVE_REPAIR_FAILED_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R8_OG_CREATE_NONINTERACTIVE_REPAIR_FAILED_NO_THEORY_FAILURE"
           elif spi not in (0,None):
-              decision="R22F_R10B_R7_SPI_SCIENCE_ANALYSIS_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R8_SPI_SCIENCE_ANALYSIS_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
           elif valid and best and best.get("passes_min_ratio"):
-              decision="R22F_R10B_R7_SPI511_RUN_OUTPUT_LINE_SIDEBAND_RATIO_PASS_REQUIRES_CONTROLS_NOT_PROOF"
+              decision="R22F_R10B_R8_SPI511_RUN_OUTPUT_LINE_SIDEBAND_RATIO_PASS_REQUIRES_CONTROLS_NOT_PROOF"
           elif valid:
-              decision="R22F_R10B_R7_LINE_SIDEBAND_RATIO_AVAILABLE_AUDIT_REQUIRED_NOT_PRODUCT_PROOF"
+              decision="R22F_R10B_R8_LINE_SIDEBAND_RATIO_AVAILABLE_AUDIT_REQUIRED_NOT_PRODUCT_PROOF"
           else:
-              decision="R22F_R10B_R7_NO_USABLE_RUN_OUTPUT_LINE_SIDEBAND_SPECTRUM_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R8_NO_USABLE_RUN_OUTPUT_LINE_SIDEBAND_SPECTRUM_NO_THEORY_FAILURE"
           status={
               "run_id":RUN_ID,
               "decision":decision,
@@ -440,13 +465,13 @@ jobs:
               "line_sideband_extract_exit":ext,
               "valid_ratio_rows":valid,
               "best_candidate":best,
-              "claim_ceiling":"OGCREATE_NONINTERACTIVE_REPAIR_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
+              "claim_ceiling":"OGCREATE_NO_BOGUS_PARAMS_VALIDATION_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
               "raw_heavy_files_packaged":False,
               "cache_reuse_first":True,
               "no_rescue_applied":True
           }
           (OUT/"STATUS.json").write_text(json.dumps(status,indent=2,sort_keys=True),encoding="utf-8")
-          with (OUT/"R22F_R10B_R7_GO_NO_GO_DECISION.csv").open("w",newline="",encoding="utf-8") as f:
+          with (OUT/"R22F_R10B_R8_GO_NO_GO_DECISION.csv").open("w",newline="",encoding="utf-8") as f:
               w=csv.DictWriter(f, fieldnames=list(status.keys()))
               w.writeheader(); w.writerow(status)
           rows=[]
@@ -469,9 +494,9 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_RESULTS
+          name: R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_RESULTS
           path: |
-            R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_REPAIR_EXECUTION_RESULTS.zip
-            R22F_R10B_R7_SPI511_OGCREATE_NONINTERACTIVE_REPAIR_EXECUTION_RESULTS.zip.sha256.txt
+            R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION_RESULTS.zip
+            R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION_RESULTS.zip.sha256.txt
           if-no-files-found: error
           retention-days: 14
