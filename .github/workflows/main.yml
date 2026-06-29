@@ -1,10 +1,10 @@
-name: ACIRM R22F R10B SPI511 guarded OSA line-sideband
+name: ACIRM R22F R10B R2 SPI511 OSA tech hardened
 
 on:
   workflow_dispatch:
 
 jobs:
-  r22f-r10b-spi511-guarded-osa:
+  r22f-r10b-r2-spi511-osa-tech-hardened:
     runs-on: ubuntu-latest
     timeout-minutes: 240
 
@@ -12,18 +12,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare locked folders and files
+      - name: Prepare locked folders and state
         shell: bash
         run: |
           set -euo pipefail
-          RUN_ID="R22F_R10B_SPI511_OSA_LINE_SIDEBAND_GUARDED_EXECUTION"
+          RUN_ID="R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION"
           echo "RUN_ID=${RUN_ID}" >> "$GITHUB_ENV"
-          mkdir -p "$RUN_ID" "$RUN_ID/logs" "$RUN_ID/scripts" "$RUN_ID/slim_results" "ACIRM_CACHE_R10B"
+          mkdir -p "$RUN_ID" "$RUN_ID/logs" "$RUN_ID/scripts" "$RUN_ID/slim_results" "ACIRM_CACHE_R10B_R2"
+          echo "false" > "$RUN_ID/PREFLIGHT_PASS.flag"
+          echo "not_started" > "$RUN_ID/RUN_STAGE.txt"
           cat > "$RUN_ID/LOCK.json" <<'JSON'
           {
-            "run_id": "R22F_R10B_SPI511_OSA_LINE_SIDEBAND_GUARDED_EXECUTION",
+            "run_id": "R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION",
+            "parent_audit": "R22F_R10B_VALID_ARTIFACT_TECHNICAL_NO_GO_OSA_COMMANDS_NOT_AVAILABLE_NO_SPI511_MEASUREMENT_NO_THEORY_FAILURE",
             "parent_lock": "R22F_R10A_SPI511_LOCKED_OSA_LINE_SIDEBAND_PREFLIGHT_LOCKED_NO_OSA_EXECUTION_NO_NEW_DATA_NOT_PROOF",
-            "claim_ceiling": "GUARDED_OSA_EXECUTION_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
+            "claim_ceiling": "TECH_HARDENED_OSA_EXECUTION_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
+            "critical_repair": "Use official osa-container.sh wrapper before downloading SCW data; direct docker run is forbidden for OSA commands.",
             "instrument": "INTEGRAL_SPI",
             "revision": "2504",
             "line_band_keV": [508.0, 514.0],
@@ -45,16 +49,25 @@ jobs:
               "No SCW drop after results.",
               "No threshold reduction after results.",
               "No raw 511 occupancy promoted to material-production proof.",
+              "If OSA wrapper commands are not available, stop before downloading SCW data.",
               "Any technical failure is TECHNICAL_NO_GO_NO_THEORY_FAILURE."
             ]
           }
           JSON
           cat > "$RUN_ID/README_AR.md" <<'MD'
-          # R22F_R10B
-          تنفيذ محروس لاختبار SPI 511 line/sideband تحت قفل R22F_R10A.
-          لا يثبت إنتاج مادة ولا يحول ACIRM إلى قانون نهائي وحده.
-          إذا فشل OSA أو تحميل البيانات فالحكم تقني: TECHNICAL_NO_GO_NO_THEORY_FAILURE.
+          # R22F_R10B_R2
+          تنفيذ محروس ومصلح تقنيًا لاختبار SPI 511 line/sideband.
+          الإصلاح الرئيسي: استخدام wrapper الرسمي `osa-container.sh` بدل تشغيل أوامر OSA مباشرة داخل `docker run`.
+          إذا لم تظهر أوامر `og_create` و`spi_science_analysis` عبر wrapper، يتوقف workflow قبل تنزيل بيانات SCW.
+          أي فشل تقني = TECHNICAL_NO_GO_NO_THEORY_FAILURE.
           MD
+
+      - name: Install host preflight tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y xvfb zip unzip curl
 
       - name: System preflight
         shell: bash
@@ -69,43 +82,95 @@ jobs:
             free -h || true
             echo "docker_version"
             docker --version || true
+            echo "curl_version"
+            curl --version | head -5 || true
           } | tee "$RUN_ID/logs/system_preflight.log"
 
-      - name: Pull official OSA Docker image
+      - name: Restore guarded cache
+        uses: actions/cache@v4
+        with:
+          path: ACIRM_CACHE_R10B_R2
+          key: acirm-r22f-r10b-r2-rev2504-cache-v1
+          restore-keys: |
+            acirm-r22f-r10b-r2-rev2504-cache-
+
+      - name: Fetch official OSA Docker wrapper
         shell: bash
         continue-on-error: true
         run: |
           set +e
-          IMAGE="integralsw/osa:11.2-2-g667521a3-20220403-190332"
-          echo "OSA_IMAGE=$IMAGE" >> "$GITHUB_ENV"
-          docker pull "$IMAGE" 2>&1 | tee "$RUN_ID/logs/docker_pull.log"
-          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/docker_pull_exit_code.txt"
+          echo "wrapper_fetch" > "$RUN_ID/RUN_STAGE.txt"
+          curl -L --retry 3 --retry-delay 5 \
+            https://raw.githubusercontent.com/ISDC-integral/osa-docker/master/osa-container.sh \
+            -o osa-container.sh 2>&1 | tee "$RUN_ID/logs/osa_wrapper_fetch.log"
+          rc=${PIPESTATUS[0]}
+          chmod +x osa-container.sh 2>/dev/null || true
+          echo "$rc" > "$RUN_ID/logs/osa_wrapper_fetch_exit_code.txt"
+          test -s osa-container.sh && head -60 osa-container.sh > "$RUN_ID/logs/osa_wrapper_head.txt" || true
 
-      - name: OSA command preflight
+      - name: OSA wrapper command preflight - fail before heavy download if missing
         shell: bash
         continue-on-error: true
         run: |
           set +e
-          IMAGE="${OSA_IMAGE:-integralsw/osa:11.2-2-g667521a3-20220403-190332}"
-          docker run --rm "$IMAGE" bash -lc 'set +e; echo PATH=$PATH; command -v og_create; command -v spi_science_analysis; command -v spi_obs_hist; command -v dal_list || true' 2>&1 | tee "$RUN_ID/logs/osa_command_preflight.log"
-          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/osa_command_preflight_exit_code.txt"
+          echo "osa_wrapper_command_preflight" > "$RUN_ID/RUN_STAGE.txt"
+          if [ ! -s osa-container.sh ]; then
+            echo "WRAPPER_MISSING" | tee "$RUN_ID/logs/osa_wrapper_command_preflight.log"
+            echo 90 > "$RUN_ID/logs/osa_wrapper_command_preflight_exit_code.txt"
+            exit 0
+          fi
+          export OSA_VERSION="11.2"
+          export OSA_DOCKER_PULL="yes"
+          export REP_BASE_PROD="$PWD/ACIRM_CACHE_R10B_R2"
+          export CURRENT_IC="$PWD/ACIRM_CACHE_R10B_R2"
+          bash ./osa-container.sh docker bash -lc '
+            set +e
+            echo "INSIDE_OSA_WRAPPER_PRECHECK"
+            echo "PWD=$(pwd)"
+            echo "PATH=$PATH"
+            echo "REP_BASE_PROD=$REP_BASE_PROD"
+            echo "CURRENT_IC=$CURRENT_IC"
+            echo "OSA_VERSION=${OSA_VERSION:-unset}"
+            echo "--- command lookup ---"
+            command -v og_create || true
+            command -v spi_science_analysis || true
+            command -v dal_list || true
+            command -v spi_obs_hist || true
+            echo "--- likely OSA dirs ---"
+            find / -maxdepth 4 -type d \( -name ic -o -name idx -o -name cat -o -name aux \) 2>/dev/null | sort | head -80 || true
+            echo "--- env sample ---"
+            env | sort | grep -E "^(OSA|ISDC|REP_BASE|CURRENT|PFILES|HEADAS|PATH)=" || true
+            if command -v og_create >/dev/null 2>&1 && command -v spi_science_analysis >/dev/null 2>&1; then
+              exit 0
+            else
+              exit 17
+            fi
+          ' 2>&1 | tee "$RUN_ID/logs/osa_wrapper_command_preflight.log"
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > "$RUN_ID/logs/osa_wrapper_command_preflight_exit_code.txt"
+          if [ "$rc" = "0" ]; then
+            echo "true" > "$RUN_ID/PREFLIGHT_PASS.flag"
+          else
+            echo "false" > "$RUN_ID/PREFLIGHT_PASS.flag"
+          fi
+          sudo chown -R "$USER:$USER" . 2>/dev/null || true
 
-      - name: Write guarded scripts
+      - name: Write hardened helper scripts
         shell: bash
         run: |
           set -euo pipefail
-          cat > "$RUN_ID/scripts/r10b_download_and_layout.py" <<'PY'
+          cat > "$RUN_ID/scripts/r10b_r2_download_layout_verify.py" <<'PY'
           import os, re, json, csv, urllib.request, html.parser
           from pathlib import Path
 
-          RUN_ID = "R22F_R10B_SPI511_OSA_LINE_SIDEBAND_GUARDED_EXECUTION"
+          RUN_ID = "R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION"
           ROOT = Path.cwd()
           OUT = ROOT / RUN_ID
-          CACHE = ROOT / "ACIRM_CACHE_R10B"
+          CACHE = ROOT / "ACIRM_CACHE_R10B_R2"
           CACHE.mkdir(parents=True, exist_ok=True)
           SCW = ["250400090010","250400020010","250400080010","250400030010","250400070021","250400040010","250400060010","250400050010"]
           REV = "2504"
-          MAX_PER_SCW_MB = 450.0
+          MAX_PER_FILE_MB = 450.0
           MAX_TOTAL_MB = 2800.0
 
           class LinkParser(html.parser.HTMLParser):
@@ -152,7 +217,7 @@ jobs:
               f"https://www.isdc.unige.ch/integral/archive/data/scw/{REV}/",
           ]
 
-          rows=[]; downloaded_total=0
+          rows=[]; downloaded_total=0; layout=[]
           for scw in SCW:
               found_dir=None; found_links=[]
               for base in BASES:
@@ -166,12 +231,15 @@ jobs:
                   if found_dir:
                       break
 
+              scw_dir_name = scw + ".001"
+              target_dir=CACHE / "scw" / REV / scw_dir_name
+              target_dir.mkdir(parents=True, exist_ok=True)
+              kept=[]
               if not found_dir:
                   rows.append({"kind":"SCW_STATUS", "scw":scw, "url":"", "status":"NO_PUBLIC_LISTING_DISCOVERED", "links":0, "bytes":0})
+                  layout.append({"scw":scw,"dir":str(target_dir),"files":0,"bytes":0,"has_fits":False,"status":"NO_LISTING"})
                   continue
 
-              target_dir=CACHE / "scw" / REV / (scw + ".001")
-              kept=[]
               for a in found_links:
                   fn=a.split("/")[-1]
                   if not fn or fn.startswith("?") or fn.endswith("/"):
@@ -180,7 +248,7 @@ jobs:
                       continue
                   url=found_dir+fn
                   sz=head_size(url)
-                  if sz is not None and sz/1e6 > MAX_PER_SCW_MB:
+                  if sz is not None and sz/1e6 > MAX_PER_FILE_MB:
                       rows.append({"kind":"DOWNLOAD", "scw":scw, "url":url, "status":"SKIPPED_PER_FILE_SIZE_CAP", "links":0, "bytes":sz})
                       continue
                   if downloaded_total/1e6 > MAX_TOTAL_MB:
@@ -188,17 +256,14 @@ jobs:
                       continue
                   st,b=download(url, target_dir/fn)
                   downloaded_total += b
-                  kept.append(fn)
+                  if b>0: kept.append(fn)
                   rows.append({"kind":"DOWNLOAD", "scw":scw, "url":url, "status":st, "links":0, "bytes":b})
 
-              rows.append({
-                  "kind":"SCW_STATUS",
-                  "scw":scw,
-                  "url":found_dir,
-                  "status":"DISCOVERED_DOWNLOADED_SUBSET",
-                  "links":len(found_links),
-                  "bytes":sum((target_dir/f).stat().st_size for f in kept if (target_dir/f).exists())
-              })
+              files=list(target_dir.glob("*"))
+              fits=[p for p in files if re.search(r"\.fit(s)?(\.gz)?$", p.name, re.I)]
+              bsum=sum(p.stat().st_size for p in files if p.is_file())
+              layout.append({"scw":scw,"dir":str(target_dir),"files":len(files),"bytes":bsum,"has_fits":bool(fits),"status":"OK_FILES" if fits else "NO_FITS"})
+              rows.append({"kind":"SCW_STATUS", "scw":scw, "url":found_dir, "status":"DISCOVERED_DOWNLOADED_SUBSET", "links":len(found_links), "bytes":bsum})
 
           scw_list = OUT / "scw.list"
           with scw_list.open("w", encoding="utf-8") as f:
@@ -208,23 +273,22 @@ jobs:
           with (OUT/"download_log.csv").open("w", newline="", encoding="utf-8") as f:
               w=csv.DictWriter(f, fieldnames=["kind","scw","url","status","links","bytes"])
               w.writeheader(); w.writerows(rows)
+          with (OUT/"scw_layout_verification.csv").open("w", newline="", encoding="utf-8") as f:
+              w=csv.DictWriter(f, fieldnames=["scw","dir","files","bytes","has_fits","status"])
+              w.writeheader(); w.writerows(layout)
 
-          status={
-              "downloaded_total_mb":downloaded_total/1e6,
-              "scw_count":len(SCW),
-              "cache_root":str(CACHE),
-              "note":"Guarded public archive download attempt; not a science result."
-          }
+          ok_scw=sum(1 for r in layout if r["has_fits"])
+          status={"downloaded_total_mb":downloaded_total/1e6,"scw_count":len(SCW),"ok_scw_with_fits":ok_scw,"cache_root":str(CACHE),"layout_pass":ok_scw==len(SCW),"note":"SCW data layout verification before OSA og_create."}
           (OUT/"download_status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
           print(json.dumps(status, indent=2))
           PY
 
-          cat > "$RUN_ID/scripts/r10b_extract_line_sideband.py" <<'PY'
+          cat > "$RUN_ID/scripts/r10b_r2_extract_line_sideband.py" <<'PY'
           import json, csv
           from pathlib import Path
           import numpy as np
 
-          RUN_ID="R22F_R10B_SPI511_OSA_LINE_SIDEBAND_GUARDED_EXECUTION"
+          RUN_ID="R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION"
           ROOT=Path.cwd(); OUT=ROOT/RUN_ID
           LINE=(508.0,514.0); LOW=(490.0,500.0); HIGH=(522.0,532.0); MIN_RATIO=1.2
           rows=[]
@@ -235,12 +299,12 @@ jobs:
               (OUT/"line_sideband_status.json").write_text(json.dumps({"status":"ASTROPY_UNAVAILABLE","error":repr(e)},indent=2),encoding="utf-8")
               raise SystemExit(0)
 
-          def integrate_from_arrays(e1,e2,y,band):
+          def integrate(e1,e2,y,band):
               e1=np.asarray(e1,dtype=float); e2=np.asarray(e2,dtype=float); y=np.asarray(y,dtype=float)
               m=np.isfinite(e1)&np.isfinite(e2)&np.isfinite(y)&(e2>=band[0])&(e1<=band[1])
               return float(np.nansum(y[m])) if m.any() else None
 
-          for p in sorted(ROOT.rglob("*.fit*")):
+          for p in sorted((ROOT/RUN_ID).rglob("*.fit*")) + sorted((ROOT/"ACIRM_CACHE_R10B_R2").rglob("*.fit*")):
               try:
                   hdul=fits.open(p, memmap=False)
                   for hdu_i,h in enumerate(hdul):
@@ -256,12 +320,10 @@ jobs:
                               break
                       if e1 is None:
                           continue
-
                       candidates=[]
                       for cname in ["COUNTS","RATE","FLUX","VALUE","SPEC","Y"]:
                           if cname in names:
                               candidates.append(data.names[names.index(cname)])
-
                       if not candidates:
                           for n in data.names:
                               if n.upper() not in ("E_MIN","E_MAX","ENERG_LO","ENERG_HI","CHANNEL_LO","CHANNEL_HI"):
@@ -271,29 +333,16 @@ jobs:
                                           candidates.append(n)
                                   except Exception:
                                       pass
-
-                      for cname in candidates[:4]:
+                      for cname in candidates[:6]:
                           try:
                               y=np.asarray(data[cname],dtype=float)
                               if y.ndim!=1 or len(y)!=len(e1):
                                   continue
-                              line=integrate_from_arrays(e1,e2,y,LINE)
-                              low=integrate_from_arrays(e1,e2,y,LOW)
-                              high=integrate_from_arrays(e1,e2,y,HIGH)
-                              side_vals=[v for v in [low,high] if v is not None]
-                              side=sum(side_vals)/len(side_vals) if side_vals else None
+                              line=integrate(e1,e2,y,LINE); low=integrate(e1,e2,y,LOW); high=integrate(e1,e2,y,HIGH)
+                              sides=[v for v in [low,high] if v is not None]
+                              side=sum(sides)/len(sides) if sides else None
                               ratio=(line/side) if (line is not None and side not in (None,0)) else None
-                              rows.append({
-                                  "file":str(p),
-                                  "hdu":hdu_i,
-                                  "column":cname,
-                                  "line_508_514":line,
-                                  "low_490_500":low,
-                                  "high_522_532":high,
-                                  "sideband_mean":side,
-                                  "line_to_sideband_ratio":ratio,
-                                  "passes_min_ratio":bool(ratio is not None and ratio>=MIN_RATIO)
-                              })
+                              rows.append({"file":str(p),"hdu":hdu_i,"column":cname,"line_508_514":line,"low_490_500":low,"high_522_532":high,"sideband_mean":side,"line_to_sideband_ratio":ratio,"passes_min_ratio":bool(ratio is not None and ratio>=MIN_RATIO)})
                           except Exception:
                               continue
               except Exception:
@@ -302,168 +351,219 @@ jobs:
           with (OUT/"line_sideband_candidates.csv").open("w",newline="",encoding="utf-8") as f:
               w=csv.DictWriter(f, fieldnames=["file","hdu","column","line_508_514","low_490_500","high_522_532","sideband_mean","line_to_sideband_ratio","passes_min_ratio"])
               w.writeheader(); w.writerows(rows)
-
-          best=None
           valid=[r for r in rows if r.get("line_to_sideband_ratio") not in (None,"")]
-          if valid:
-              best=max(valid, key=lambda r: float(r["line_to_sideband_ratio"]))
-          status={
-              "candidate_rows":len(rows),
-              "valid_ratio_rows":len(valid),
-              "best_candidate":best,
-              "claim_ceiling":"candidate extractor only; requires OSA provenance and controls"
-          }
+          best=max(valid, key=lambda r: float(r["line_to_sideband_ratio"])) if valid else None
+          status={"candidate_rows":len(rows),"valid_ratio_rows":len(valid),"best_candidate":best,"claim_ceiling":"candidate extractor only; OSA provenance and controls required"}
           (OUT/"line_sideband_status.json").write_text(json.dumps(status,indent=2),encoding="utf-8")
           print(json.dumps(status,indent=2))
           PY
 
-      - name: Guarded public data discovery and download
+      - name: Build early technical no-go package if wrapper preflight failed
         shell: bash
-        continue-on-error: true
-        run: |
-          set +e
-          python3 "$RUN_ID/scripts/r10b_download_and_layout.py" 2>&1 | tee "$RUN_ID/logs/download_and_layout.log"
-          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/download_and_layout_exit_code.txt"
-          du -sh ACIRM_CACHE_R10B "$RUN_ID" 2>/dev/null | tee "$RUN_ID/logs/size_after_download.log"
-
-      - name: Create OSA observation group if technically possible
-        shell: bash
-        continue-on-error: true
-        run: |
-          set +e
-          IMAGE="${OSA_IMAGE:-integralsw/osa:11.2-2-g667521a3-20220403-190332}"
-          ABS_ROOT="$PWD"
-          docker run --rm \
-            -v "$ABS_ROOT:/work" \
-            -w /work \
-            -e REP_BASE_PROD=/work/ACIRM_CACHE_R10B \
-            -e CURRENT_IC=/work/ACIRM_CACHE_R10B \
-            "$IMAGE" bash -lc '
-              set +e
-              cd /work/'"$RUN_ID"'
-              echo "PWD=$PWD"
-              echo "REP_BASE_PROD=$REP_BASE_PROD"
-              echo "CURRENT_IC=$CURRENT_IC"
-              cat scw.list
-              og_create scw.list SPI r10b_og ./ 2>&1
-            ' 2>&1 | tee "$RUN_ID/logs/og_create.log"
-          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/og_create_exit_code.txt"
-
-      - name: Run SPI science analysis if observation group exists
-        shell: bash
-        continue-on-error: true
-        run: |
-          set +e
-          IMAGE="${OSA_IMAGE:-integralsw/osa:11.2-2-g667521a3-20220403-190332}"
-          ABS_ROOT="$PWD"
-          docker run --rm \
-            -v "$ABS_ROOT:/work" \
-            -w /work \
-            -e REP_BASE_PROD=/work/ACIRM_CACHE_R10B \
-            -e CURRENT_IC=/work/ACIRM_CACHE_R10B \
-            "$IMAGE" bash -lc '
-              set +e
-              cd /work/'"$RUN_ID"'
-              find . -maxdepth 3 -type f | sort | head -200
-              if command -v spi_science_analysis >/dev/null 2>&1; then
-                spi_science_analysis 2>&1
-              else
-                echo "spi_science_analysis command not found"
-                exit 12
-              fi
-            ' 2>&1 | tee "$RUN_ID/logs/spi_science_analysis.log"
-          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/spi_science_analysis_exit_code.txt"
-
-      - name: Extract locked 511 line-sideband candidates from available FITS
-        shell: bash
-        continue-on-error: true
-        run: |
-          set +e
-          python3 -m pip install -q astropy numpy pandas
-          python3 "$RUN_ID/scripts/r10b_extract_line_sideband.py" 2>&1 | tee "$RUN_ID/logs/line_sideband_extract.log"
-          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/line_sideband_extract_exit_code.txt"
-
-      - name: Build guarded decision and slim phone package
-        shell: bash
+        if: ${{ always() }}
         run: |
           set -euo pipefail
+          if [ "$(cat "$RUN_ID/PREFLIGHT_PASS.flag" 2>/dev/null || echo false)" = "true" ]; then
+            echo "Wrapper preflight passed; not building early no-go yet."
+            exit 0
+          fi
+          echo "early_technical_no_go" > "$RUN_ID/RUN_STAGE.txt"
           python3 - <<'PY'
           import json, csv, hashlib
           from pathlib import Path
-
-          RUN_ID="R22F_R10B_SPI511_OSA_LINE_SIDEBAND_GUARDED_EXECUTION"
+          RUN_ID="R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION"
           OUT=Path(RUN_ID)
+          def read_text(path):
+              try: return Path(path).read_text().strip()
+              except Exception: return None
+          status={
+            "run_id":RUN_ID,
+            "decision":"R22F_R10B_R2_FAIL_FAST_OSA_WRAPPER_COMMAND_PREFLIGHT_FAILED_NO_DOWNLOAD_NO_THEORY_FAILURE",
+            "wrapper_fetch_exit":read_text(OUT/"logs/osa_wrapper_fetch_exit_code.txt"),
+            "wrapper_command_preflight_exit":read_text(OUT/"logs/osa_wrapper_command_preflight_exit_code.txt"),
+            "downloads_performed":False,
+            "osa_execution_performed":False,
+            "line_sideband_measurement_performed":False,
+            "claim_ceiling":"TECHNICAL_NO_GO_NO_THEORY_FAILURE_NOT_PROOF",
+            "required_repair":"Use official wrapper successfully or pin working OSA image/wrapper pair before data download."
+          }
+          (OUT/"STATUS.json").write_text(json.dumps(status,indent=2,sort_keys=True),encoding="utf-8")
+          with (OUT/"R22F_R10B_R2_GO_NO_GO_DECISION.csv").open("w",newline="",encoding="utf-8") as f:
+              w=csv.DictWriter(f, fieldnames=list(status.keys()))
+              w.writeheader(); w.writerow(status)
+          rows=[]
+          for p in sorted(OUT.rglob("*")):
+              if p.is_file():
+                  rows.append({"file":str(p.relative_to(OUT)),"sha256":hashlib.sha256(p.read_bytes()).hexdigest(),"bytes":p.stat().st_size})
+          with (OUT/"MANIFEST_SHA256.csv").open("w",newline="",encoding="utf-8") as f:
+              w=csv.DictWriter(f, fieldnames=["file","sha256","bytes"])
+              w.writeheader(); w.writerows(rows)
+          print(json.dumps(status,indent=2,sort_keys=True))
+          PY
 
+      - name: Guarded public SCW discovery and download - only after real OSA preflight pass
+        shell: bash
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set +e
+          if [ "$(cat "$RUN_ID/PREFLIGHT_PASS.flag" 2>/dev/null || echo false)" != "true" ]; then
+            echo "SKIP_DOWNLOAD_BECAUSE_OSA_PREFLIGHT_FAILED" | tee "$RUN_ID/logs/download_and_layout.log"
+            echo 77 > "$RUN_ID/logs/download_and_layout_exit_code.txt"
+            exit 0
+          fi
+          echo "download_and_layout" > "$RUN_ID/RUN_STAGE.txt"
+          python3 "$RUN_ID/scripts/r10b_r2_download_layout_verify.py" 2>&1 | tee "$RUN_ID/logs/download_and_layout.log"
+          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/download_and_layout_exit_code.txt"
+          du -sh ACIRM_CACHE_R10B_R2 "$RUN_ID" 2>/dev/null | tee "$RUN_ID/logs/size_after_download.log"
+
+      - name: OSA og_create through official wrapper - guarded
+        shell: bash
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set +e
+          if [ "$(cat "$RUN_ID/PREFLIGHT_PASS.flag" 2>/dev/null || echo false)" != "true" ]; then
+            echo "SKIP_OG_CREATE_BECAUSE_OSA_PREFLIGHT_FAILED" | tee "$RUN_ID/logs/og_create.log"
+            echo 77 > "$RUN_ID/logs/og_create_exit_code.txt"
+            exit 0
+          fi
+          echo "og_create" > "$RUN_ID/RUN_STAGE.txt"
+          export OSA_VERSION="11.2"
+          export OSA_DOCKER_PULL="no"
+          export REP_BASE_PROD="$PWD/ACIRM_CACHE_R10B_R2"
+          export CURRENT_IC="$PWD/ACIRM_CACHE_R10B_R2"
+          xvfb-run -a bash ./osa-container.sh docker bash -lc '
+            set +e
+            cd /home/integral/R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION 2>/dev/null || cd /home/integral
+            echo "PWD=$(pwd)"
+            echo "REP_BASE_PROD=$REP_BASE_PROD"
+            echo "CURRENT_IC=$CURRENT_IC"
+            ls -lah
+            cat scw.list
+            command -v og_create || exit 91
+            og_create scw.list SPI r10b_r2_og ./
+          ' 2>&1 | tee "$RUN_ID/logs/og_create.log"
+          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/og_create_exit_code.txt"
+          sudo chown -R "$USER:$USER" . 2>/dev/null || true
+
+      - name: OSA SPI science analysis through official wrapper - guarded
+        shell: bash
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set +e
+          if [ "$(cat "$RUN_ID/PREFLIGHT_PASS.flag" 2>/dev/null || echo false)" != "true" ]; then
+            echo "SKIP_SPI_ANALYSIS_BECAUSE_OSA_PREFLIGHT_FAILED" | tee "$RUN_ID/logs/spi_science_analysis.log"
+            echo 77 > "$RUN_ID/logs/spi_science_analysis_exit_code.txt"
+            exit 0
+          fi
+          echo "spi_science_analysis" > "$RUN_ID/RUN_STAGE.txt"
+          export OSA_VERSION="11.2"
+          export OSA_DOCKER_PULL="no"
+          export REP_BASE_PROD="$PWD/ACIRM_CACHE_R10B_R2"
+          export CURRENT_IC="$PWD/ACIRM_CACHE_R10B_R2"
+          xvfb-run -a bash ./osa-container.sh docker bash -lc '
+            set +e
+            cd /home/integral/R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION 2>/dev/null || cd /home/integral
+            echo "PWD=$(pwd)"
+            find . -maxdepth 4 -type f | sort | head -250
+            command -v spi_science_analysis || exit 92
+            spi_science_analysis
+          ' 2>&1 | tee "$RUN_ID/logs/spi_science_analysis.log"
+          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/spi_science_analysis_exit_code.txt"
+          sudo chown -R "$USER:$USER" . 2>/dev/null || true
+
+      - name: Extract locked 511 line-sideband candidates from available FITS
+        shell: bash
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set +e
+          echo "line_sideband_extract" > "$RUN_ID/RUN_STAGE.txt"
+          python3 -m pip install -q astropy numpy pandas
+          python3 "$RUN_ID/scripts/r10b_r2_extract_line_sideband.py" 2>&1 | tee "$RUN_ID/logs/line_sideband_extract.log"
+          echo ${PIPESTATUS[0]} > "$RUN_ID/logs/line_sideband_extract_exit_code.txt"
+
+      - name: Build final guarded decision and slim phone package
+        shell: bash
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, csv, hashlib, os
+          from pathlib import Path
+          RUN_ID="R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION"
+          OUT=Path(RUN_ID)
           def read_exit(name):
               p=OUT/"logs"/name
-              try:
-                  return int(p.read_text().strip().splitlines()[-1])
-              except Exception:
-                  return None
-
-          docker_pull=read_exit("docker_pull_exit_code.txt")
-          command_pre=read_exit("osa_command_preflight_exit_code.txt")
+              try: return int(p.read_text().strip().splitlines()[-1])
+              except Exception: return None
+          def read_flag():
+              try: return (OUT/"PREFLIGHT_PASS.flag").read_text().strip()=="true"
+              except Exception: return False
+          wrapper_fetch=read_exit("osa_wrapper_fetch_exit_code.txt")
+          wrapper_cmd=read_exit("osa_wrapper_command_preflight_exit_code.txt")
           download=read_exit("download_and_layout_exit_code.txt")
           og=read_exit("og_create_exit_code.txt")
           spi=read_exit("spi_science_analysis_exit_code.txt")
           extract=read_exit("line_sideband_extract_exit_code.txt")
-
           line_status={}
           if (OUT/"line_sideband_status.json").exists():
-              try:
-                  line_status=json.loads((OUT/"line_sideband_status.json").read_text())
-              except Exception:
-                  line_status={}
-
-          valid_ratio_rows=line_status.get("valid_ratio_rows",0)
+              try: line_status=json.loads((OUT/"line_sideband_status.json").read_text())
+              except Exception: line_status={}
+          dl_status={}
+          if (OUT/"download_status.json").exists():
+              try: dl_status=json.loads((OUT/"download_status.json").read_text())
+              except Exception: dl_status={}
+          valid=int(line_status.get("valid_ratio_rows",0) or 0)
           best=line_status.get("best_candidate")
-
-          if docker_pull not in (0,None) or command_pre not in (0,None):
-              decision="R22F_R10B_OSA_DOCKER_PREFLIGHT_FAIL_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
-          elif og not in (0,None) or spi not in (0,None):
-              decision="R22F_R10B_OSA_EXECUTION_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
-          elif valid_ratio_rows and best and best.get("passes_min_ratio"):
-              decision="R22F_R10B_SPI511_LINE_SIDEBAND_CANDIDATE_RATIO_PASS_REQUIRES_PROVENANCE_AND_CONTROLS_NOT_PROOF"
-          elif valid_ratio_rows:
-              decision="R22F_R10B_SPI511_LINE_SIDEBAND_RATIO_NOT_PASSED_NO_PRODUCT_PROOF_NO_THEORY_FAILURE"
+          preflight_pass=read_flag()
+          if not preflight_pass:
+              decision="R22F_R10B_R2_FAIL_FAST_OSA_WRAPPER_COMMAND_PREFLIGHT_FAILED_NO_DOWNLOAD_NO_THEORY_FAILURE"
+          elif dl_status and not dl_status.get("layout_pass",False):
+              decision="R22F_R10B_R2_SCW_LAYOUT_INCOMPLETE_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+          elif og not in (0,None):
+              decision="R22F_R10B_R2_OG_CREATE_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+          elif spi not in (0,None):
+              decision="R22F_R10B_R2_SPI_SCIENCE_ANALYSIS_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+          elif valid and best and best.get("passes_min_ratio"):
+              decision="R22F_R10B_R2_SPI511_LINE_SIDEBAND_RATIO_PASS_REQUIRES_PROVENANCE_AND_CONTROLS_NOT_PROOF"
+          elif valid:
+              decision="R22F_R10B_R2_SPI511_LINE_SIDEBAND_RATIO_NOT_PASSED_NO_PRODUCT_PROOF_NO_THEORY_FAILURE"
           else:
-              decision="R22F_R10B_NO_USABLE_LINE_SIDEBAND_SPECTRUM_EXTRACTED_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
-
+              decision="R22F_R10B_R2_NO_USABLE_LINE_SIDEBAND_SPECTRUM_EXTRACTED_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
           status={
               "run_id":RUN_ID,
               "decision":decision,
-              "docker_pull_exit":docker_pull,
-              "osa_command_preflight_exit":command_pre,
+              "preflight_pass":preflight_pass,
+              "wrapper_fetch_exit":wrapper_fetch,
+              "wrapper_command_preflight_exit":wrapper_cmd,
               "download_exit":download,
               "og_create_exit":og,
               "spi_science_analysis_exit":spi,
               "line_sideband_extract_exit":extract,
-              "valid_ratio_rows":valid_ratio_rows,
+              "downloaded_total_mb":dl_status.get("downloaded_total_mb"),
+              "ok_scw_with_fits":dl_status.get("ok_scw_with_fits"),
+              "valid_ratio_rows":valid,
               "best_candidate":best,
-              "claim_ceiling":"GUARDED_OSA_EXECUTION_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
+              "claim_ceiling":"TECH_HARDENED_OSA_EXECUTION_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
               "raw_heavy_files_packaged":False,
               "no_rescue_applied":True
           }
-
           (OUT/"STATUS.json").write_text(json.dumps(status,indent=2,sort_keys=True),encoding="utf-8")
-
-          with (OUT/"R22F_R10B_GO_NO_GO_DECISION.csv").open("w",newline="",encoding="utf-8") as f:
+          with (OUT/"R22F_R10B_R2_GO_NO_GO_DECISION.csv").open("w",newline="",encoding="utf-8") as f:
               w=csv.DictWriter(f, fieldnames=list(status.keys()))
               w.writeheader(); w.writerow(status)
-
           rows=[]
           for p in sorted(OUT.rglob("*")):
               if p.is_file():
-                  h=hashlib.sha256(p.read_bytes()).hexdigest()
-                  rows.append({"file":str(p.relative_to(OUT)),"sha256":h,"bytes":p.stat().st_size})
-
+                  rows.append({"file":str(p.relative_to(OUT)),"sha256":hashlib.sha256(p.read_bytes()).hexdigest(),"bytes":p.stat().st_size})
           with (OUT/"MANIFEST_SHA256.csv").open("w",newline="",encoding="utf-8") as f:
               w=csv.DictWriter(f, fieldnames=["file","sha256","bytes"])
               w.writeheader(); w.writerows(rows)
-
           print(json.dumps(status,indent=2,sort_keys=True))
           PY
-
           ZIP="${RUN_ID}_RESULTS.zip"
           SHA="${ZIP}.sha256.txt"
           zip -r "$ZIP" "$RUN_ID" -x "*/__pycache__/*" >/dev/null
@@ -473,10 +573,11 @@ jobs:
 
       - name: Upload slim results artifact
         uses: actions/upload-artifact@v4
+        if: ${{ always() }}
         with:
-          name: R22F_R10B_SPI511_GUARDED_RESULTS
+          name: R22F_R10B_R2_SPI511_TECH_HARDENED_RESULTS
           path: |
-            R22F_R10B_SPI511_OSA_LINE_SIDEBAND_GUARDED_EXECUTION_RESULTS.zip
-            R22F_R10B_SPI511_OSA_LINE_SIDEBAND_GUARDED_EXECUTION_RESULTS.zip.sha256.txt
+            R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION_RESULTS.zip
+            R22F_R10B_R2_SPI511_OSA_TECH_HARDENED_EXECUTION_RESULTS.zip.sha256.txt
           if-no-files-found: error
           retention-days: 14
