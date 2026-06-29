@@ -1,35 +1,40 @@
-name: ACIRM R22F R10B R8 SPI511 og_create no-bogus-params validation
+name: ACIRM R22F R10B R9 SPI511 PFILES repaired continuation
 
 on:
   workflow_dispatch:
+    inputs:
+      allow_redownload:
+        description: "Keep false. R9 is cache-reuse only unless cache is missing."
+        required: true
+        default: "false"
 
 jobs:
-  r22f-r10b-r8-spi511-ogcreate-no-bogus-params-validation:
+  r22f-r10b-r9-spi511-pfiles-repaired:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare locked state
+      - name: Prepare locked folders and constants
         shell: bash
         run: |
           set -euo pipefail
-          RUN_ID="R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION"
+          RUN_ID="R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION"
           CACHE="ACIRM_CACHE_R10B_R4"
           echo "RUN_ID=${RUN_ID}" >> "$GITHUB_ENV"
           echo "CACHE=${CACHE}" >> "$GITHUB_ENV"
-          mkdir -p "$RUN_ID" "$RUN_ID/logs" "$RUN_ID/scripts" "$RUN_ID/slim_results"
-          mkdir -p "$CACHE/scw" "$CACHE/aux" "$CACHE/ic" "$CACHE/idx" "$CACHE/cat"
+          mkdir -p "$RUN_ID" "$RUN_ID/logs" "$RUN_ID/scripts" "$RUN_ID/slim_results" "$CACHE/scw" "$CACHE/aux" "$CACHE/ic" "$CACHE/idx" "$CACHE/cat"
           echo "false" > "$RUN_ID/PREFLIGHT_PASS.flag"
           echo "false" > "$RUN_ID/OG_CREATE_PASS.flag"
+          echo "false" > "$RUN_ID/PFILES_REPAIR_PASS.flag"
           echo "not_started" > "$RUN_ID/RUN_STAGE.txt"
           cat > "$RUN_ID/LOCK.json" <<'JSON'
           {
-            "run_id": "R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION",
-            "parent_result": "R22F_R10B_R7_OG_CREATE_NONINTERACTIVE_REPAIR_FAILED_BOGUS_MODE_PARAMETER_NO_THEORY_FAILURE",
-            "critical_repair": "Remove unsupported og_create mode/clobber parameters; use only parameters shown by plist og_create.",
+            "run_id": "R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION",
+            "parent_result": "R22F_R10B_R8_SPI_SCIENCE_ANALYSIS_TECHNICAL_NO_GO_NO_THEORY_FAILURE",
+            "critical_repair": "R8 og_create succeeded; R9 only repairs spi_science_analysis PFILES/plist initialization before attempting SPI analysis.",
             "instrument": "INTEGRAL_SPI",
             "revision": "2504",
             "line_band_keV": [508.0, 514.0],
@@ -37,33 +42,27 @@ jobs:
             "high_sideband_keV": [522.0, 532.0],
             "min_line_to_sideband_ratio": 1.2,
             "locked_scw": [
-              "250400090010",
-              "250400020010",
-              "250400080010",
-              "250400030010",
-              "250400070021",
-              "250400040010",
-              "250400060010",
-              "250400050010"
+              "250400090010", "250400020010", "250400080010", "250400030010",
+              "250400070021", "250400040010", "250400060010", "250400050010"
             ],
-            "claim_ceiling": "OGCREATE_NO_BOGUS_PARAMS_VALIDATION_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
+            "claim_ceiling": "PFILES_REPAIR_CONTINUATION_NOT_PROOF_NOT_FINAL_LAW",
             "no_rescue_rules": [
               "No energy-band change after results.",
               "No SCW drop after results.",
               "No threshold reduction after results.",
-              "No heavy redownload by default.",
-              "No 511 measurement accepted from cache or index metadata.",
+              "No cache/index metadata promoted to 511 science measurement.",
+              "Do not run spi_science_analysis until plist initializes after PFILES repair.",
               "Any technical failure is TECHNICAL_NO_GO_NO_THEORY_FAILURE."
             ]
           }
           JSON
 
-      - name: Install tools
+      - name: Install host tools
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -y
-          sudo apt-get install -y xvfb zip unzip curl ca-certificates python3-pip
+          sudo apt-get install -y xvfb zip unzip curl ca-certificates
           {
             echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "runner=$(uname -a)"
@@ -72,41 +71,50 @@ jobs:
             echo "docker_version"; docker --version || true
           } | tee "$RUN_ID/logs/system_preflight.log"
 
-      - name: Restore existing R4/R5/R6 cache
+      - name: Restore previous SPI cache
         uses: actions/cache@v4
         with:
           path: ACIRM_CACHE_R10B_R4
           key: acirm-r22f-r10b-r4-rev2504-cache-v1
           restore-keys: |
             acirm-r22f-r10b-r4-rev2504-cache-
-            acirm-r22f-r10b-r5-
-            acirm-r22f-r10b-r6-
+            acirm-r22f-r10b-r5-rev2504-cache-
+            acirm-r22f-r10b-r6-rev2504-cache-
+            acirm-r22f-r10b-r7-rev2504-cache-
+            acirm-r22f-r10b-r8-rev2504-cache-
 
-      - name: Verify cache and write absolute SWG DOL list
+      - name: Verify cache and create absolute DOL list
         shell: bash
+        continue-on-error: true
         run: |
-          set -euo pipefail
-          mkdir -p "$CACHE/scw" "$CACHE/aux" "$CACHE/ic" "$CACHE/idx" "$CACHE/cat"
+          set +e
+          echo "cache_verify" > "$RUN_ID/RUN_STAGE.txt"
+          mkdir -p "$CACHE/scw/2504" "$CACHE/aux" "$CACHE/ic" "$CACHE/idx" "$CACHE/cat"
           SCWS=(250400090010 250400020010 250400080010 250400030010 250400070021 250400040010 250400060010 250400050010)
-          : > "$RUN_ID/scw_dol.list"
           missing=0
-          for scw in "${SCWS[@]}"; do
-            host_file="$CACHE/scw/2504/${scw}.001/swg.fits"
-            if [ -s "$host_file" ]; then
-              echo "FOUND_SWG: $host_file" | tee -a "$RUN_ID/logs/cache_verify.log"
-              echo "/data/scw/2504/${scw}.001/swg.fits" >> "$RUN_ID/scw_dol.list"
+          : > "$RUN_ID/scw_dol.list"
+          for s in "${SCWS[@]}"; do
+            f="$CACHE/scw/2504/${s}.001/swg.fits"
+            echo "CHECK $f" | tee -a "$RUN_ID/logs/cache_verify.log"
+            if [ -s "$f" ]; then
+              echo "/data/scw/2504/${s}.001/swg.fits" >> "$RUN_ID/scw_dol.list"
             else
-              echo "MISSING_SWG: $host_file" | tee -a "$RUN_ID/logs/cache_verify.log"
               missing=$((missing+1))
+              echo "MISSING $f" | tee -a "$RUN_ID/logs/cache_verify.log"
             fi
           done
           echo "$missing" > "$RUN_ID/logs/swg_missing_count.txt"
-          find "$CACHE" -maxdepth 3 -type d | sort | tee "$RUN_ID/logs/cache_tree.log"
-          du -sh "$CACHE" 2>/dev/null | tee "$RUN_ID/logs/cache_size.log" || true
           cat "$RUN_ID/scw_dol.list" | tee "$RUN_ID/logs/scw_dol_list.log"
+          du -sh "$CACHE" 2>/dev/null | tee "$RUN_ID/logs/cache_size.log" || true
+          find "$CACHE" -maxdepth 4 -type f | sort | head -300 > "$RUN_ID/logs/cache_tree_head.txt" || true
           if [ "$missing" != "0" ]; then
-            echo "CACHE_INCOMPLETE_NO_HEAVY_REDOWNLOAD_IN_R8" | tee "$RUN_ID/logs/cache_incomplete_no_go.log"
+            echo "CACHE_INCOMPLETE_MISSING_SWG=$missing" | tee "$RUN_ID/logs/cache_incomplete.log"
+            if [ "${{ github.event.inputs.allow_redownload }}" != "true" ]; then
+              echo 44 > "$RUN_ID/logs/cache_verify_exit_code.txt"
+              exit 0
+            fi
           fi
+          echo 0 > "$RUN_ID/logs/cache_verify_exit_code.txt"
 
       - name: Fetch and patch OSA wrapper no-TTY
         shell: bash
@@ -118,29 +126,21 @@ jobs:
             https://raw.githubusercontent.com/ISDC-integral/osa-docker/master/osa-container.sh \
             -o osa-container.sh 2>&1 | tee "$RUN_ID/logs/osa_wrapper_fetch.log"
           fetch_rc=${PIPESTATUS[0]}
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path("osa-container.sh")
-          txt=p.read_text(encoding="utf-8", errors="replace")
-          txt=txt.replace("--rm -it --user", "--rm --user")
-          txt=txt.replace("--rm -i -t --user", "--rm --user")
-          txt=txt.replace("--rm -ti --user", "--rm --user")
-          txt=txt.replace("--rm -it", "--rm")
-          txt=txt.replace("docker run -it", "docker run")
-          Path("osa-container.notty.sh").write_text(txt, encoding="utf-8")
-          PY
+          cp osa-container.sh osa-container.notty.sh 2>/dev/null || true
+          # Strong no-TTY patch. GitHub Actions is non-interactive.
+          sed -i -E 's/docker run --rm -it/docker run --rm/g; s/docker run -it --rm/docker run --rm/g; s/[[:space:]]-it([[:space:]])/\1/g; s/[[:space:]]-i([[:space:]])/\1/g; s/[[:space:]]-t([[:space:]])/\1/g' osa-container.notty.sh 2>/dev/null || true
           chmod +x osa-container.notty.sh 2>/dev/null || true
           echo "$fetch_rc" > "$RUN_ID/logs/osa_wrapper_fetch_exit_code.txt"
-          grep -n -A4 -B2 "docker run" osa-container.notty.sh > "$RUN_ID/logs/osa_wrapper_docker_run_notty_excerpt.txt" || true
-          if grep -Eq -- 'docker run.*(^|[[:space:]])-it([[:space:]]|$)|--rm[[:space:]]+-it' osa-container.notty.sh; then
-            echo "NOTTY_PATCH_FAILED_STILL_HAS_IT" | tee "$RUN_ID/logs/notty_patch_validation.log"
-            echo 91 > "$RUN_ID/logs/notty_patch_validation_exit_code.txt"
+          grep -n "docker run" osa-container.notty.sh > "$RUN_ID/logs/osa_wrapper_docker_run_notty_excerpt.txt" 2>&1 || true
+          if grep -nE 'docker run.*(^|[[:space:]])-it([[:space:]]|$)' osa-container.notty.sh > "$RUN_ID/logs/notty_patch_validation.log" 2>&1; then
+            echo "NOTTY_PATCH_FAILED_STILL_HAS_IT"
+            echo 66 > "$RUN_ID/logs/notty_patch_validation_exit_code.txt"
           else
-            echo "NOTTY_PATCH_VALIDATED" | tee "$RUN_ID/logs/notty_patch_validation.log"
+            echo "NOTTY_PATCH_PASS" | tee "$RUN_ID/logs/notty_patch_validation.log"
             echo 0 > "$RUN_ID/logs/notty_patch_validation_exit_code.txt"
           fi
 
-      - name: Write OSA bootstrap and extractor
+      - name: Write bootstrap, PFILES repair, and extractor scripts
         shell: bash
         run: |
           set -euo pipefail
@@ -157,6 +157,7 @@ jobs:
           [ -n "$og_path" ] && export PATH="$(dirname "$og_path"):$PATH" && echo "found_og_create=$og_path"
           [ -n "$spi_path" ] && export PATH="$(dirname "$spi_path"):$PATH" && echo "found_spi_science_analysis=$spi_path"
           echo "final_PATH=$PATH"
+          echo "PFILES_BEFORE=${PFILES:-unset}"
           command -v og_create || true
           command -v spi_science_analysis || true
           command -v plist || true
@@ -172,12 +173,74 @@ jobs:
           SH
           chmod +x "$RUN_ID/scripts/osa_command_bootstrap.sh"
 
-          cat > "$RUN_ID/scripts/r10b_r8_extract_line_sideband.py" <<'PY'
-          import json, csv
+          cat > "$RUN_ID/scripts/repair_pfiles.sh" <<'SH'
+          #!/usr/bin/env bash
+          set +e
+          RUN_ID="R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION"
+          cd "/home/integral/$RUN_ID" || exit 80
+          mkdir -p /home/integral/pfiles logs
+          echo "PFILES_INITIAL=${PFILES:-unset}" | tee logs/pfiles_repair.log
+          echo "--- locate relevant par files ---" | tee -a logs/pfiles_repair.log
+          find /home/integral /opt /isdc /usr/local -type f \( -name 'spi_science_analysis.par' -o -name 'spiros*.par' -o -name '*spi*.par' \) 2>/dev/null | sort | tee logs/pfiles_found_all.txt | head -500
+          # Avoid stale local broken copies.
+          rm -f /home/integral/pfiles/spi_science_analysis.par /home/integral/pfiles/spiros*.par 2>/dev/null || true
+          # Copy the primary par file and any file containing the bad forwarded parameters.
+          primary="$(find /opt /isdc /usr/local /home/integral -type f -name 'spi_science_analysis.par' 2>/dev/null | head -1)"
+          [ -n "$primary" ] && cp -f "$primary" /home/integral/pfiles/spi_science_analysis.par && echo "copied_primary=$primary" | tee -a logs/pfiles_repair.log
+          grep -RIl 'spiros_background-method\|spiros_nofsources' /opt /isdc /usr/local /home/integral 2>/dev/null | sort > logs/pfiles_with_known_bad_lines.txt
+          while IFS= read -r src; do
+            [ -f "$src" ] || continue
+            base="$(basename "$src")"
+            cp -f "$src" "/home/integral/pfiles/$base" 2>/dev/null || true
+            echo "copied_related=$src -> /home/integral/pfiles/$base" | tee -a logs/pfiles_repair.log
+          done < logs/pfiles_with_known_bad_lines.txt
+          # Sanitize HEASOFT .par CSV rows: name,type,mode,value,min,max,prompt. If row has >7 fields, merge the tail into prompt.
+          awk -F, '
+            BEGIN{OFS=","}
+            NF>7{
+              printf "%s,%s,%s,%s,%s,%s,\"",$1,$2,$3,$4,$5,$6;
+              for(i=7;i<=NF;i++){
+                gsub(/\"/,"\"\"",$i);
+                printf "%s%s",(i==7?"":","),$i;
+              }
+              print "\"";
+              next;
+            }
+            {print}
+          ' /home/integral/pfiles/spi_science_analysis.par > /home/integral/pfiles/spi_science_analysis.par.fixed 2>>logs/pfiles_repair.log
+          if [ -s /home/integral/pfiles/spi_science_analysis.par.fixed ]; then
+            mv /home/integral/pfiles/spi_science_analysis.par.fixed /home/integral/pfiles/spi_science_analysis.par
+          fi
+          for f in /home/integral/pfiles/spiros*.par; do
+            [ -f "$f" ] || continue
+            awk -F, 'BEGIN{OFS=","} NF>7{printf "%s,%s,%s,%s,%s,%s,\"",$1,$2,$3,$4,$5,$6; for(i=7;i<=NF;i++){gsub(/\"/,"\"\"",$i); printf "%s%s",(i==7?"":","),$i} print "\""; next} {print}' "$f" > "$f.fixed" 2>>logs/pfiles_repair.log
+            [ -s "$f.fixed" ] && mv "$f.fixed" "$f"
+          done
+          export PFILES="/home/integral/pfiles;${PFILES:-/opt/osa/pfiles}"
+          echo "PFILES_AFTER=$PFILES" | tee -a logs/pfiles_repair.log
+          echo "--- local pfiles ---" | tee -a logs/pfiles_repair.log
+          ls -lah /home/integral/pfiles | tee -a logs/pfiles_repair.log
+          echo "--- known bad lines after sanitize ---" | tee -a logs/pfiles_repair.log
+          grep -n 'spiros_background-method\|spiros_nofsources' /home/integral/pfiles/* 2>/dev/null | tee logs/pfiles_known_bad_lines_after_sanitize.txt || true
+          echo "--- plist spi_science_analysis after repair ---" | tee -a logs/pfiles_repair.log
+          plist spi_science_analysis 2>&1 | tee logs/plist_spi_science_analysis_after_repair.txt
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > logs/plist_spi_science_analysis_after_repair_exit_code.txt
+          if [ "$rc" = "0" ]; then
+            echo "PFILES_REPAIR_PASS"
+            exit 0
+          else
+            echo "PFILES_REPAIR_FAIL"
+            exit 75
+          fi
+          SH
+          chmod +x "$RUN_ID/scripts/repair_pfiles.sh"
+
+          cat > "$RUN_ID/scripts/r10b_r9_extract_line_sideband.py" <<'PY'
+          import json, csv, re
           from pathlib import Path
           import numpy as np
-
-          RUN_ID="R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION"
+          RUN_ID="R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION"
           ROOT=Path.cwd(); OUT=ROOT/RUN_ID
           LINE=(508.0,514.0); LOW=(490.0,500.0); HIGH=(522.0,532.0); MIN_RATIO=1.2
           rows=[]
@@ -191,12 +254,12 @@ jobs:
               m=np.isfinite(e1)&np.isfinite(e2)&np.isfinite(y)&(e2>=band[0])&(e1<=band[1])
               return float(np.nansum(y[m])) if m.any() else None
           for p in sorted(OUT.rglob("*.fit*")):
+              # R9 accepts RUN_OUTPUT only. Do not inspect cache fallback.
               try:
                   hdul=fits.open(p, memmap=False)
                   for hdu_i,h in enumerate(hdul):
                       data=getattr(h,"data",None)
-                      if data is None or not hasattr(data,"names") or data.names is None:
-                          continue
+                      if data is None or not hasattr(data,"names") or data.names is None: continue
                       names=[n.upper() for n in data.names]
                       e1=e2=None
                       for a,b in [("E_MIN","E_MAX"),("ENERG_LO","ENERG_HI"),("CHANNEL_LO","CHANNEL_HI")]:
@@ -204,35 +267,28 @@ jobs:
                               e1=np.asarray(data[data.names[names.index(a)]],dtype=float)
                               e2=np.asarray(data[data.names[names.index(b)]],dtype=float)
                               break
-                      if e1 is None:
-                          continue
+                      if e1 is None: continue
                       candidates=[]
                       for cname in ["COUNTS","RATE","FLUX","VALUE","SPEC","Y"]:
-                          if cname in names:
-                              candidates.append(data.names[names.index(cname)])
+                          if cname in names: candidates.append(data.names[names.index(cname)])
                       if not candidates:
                           for n in data.names:
                               if n.upper() not in ("E_MIN","E_MAX","ENERG_LO","ENERG_HI","CHANNEL_LO","CHANNEL_HI"):
                                   try:
                                       arr=np.asarray(data[n],dtype=float)
-                                      if arr.ndim==1 and len(arr)==len(e1):
-                                          candidates.append(n)
-                                  except Exception:
-                                      pass
+                                      if arr.ndim==1 and len(arr)==len(e1): candidates.append(n)
+                                  except Exception: pass
                       for cname in candidates[:8]:
                           try:
                               y=np.asarray(data[cname],dtype=float)
-                              if y.ndim!=1 or len(y)!=len(e1):
-                                  continue
+                              if y.ndim!=1 or len(y)!=len(e1): continue
                               line=integrate(e1,e2,y,LINE); low=integrate(e1,e2,y,LOW); high=integrate(e1,e2,y,HIGH)
                               sides=[v for v in [low,high] if v is not None]
                               side=sum(sides)/len(sides) if sides else None
                               ratio=(line/side) if (line is not None and side not in (None,0)) else None
                               rows.append({"file":str(p),"provenance":"RUN_OUTPUT","hdu":hdu_i,"column":cname,"line_508_514":line,"low_490_500":low,"high_522_532":high,"sideband_mean":side,"line_to_sideband_ratio":ratio,"passes_min_ratio":bool(ratio is not None and ratio>=MIN_RATIO)})
-                          except Exception:
-                              continue
-              except Exception:
-                  continue
+                          except Exception: continue
+              except Exception: continue
           with (OUT/"line_sideband_candidates.csv").open("w",newline="",encoding="utf-8") as f:
               w=csv.DictWriter(f, fieldnames=["file","provenance","hdu","column","line_508_514","low_490_500","high_522_532","sideband_mean","line_to_sideband_ratio","passes_min_ratio"])
               w.writeheader(); w.writerows(rows)
@@ -243,57 +299,22 @@ jobs:
           print(json.dumps(status,indent=2))
           PY
 
-      - name: OSA command preflight using corrected wrapper invocation
+      - name: OSA command preflight
         shell: bash
         continue-on-error: true
         run: |
           set +e
           echo "osa_command_preflight" > "$RUN_ID/RUN_STAGE.txt"
-          missing="$(cat "$RUN_ID/logs/swg_missing_count.txt" 2>/dev/null || echo 99)"
-          patch_rc="$(cat "$RUN_ID/logs/notty_patch_validation_exit_code.txt" 2>/dev/null || echo 99)"
-          if [ "$missing" != "0" ]; then
-            echo "SKIP_PREFLIGHT_CACHE_INCOMPLETE" | tee "$RUN_ID/logs/osa_command_preflight.log"
-            echo 78 > "$RUN_ID/logs/osa_command_preflight_exit_code.txt"
+          if [ ! -s osa-container.notty.sh ]; then
+            echo "WRAPPER_NOTTY_MISSING" | tee "$RUN_ID/logs/osa_command_preflight.log"
+            echo 90 > "$RUN_ID/logs/osa_command_preflight_exit_code.txt"
             exit 0
           fi
-          if [ "$patch_rc" != "0" ]; then
-            echo "SKIP_PREFLIGHT_NOTTY_PATCH_FAILED" | tee "$RUN_ID/logs/osa_command_preflight.log"
-            echo 91 > "$RUN_ID/logs/osa_command_preflight_exit_code.txt"
+          if [ "$(cat "$RUN_ID/logs/notty_patch_validation_exit_code.txt" 2>/dev/null || echo 66)" != "0" ]; then
+            echo "NOTTY_PATCH_NOT_VALIDATED" | tee "$RUN_ID/logs/osa_command_preflight.log"
+            echo 66 > "$RUN_ID/logs/osa_command_preflight_exit_code.txt"
             exit 0
           fi
-          export OSA_VERSION="11.2-2-g667521a3-20220403-190332"
-          export OSA_DOCKER_IMAGE="integralsw/osa:11.2-2-g667521a3-20220403-190332"
-          export OSA_DOCKER_PULL="yes"
-          export REP_BASE_PROD="$PWD/$CACHE"
-          export CURRENT_IC="$PWD/$CACHE"
-          export WORKDIR="$PWD"
-          xvfb-run -a bash ./osa-container.notty.sh docker '
-            set +e
-            echo "INSIDE_R8_PREFLIGHT"
-            echo "PWD=$(pwd)"
-            echo "REP_BASE_PROD=$REP_BASE_PROD"
-            echo "CURRENT_IC=$CURRENT_IC"
-            ls -ld /data/scw /data/aux /data/ic /data/idx 2>/dev/null || true
-            bash /home/integral/R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION/scripts/osa_command_bootstrap.sh
-          ' 2>&1 | tee "$RUN_ID/logs/osa_command_preflight.log"
-          rc=${PIPESTATUS[0]}
-          echo "$rc" > "$RUN_ID/logs/osa_command_preflight_exit_code.txt"
-          if [ "$rc" = "0" ]; then echo "true" > "$RUN_ID/PREFLIGHT_PASS.flag"; else echo "false" > "$RUN_ID/PREFLIGHT_PASS.flag"; fi
-          sudo chown -R "$USER:$USER" . 2>/dev/null || true
-
-      - name: og_create noninteractive repair
-        shell: bash
-        if: ${{ always() }}
-        continue-on-error: true
-        run: |
-          set +e
-          echo "og_create" > "$RUN_ID/RUN_STAGE.txt"
-          if [ "$(cat "$RUN_ID/PREFLIGHT_PASS.flag" 2>/dev/null || echo false)" != "true" ]; then
-            echo "SKIP_OG_CREATE_PREFLIGHT_FAILED" | tee "$RUN_ID/logs/og_create.log"
-            echo 77 > "$RUN_ID/logs/og_create_exit_code.txt"
-            exit 0
-          fi
-          export OSA_VERSION="11.2-2-g667521a3-20220403-190332"
           export OSA_DOCKER_IMAGE="integralsw/osa:11.2-2-g667521a3-20220403-190332"
           export OSA_DOCKER_PULL="no"
           export REP_BASE_PROD="$PWD/$CACHE"
@@ -301,29 +322,47 @@ jobs:
           export WORKDIR="$PWD"
           xvfb-run -a bash ./osa-container.notty.sh docker '
             set +e
-            cd /home/integral/R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION || exit 80
+            cd /home/integral/R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION || exit 80
+            bash scripts/osa_command_bootstrap.sh
+          ' 2>&1 | tee "$RUN_ID/logs/osa_command_preflight.log"
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > "$RUN_ID/logs/osa_command_preflight_exit_code.txt"
+          if [ "$rc" = "0" ]; then echo "true" > "$RUN_ID/PREFLIGHT_PASS.flag"; else echo "false" > "$RUN_ID/PREFLIGHT_PASS.flag"; fi
+          sudo chown -R "$USER:$USER" . 2>/dev/null || true
+
+      - name: Recreate observation group using R8-proven call
+        shell: bash
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set +e
+          if [ "$(cat "$RUN_ID/PREFLIGHT_PASS.flag" 2>/dev/null || echo false)" != "true" ]; then
+            echo "SKIP_OG_CREATE_PREFLIGHT_FAILED" | tee "$RUN_ID/logs/og_create.log"
+            echo 77 > "$RUN_ID/logs/og_create_exit_code.txt"
+            exit 0
+          fi
+          if [ "$(cat "$RUN_ID/logs/swg_missing_count.txt" 2>/dev/null || echo 99)" != "0" ]; then
+            echo "SKIP_OG_CREATE_CACHE_INCOMPLETE" | tee "$RUN_ID/logs/og_create.log"
+            echo 44 > "$RUN_ID/logs/og_create_exit_code.txt"
+            exit 0
+          fi
+          echo "og_create" > "$RUN_ID/RUN_STAGE.txt"
+          export OSA_DOCKER_IMAGE="integralsw/osa:11.2-2-g667521a3-20220403-190332"
+          export OSA_DOCKER_PULL="no"
+          export REP_BASE_PROD="$PWD/$CACHE"
+          export CURRENT_IC="$PWD/$CACHE"
+          export WORKDIR="$PWD"
+          xvfb-run -a bash ./osa-container.notty.sh docker '
+            set +e
+            cd /home/integral/R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION || exit 80
             bash scripts/osa_command_bootstrap.sh || exit 91
-            echo "PWD=$(pwd)"
-            echo "--- scw_dol.list ---"
-            cat scw_dol.list
-            rm -rf obs r10b_r8_og og_spi.fits 2>/dev/null || true
-            echo "--- plist og_create before run ---"
+            rm -rf obs r10b_r9_og og_spi.fits 2>/dev/null || true
             plist og_create 2>&1 | head -120 || true
-            echo "--- og_create named-parameter attempt: plist-supported parameters only ---"
-            # R8 repair: R7 failed because mode=h and clobber=yes are not in og_create.par.
-            # Do not pass unsupported PIL parameters.
-            og_create idxSwg="scw_dol.list" instrument="SPI" ogid="r10b_r8_og" baseDir="."
+            og_create idxSwg="scw_dol.list" instrument="SPI" ogid="r10b_r9_og" baseDir="."
             rc=$?
             echo "og_create_named_rc=$rc"
-            if [ "$rc" != "0" ]; then
-              echo "--- og_create positional fallback without mode/clobber ---"
-              og_create scw_dol.list SPI r10b_r8_og ./
-              rc=$?
-              echo "og_create_positional_rc=$rc"
-            fi
-            echo "--- outputs after og_create ---"
             find . -maxdepth 7 -type f | sort | tee logs/outputs_after_og_create.txt | head -600
-            og_file="$(find . -maxdepth 7 \( -name 'og_spi.fits' -o -name '*og*.fits' \) -type f | head -1)"
+            og_file="$(find . -maxdepth 7 \( -name og_spi.fits -o -name "*og*.fits" \) -type f | head -1)"
             if [ "$rc" = "0" ] && [ -n "$og_file" ]; then
               echo "OG_FILE_FOUND=$og_file" | tee logs/og_file_found.txt
               exit 0
@@ -336,19 +375,18 @@ jobs:
           if [ "$rc" = "0" ]; then echo "true" > "$RUN_ID/OG_CREATE_PASS.flag"; else echo "false" > "$RUN_ID/OG_CREATE_PASS.flag"; fi
           sudo chown -R "$USER:$USER" . 2>/dev/null || true
 
-      - name: SPI science analysis only if og_create passed
+      - name: PFILES repair and plist validation for spi_science_analysis
         shell: bash
         if: ${{ always() }}
         continue-on-error: true
         run: |
           set +e
-          echo "spi_science_analysis" > "$RUN_ID/RUN_STAGE.txt"
           if [ "$(cat "$RUN_ID/OG_CREATE_PASS.flag" 2>/dev/null || echo false)" != "true" ]; then
-            echo "SKIP_SPI_ANALYSIS_OG_CREATE_NOT_VALID" | tee "$RUN_ID/logs/spi_science_analysis.log"
-            echo 77 > "$RUN_ID/logs/spi_science_analysis_exit_code.txt"
+            echo "SKIP_PFILES_REPAIR_OG_CREATE_FAILED" | tee "$RUN_ID/logs/pfiles_repair_host.log"
+            echo 77 > "$RUN_ID/logs/pfiles_repair_exit_code.txt"
             exit 0
           fi
-          export OSA_VERSION="11.2-2-g667521a3-20220403-190332"
+          echo "pfiles_repair" > "$RUN_ID/RUN_STAGE.txt"
           export OSA_DOCKER_IMAGE="integralsw/osa:11.2-2-g667521a3-20220403-190332"
           export OSA_DOCKER_PULL="no"
           export REP_BASE_PROD="$PWD/$CACHE"
@@ -356,35 +394,52 @@ jobs:
           export WORKDIR="$PWD"
           xvfb-run -a bash ./osa-container.notty.sh docker '
             set +e
-            cd /home/integral/R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION || exit 80
+            cd /home/integral/R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION || exit 80
             bash scripts/osa_command_bootstrap.sh || exit 92
-            echo "--- available OG files ---"
-            find . -maxdepth 5 \( -name "*og*.fits" -o -name "og_spi.fits" -o -name "*.fits" \) -type f | sort | tee logs/available_fits_before_spi.txt
-            og_file="$(find . -maxdepth 5 \( -name "og_spi.fits" -o -name "*og*.fits" \) -type f | head -1)"
-            if [ -z "$og_file" ]; then
-              echo "NO_OG_FILE_FOUND_AFTER_OG_CREATE"
-              exit 93
-            fi
+            bash scripts/repair_pfiles.sh
+          ' 2>&1 | tee "$RUN_ID/logs/pfiles_repair_host.log"
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > "$RUN_ID/logs/pfiles_repair_exit_code.txt"
+          if [ "$rc" = "0" ]; then echo "true" > "$RUN_ID/PFILES_REPAIR_PASS.flag"; else echo "false" > "$RUN_ID/PFILES_REPAIR_PASS.flag"; fi
+          sudo chown -R "$USER:$USER" . 2>/dev/null || true
+
+      - name: Run spi_science_analysis only after repaired plist works
+        shell: bash
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set +e
+          if [ "$(cat "$RUN_ID/PFILES_REPAIR_PASS.flag" 2>/dev/null || echo false)" != "true" ]; then
+            echo "SKIP_SPI_ANALYSIS_PFILES_REPAIR_FAILED" | tee "$RUN_ID/logs/spi_science_analysis.log"
+            echo 75 > "$RUN_ID/logs/spi_science_analysis_exit_code.txt"
+            exit 0
+          fi
+          echo "spi_science_analysis" > "$RUN_ID/RUN_STAGE.txt"
+          export OSA_DOCKER_IMAGE="integralsw/osa:11.2-2-g667521a3-20220403-190332"
+          export OSA_DOCKER_PULL="no"
+          export REP_BASE_PROD="$PWD/$CACHE"
+          export CURRENT_IC="$PWD/$CACHE"
+          export WORKDIR="$PWD"
+          xvfb-run -a bash ./osa-container.notty.sh docker '
+            set +e
+            cd /home/integral/R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION || exit 80
+            bash scripts/osa_command_bootstrap.sh || exit 92
+            bash scripts/repair_pfiles.sh || exit 75
+            og_file="$(find . -maxdepth 5 \( -name og_spi.fits -o -name "*og*.fits" \) -type f | head -1)"
+            if [ -z "$og_file" ]; then echo "NO_OG_FILE_FOUND"; exit 93; fi
             echo "USING_OG_FILE=$og_file"
-            echo "--- plist spi_science_analysis before run ---"
-            plist spi_science_analysis 2>&1 | tee logs/plist_spi_science_analysis.txt | head -220 || true
-            # R8 safety: do not pass unsupported parameters and do not force interactive prompts.
-            # Try only parameter names that actually appear in the current par file.
+            plist spi_science_analysis 2>&1 | tee logs/plist_spi_science_analysis_before_run.txt || exit 75
             param=""
-            if grep -Eq '^[[:space:]]*ogDOL[[:space:]=]' logs/plist_spi_science_analysis.txt; then
-              param="ogDOL"
-            elif grep -Eq '^[[:space:]]*obs_group[[:space:]=]' logs/plist_spi_science_analysis.txt; then
-              param="obs_group"
-            elif grep -Eq '^[[:space:]]*inOG[[:space:]=]' logs/plist_spi_science_analysis.txt; then
-              param="inOG"
-            elif grep -Eq '^[[:space:]]*OG_DOL[[:space:]=]' logs/plist_spi_science_analysis.txt; then
-              param="OG_DOL"
-            fi
+            for cand in ogDOL obs_group inOG OG_DOL; do
+              if grep -Eq "^[[:space:]]*${cand}[[:space:]=]" logs/plist_spi_science_analysis_before_run.txt; then param="$cand"; break; fi
+            done
             if [ -z "$param" ]; then
-              echo "SPI_ANALYSIS_PARAM_UNKNOWN_SKIP_TO_AVOID_INTERACTIVE_FAILURE"
+              echo "SPI_ANALYSIS_PARAM_UNKNOWN_AFTER_REPAIRED_PLIST"
               exit 76
             fi
             echo "SPI_ANALYSIS_USING_PARAM=$param"
+            export HEADASNOQUERY=1
+            export HEADASPROMPT=/dev/null
             timeout 90m spi_science_analysis "$param=$og_file"
             rc=$?
             echo "spi_science_analysis_rc=$rc"
@@ -402,10 +457,10 @@ jobs:
           set +e
           echo "line_sideband_extract" > "$RUN_ID/RUN_STAGE.txt"
           python3 -m pip install -q astropy numpy pandas
-          python3 "$RUN_ID/scripts/r10b_r8_extract_line_sideband.py" 2>&1 | tee "$RUN_ID/logs/line_sideband_extract.log"
+          python3 "$RUN_ID/scripts/r10b_r9_extract_line_sideband.py" 2>&1 | tee "$RUN_ID/logs/line_sideband_extract.log"
           echo ${PIPESTATUS[0]} > "$RUN_ID/logs/line_sideband_extract_exit_code.txt"
 
-      - name: Build final guarded package
+      - name: Build final guarded decision and slim artifact
         shell: bash
         if: ${{ always() }}
         run: |
@@ -413,74 +468,74 @@ jobs:
           python3 - <<'PY'
           import json, csv, hashlib
           from pathlib import Path
-          RUN_ID="R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION"
+          RUN_ID="R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION"
           OUT=Path(RUN_ID)
           def read_exit(name):
               p=OUT/"logs"/name
               try: return int(p.read_text().strip().splitlines()[-1])
               except Exception: return None
-          def read_text(p):
-              try: return Path(p).read_text().strip()
-              except Exception: return None
-          preflight=(OUT/"PREFLIGHT_PASS.flag").read_text().strip()=="true" if (OUT/"PREFLIGHT_PASS.flag").exists() else False
-          og_pass=(OUT/"OG_CREATE_PASS.flag").read_text().strip()=="true" if (OUT/"OG_CREATE_PASS.flag").exists() else False
-          swg_missing=int(read_text(OUT/"logs/swg_missing_count.txt") or 99)
-          patch=read_exit("notty_patch_validation_exit_code.txt")
+          def read_flag(name):
+              try: return (OUT/name).read_text().strip()=="true"
+              except Exception: return False
+          swg_missing=None
+          try: swg_missing=int((OUT/"logs/swg_missing_count.txt").read_text().strip())
+          except Exception: pass
+          notty=read_exit("notty_patch_validation_exit_code.txt")
           pre=read_exit("osa_command_preflight_exit_code.txt")
           og=read_exit("og_create_exit_code.txt")
+          pfix=read_exit("pfiles_repair_exit_code.txt")
           spi=read_exit("spi_science_analysis_exit_code.txt")
-          ext=read_exit("line_sideband_extract_exit_code.txt")
-          line={}
+          extract=read_exit("line_sideband_extract_exit_code.txt")
+          line_status={}
           if (OUT/"line_sideband_status.json").exists():
-              try: line=json.loads((OUT/"line_sideband_status.json").read_text())
-              except Exception: line={}
-          valid=int(line.get("valid_ratio_rows",0) or 0)
-          best=line.get("best_candidate")
-          if swg_missing != 0:
-              decision="R22F_R10B_R8_CACHE_INCOMPLETE_NO_HEAVY_REDOWNLOAD_NO_THEORY_FAILURE"
-          elif patch not in (0,None):
-              decision="R22F_R10B_R8_NOTTY_PATCH_VALIDATION_FAILED_NO_THEORY_FAILURE"
-          elif not preflight:
-              decision="R22F_R10B_R8_OSA_PREFLIGHT_FAILED_NO_THEORY_FAILURE"
-          elif not og_pass:
-              decision="R22F_R10B_R8_OG_CREATE_NONINTERACTIVE_REPAIR_FAILED_NO_THEORY_FAILURE"
+              try: line_status=json.loads((OUT/"line_sideband_status.json").read_text())
+              except Exception: line_status={}
+          valid=int(line_status.get("valid_ratio_rows",0) or 0)
+          best=line_status.get("best_candidate")
+          if swg_missing not in (0,None):
+              decision="R22F_R10B_R9_CACHE_INCOMPLETE_NO_REDOWLOAD_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+          elif notty not in (0,None) or pre not in (0,None):
+              decision="R22F_R10B_R9_OSA_PREFLIGHT_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+          elif og not in (0,None):
+              decision="R22F_R10B_R9_OG_CREATE_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+          elif pfix not in (0,None):
+              decision="R22F_R10B_R9_PFILES_REPAIR_FAILED_SPI_ANALYSIS_NOT_RUN_NO_THEORY_FAILURE"
           elif spi not in (0,None):
-              decision="R22F_R10B_R8_SPI_SCIENCE_ANALYSIS_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R9_SPI_SCIENCE_ANALYSIS_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
           elif valid and best and best.get("passes_min_ratio"):
-              decision="R22F_R10B_R8_SPI511_RUN_OUTPUT_LINE_SIDEBAND_RATIO_PASS_REQUIRES_CONTROLS_NOT_PROOF"
+              decision="R22F_R10B_R9_SPI511_RUN_OUTPUT_LINE_SIDEBAND_RATIO_PASS_REQUIRES_CONTROLS_NOT_PROOF"
           elif valid:
-              decision="R22F_R10B_R8_LINE_SIDEBAND_RATIO_AVAILABLE_AUDIT_REQUIRED_NOT_PRODUCT_PROOF"
+              decision="R22F_R10B_R9_LINE_SIDEBAND_RATIO_AVAILABLE_NOT_PRODUCT_PROOF_AUDIT_REQUIRED"
           else:
-              decision="R22F_R10B_R8_NO_USABLE_RUN_OUTPUT_LINE_SIDEBAND_SPECTRUM_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R9_NO_USABLE_RUN_OUTPUT_LINE_SIDEBAND_SPECTRUM_EXTRACTED_NO_THEORY_FAILURE"
           status={
               "run_id":RUN_ID,
               "decision":decision,
               "swg_missing_count":swg_missing,
-              "notty_patch_validation_exit":patch,
-              "preflight_pass":preflight,
-              "og_create_pass":og_pass,
+              "notty_patch_validation_exit":notty,
               "osa_command_preflight_exit":pre,
+              "preflight_pass":read_flag("PREFLIGHT_PASS.flag"),
               "og_create_exit":og,
+              "og_create_pass":read_flag("OG_CREATE_PASS.flag"),
+              "pfiles_repair_exit":pfix,
+              "pfiles_repair_pass":read_flag("PFILES_REPAIR_PASS.flag"),
               "spi_science_analysis_exit":spi,
-              "line_sideband_extract_exit":ext,
+              "line_sideband_extract_exit":extract,
               "valid_ratio_rows":valid,
               "best_candidate":best,
-              "claim_ceiling":"OGCREATE_NO_BOGUS_PARAMS_VALIDATION_ATTEMPT_NOT_PROOF_NOT_FINAL_LAW",
+              "claim_ceiling":"PFILES_REPAIR_CONTINUATION_NOT_PROOF_NOT_FINAL_LAW",
               "raw_heavy_files_packaged":False,
-              "cache_reuse_first":True,
               "no_rescue_applied":True
           }
           (OUT/"STATUS.json").write_text(json.dumps(status,indent=2,sort_keys=True),encoding="utf-8")
-          with (OUT/"R22F_R10B_R8_GO_NO_GO_DECISION.csv").open("w",newline="",encoding="utf-8") as f:
-              w=csv.DictWriter(f, fieldnames=list(status.keys()))
-              w.writeheader(); w.writerow(status)
+          with (OUT/"R22F_R10B_R9_GO_NO_GO_DECISION.csv").open("w",newline="",encoding="utf-8") as f:
+              w=csv.DictWriter(f, fieldnames=list(status.keys())); w.writeheader(); w.writerow(status)
           rows=[]
           for p in sorted(OUT.rglob("*")):
               if p.is_file():
                   rows.append({"file":str(p.relative_to(OUT)),"sha256":hashlib.sha256(p.read_bytes()).hexdigest(),"bytes":p.stat().st_size})
           with (OUT/"MANIFEST_SHA256.csv").open("w",newline="",encoding="utf-8") as f:
-              w=csv.DictWriter(f, fieldnames=["file","sha256","bytes"])
-              w.writeheader(); w.writerows(rows)
+              w=csv.DictWriter(f, fieldnames=["file","sha256","bytes"]); w.writeheader(); w.writerows(rows)
           print(json.dumps(status,indent=2,sort_keys=True))
           PY
           ZIP="${RUN_ID}_RESULTS.zip"
@@ -494,9 +549,9 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_RESULTS
+          name: R22F_R10B_R9_SPI511_PFILES_REPAIR_RESULTS
           path: |
-            R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION_RESULTS.zip
-            R22F_R10B_R8_SPI511_OGCREATE_NO_BOGUS_PARAMS_VALIDATION_RESULTS.zip.sha256.txt
+            R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION_RESULTS.zip
+            R22F_R10B_R9_SPI511_PFILES_REPAIR_CONTINUATION_RESULTS.zip.sha256.txt
           if-no-files-found: error
           retention-days: 14
