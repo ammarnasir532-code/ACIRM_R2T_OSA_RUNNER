@@ -1,10 +1,10 @@
-name: ACIRM R22F R10B R10 SPI511 targeted PFILES repair
+name: ACIRM R22F R10B R11 SPI511 shell-only PFILES repair
 
 on:
   workflow_dispatch:
     inputs:
       allow_redownload:
-        description: "Keep false. R10 is cache-reuse only unless cache is missing."
+        description: "Keep false. R11 is cache-reuse only unless cache is missing."
         required: true
         default: "false"
 
@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RUN_ID="R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION"
+          RUN_ID="R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION"
           CACHE="ACIRM_CACHE_R10B_R4"
           echo "RUN_ID=${RUN_ID}" >> "$GITHUB_ENV"
           echo "CACHE=${CACHE}" >> "$GITHUB_ENV"
@@ -32,9 +32,9 @@ jobs:
           echo "not_started" > "$RUN_ID/RUN_STAGE.txt"
           cat > "$RUN_ID/LOCK.json" <<'JSON'
           {
-            "run_id": "R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION",
+            "run_id": "R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION",
             "parent_result": "R22F_R10B_R8_SPI_SCIENCE_ANALYSIS_TECHNICAL_NO_GO_NO_THEORY_FAILURE",
-            "critical_repair": "R8/R10 og_create succeeded; R10 repairs spi_science_analysis PFILES with targeted CSV-safe .par sanitation only, avoiding broad awk rewrites.",
+            "critical_repair": "R8/R11 og_create succeeded; R11 repairs spi_science_analysis PFILES with shell-only exact-row replacement for two known bad parameters; no python inside OSA container.",
             "instrument": "INTEGRAL_SPI",
             "revision": "2504",
             "line_band_keV": [508.0, 514.0],
@@ -176,11 +176,11 @@ jobs:
           cat > "$RUN_ID/scripts/repair_pfiles.sh" <<'SH'
           #!/usr/bin/env bash
           set +e
-          RUN_ID="R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION"
+          RUN_ID="R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION"
           cd "/home/integral/$RUN_ID" || exit 80
           mkdir -p /home/integral/pfiles logs
           echo "PFILES_INITIAL=${PFILES:-unset}" | tee logs/pfiles_repair.log
-          echo "--- targeted clean repair: no YAML/scripts copied into pfiles ---" | tee -a logs/pfiles_repair.log
+          echo "--- R11 shell-only exact repair: no python inside OSA container ---" | tee -a logs/pfiles_repair.log
           rm -rf /home/integral/pfiles
           mkdir -p /home/integral/pfiles
           primary="/opt/osa/pfiles/spi_science_analysis.par"
@@ -194,77 +194,35 @@ jobs:
           cp -f "$primary" /home/integral/pfiles/spi_science_analysis.par
           echo "copied_primary=$primary" | tee -a logs/pfiles_repair.log
 
-          python3 - <<'PYFIX' 2>&1 | tee -a logs/pfiles_repair.log
-          import csv
-          from pathlib import Path
-          src = Path('/home/integral/pfiles/spi_science_analysis.par')
-          raw = src.read_text(errors='replace').splitlines()
-          out = []
-          repairs = []
-
-          forced = {
-              'spiros_background-method': ['spiros_background-method','i','ql','3','0|1|2|3|4|5|6|7','','Background handling method 0 ZERO 1 FIXED 2 FLOAT 3 FUNC 4 DETGROUP 5 MCM 6 DPMODULATION'],
-              'spiros_nofsources': ['spiros_nofsources','i','ql','3','0','','Maximum number of sources to search 0 1 2 or more'],
-          }
-
-          def emit(row):
-              import io
-              buf = io.StringIO()
-              w = csv.writer(buf, lineterminator='')
-              w.writerow(row)
-              return buf.getvalue()
-
-          for line in raw:
-              stripped = line.strip()
-              if not stripped or stripped.startswith('#'):
-                  out.append(line)
-                  continue
-              try:
-                  row = next(csv.reader([line]))
-              except Exception:
-                  # Last-resort: keep raw line; plist will reveal if still bad.
-                  out.append(line)
-                  repairs.append(('parse_keep_raw', line[:80]))
-                  continue
-              if not row:
-                  out.append(line)
-                  continue
-              name = row[0].strip()
-              if name in forced:
-                  out.append(emit(forced[name]))
-                  repairs.append(('forced_safe_row', name, len(row)))
-                  continue
-              if len(row) > 7:
-                  # CSV-safe merge of prompt tail only; unlike awk, this respects quoted commas.
-                  row = row[:6] + [','.join(row[6:])]
-                  repairs.append(('merged_tail_to_prompt', name, len(row)))
-                  out.append(emit(row))
-                  continue
-              if 0 < len(row) < 7:
-                  # Do not guess science values; pad only syntactic missing fields so plist can report next true issue.
-                  row = row + ['']*(7-len(row))
-                  repairs.append(('padded_short_row', name, len(row)))
-                  out.append(emit(row))
-                  continue
-              out.append(line)
-
-          src.write_text('\n'.join(out)+'\n')
-          log = Path('/home/integral/R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION/logs/pfiles_targeted_repairs.csv')
-          with log.open('w', newline='') as f:
-              w=csv.writer(f); w.writerow(['repair_kind','parameter','field_count_after_or_before'])
-              for r in repairs:
-                  w.writerow(list(r)+['']*(3-len(r)))
-          print('TARGETED_REPAIR_COUNT', len(repairs))
-          for r in repairs[:80]: print('REPAIR', r)
-          PYFIX
+          # Exact replacement only for the two bad rows observed in R8-R10.
+          # Do not parse or rewrite the whole .par file. Do not touch spibounds_regions.
+          awk '
+            BEGIN{bg=0; nf=0}
+            /^spiros_background-method,/ {
+              print "spiros_background-method,i,ql,3,0,7,\"Background handling method 0 ZERO 1 FIXED 2 FLOAT 3 FUNC 4 DETGROUP 5 MCM 6 DPMODULATION\"";
+              bg=1; next
+            }
+            /^spiros_nofsources,/ {
+              print "spiros_nofsources,i,ql,3,0,999,\"Maximum number of sources to search\"";
+              nf=1; next
+            }
+            {print}
+            END{
+              if(bg==0){print "# R11_WARNING spiros_background-method row was not found" > "/home/integral/R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION/logs/pfiles_repair_warning_bg.txt"}
+              if(nf==0){print "# R11_WARNING spiros_nofsources row was not found" > "/home/integral/R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION/logs/pfiles_repair_warning_nf.txt"}
+            }
+          ' /home/integral/pfiles/spi_science_analysis.par > /home/integral/pfiles/spi_science_analysis.par.r11
+          mv /home/integral/pfiles/spi_science_analysis.par.r11 /home/integral/pfiles/spi_science_analysis.par
 
           export PFILES="/home/integral/pfiles;/opt/osa/pfiles:/opt/heasoft/x86_64-pc-linux-gnu-libc2.17/syspfiles"
           echo "PFILES_AFTER=$PFILES" | tee -a logs/pfiles_repair.log
           echo "--- local pfiles ---" | tee -a logs/pfiles_repair.log
           ls -lah /home/integral/pfiles | tee -a logs/pfiles_repair.log
-          echo "--- forced rows after repair ---" | tee -a logs/pfiles_repair.log
+          echo "--- key rows after R11 shell repair ---" | tee -a logs/pfiles_repair.log
           grep -n '^spiros_background-method\|^spiros_nofsources\|^spibounds_regions' /home/integral/pfiles/spi_science_analysis.par | tee logs/pfiles_key_rows_after_repair.txt || true
-          echo "--- plist spi_science_analysis after targeted repair ---" | tee -a logs/pfiles_repair.log
+          echo "--- field counts after R11 shell repair ---" | tee -a logs/pfiles_repair.log
+          awk -F',' '/^spiros_background-method|^spiros_nofsources|^spibounds_regions/{print NR":"$1":fields="NF":"$0}' /home/integral/pfiles/spi_science_analysis.par | tee logs/pfiles_field_counts_after_repair.txt || true
+          echo "--- plist spi_science_analysis after R11 shell repair ---" | tee -a logs/pfiles_repair.log
           plist spi_science_analysis 2>&1 | tee logs/plist_spi_science_analysis_after_repair.txt
           rc=${PIPESTATUS[0]}
           echo "$rc" > logs/plist_spi_science_analysis_after_repair_exit_code.txt
@@ -278,11 +236,11 @@ jobs:
           SH
           chmod +x "$RUN_ID/scripts/repair_pfiles.sh"
 
-          cat > "$RUN_ID/scripts/r10b_r10_extract_line_sideband.py" <<'PY'
+          cat > "$RUN_ID/scripts/r10b_r11_extract_line_sideband.py" <<'PY'
           import json, csv, re
           from pathlib import Path
           import numpy as np
-          RUN_ID="R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION"
+          RUN_ID="R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION"
           ROOT=Path.cwd(); OUT=ROOT/RUN_ID
           LINE=(508.0,514.0); LOW=(490.0,500.0); HIGH=(522.0,532.0); MIN_RATIO=1.2
           rows=[]
@@ -296,7 +254,7 @@ jobs:
               m=np.isfinite(e1)&np.isfinite(e2)&np.isfinite(y)&(e2>=band[0])&(e1<=band[1])
               return float(np.nansum(y[m])) if m.any() else None
           for p in sorted(OUT.rglob("*.fit*")):
-              # R10 accepts RUN_OUTPUT only. Do not inspect cache fallback.
+              # R11 accepts RUN_OUTPUT only. Do not inspect cache fallback.
               try:
                   hdul=fits.open(p, memmap=False)
                   for hdu_i,h in enumerate(hdul):
@@ -364,7 +322,7 @@ jobs:
           export WORKDIR="$PWD"
           xvfb-run -a bash ./osa-container.notty.sh docker '
             set +e
-            cd /home/integral/R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION || exit 80
+            cd /home/integral/R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION || exit 80
             bash scripts/osa_command_bootstrap.sh
           ' 2>&1 | tee "$RUN_ID/logs/osa_command_preflight.log"
           rc=${PIPESTATUS[0]}
@@ -396,11 +354,11 @@ jobs:
           export WORKDIR="$PWD"
           xvfb-run -a bash ./osa-container.notty.sh docker '
             set +e
-            cd /home/integral/R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION || exit 80
+            cd /home/integral/R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION || exit 80
             bash scripts/osa_command_bootstrap.sh || exit 91
-            rm -rf obs r10b_r10_og og_spi.fits 2>/dev/null || true
+            rm -rf obs r10b_r11_og og_spi.fits 2>/dev/null || true
             plist og_create 2>&1 | head -120 || true
-            og_create idxSwg="scw_dol.list" instrument="SPI" ogid="r10b_r10_og" baseDir="."
+            og_create idxSwg="scw_dol.list" instrument="SPI" ogid="r10b_r11_og" baseDir="."
             rc=$?
             echo "og_create_named_rc=$rc"
             find . -maxdepth 7 -type f | sort | tee logs/outputs_after_og_create.txt | head -600
@@ -436,7 +394,7 @@ jobs:
           export WORKDIR="$PWD"
           xvfb-run -a bash ./osa-container.notty.sh docker '
             set +e
-            cd /home/integral/R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION || exit 80
+            cd /home/integral/R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION || exit 80
             bash scripts/osa_command_bootstrap.sh || exit 92
             bash scripts/repair_pfiles.sh
           ' 2>&1 | tee "$RUN_ID/logs/pfiles_repair_host.log"
@@ -464,7 +422,7 @@ jobs:
           export WORKDIR="$PWD"
           xvfb-run -a bash ./osa-container.notty.sh docker '
             set +e
-            cd /home/integral/R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION || exit 80
+            cd /home/integral/R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION || exit 80
             bash scripts/osa_command_bootstrap.sh || exit 92
             bash scripts/repair_pfiles.sh || exit 75
             og_file="$(find . -maxdepth 5 \( -name og_spi.fits -o -name "*og*.fits" \) -type f | head -1)"
@@ -499,7 +457,7 @@ jobs:
           set +e
           echo "line_sideband_extract" > "$RUN_ID/RUN_STAGE.txt"
           python3 -m pip install -q astropy numpy pandas
-          python3 "$RUN_ID/scripts/r10b_r10_extract_line_sideband.py" 2>&1 | tee "$RUN_ID/logs/line_sideband_extract.log"
+          python3 "$RUN_ID/scripts/r10b_r11_extract_line_sideband.py" 2>&1 | tee "$RUN_ID/logs/line_sideband_extract.log"
           echo ${PIPESTATUS[0]} > "$RUN_ID/logs/line_sideband_extract_exit_code.txt"
 
       - name: Build final guarded decision and slim artifact
@@ -510,7 +468,7 @@ jobs:
           python3 - <<'PY'
           import json, csv, hashlib
           from pathlib import Path
-          RUN_ID="R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION"
+          RUN_ID="R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION"
           OUT=Path(RUN_ID)
           def read_exit(name):
               p=OUT/"logs"/name
@@ -535,21 +493,21 @@ jobs:
           valid=int(line_status.get("valid_ratio_rows",0) or 0)
           best=line_status.get("best_candidate")
           if swg_missing not in (0,None):
-              decision="R22F_R10B_R10_CACHE_INCOMPLETE_NO_REDOWLOAD_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R11_CACHE_INCOMPLETE_NO_REDOWLOAD_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
           elif notty not in (0,None) or pre not in (0,None):
-              decision="R22F_R10B_R10_OSA_PREFLIGHT_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R11_OSA_PREFLIGHT_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
           elif og not in (0,None):
-              decision="R22F_R10B_R10_OG_CREATE_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R11_OG_CREATE_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
           elif pfix not in (0,None):
-              decision="R22F_R10B_R10_PFILES_REPAIR_FAILED_SPI_ANALYSIS_NOT_RUN_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R11_PFILES_REPAIR_FAILED_SPI_ANALYSIS_NOT_RUN_NO_THEORY_FAILURE"
           elif spi not in (0,None):
-              decision="R22F_R10B_R10_SPI_SCIENCE_ANALYSIS_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R11_SPI_SCIENCE_ANALYSIS_TECHNICAL_NO_GO_NO_THEORY_FAILURE"
           elif valid and best and best.get("passes_min_ratio"):
-              decision="R22F_R10B_R10_SPI511_RUN_OUTPUT_LINE_SIDEBAND_RATIO_PASS_REQUIRES_CONTROLS_NOT_PROOF"
+              decision="R22F_R10B_R11_SPI511_RUN_OUTPUT_LINE_SIDEBAND_RATIO_PASS_REQUIRES_CONTROLS_NOT_PROOF"
           elif valid:
-              decision="R22F_R10B_R10_LINE_SIDEBAND_RATIO_AVAILABLE_NOT_PRODUCT_PROOF_AUDIT_REQUIRED"
+              decision="R22F_R10B_R11_LINE_SIDEBAND_RATIO_AVAILABLE_NOT_PRODUCT_PROOF_AUDIT_REQUIRED"
           else:
-              decision="R22F_R10B_R10_NO_USABLE_RUN_OUTPUT_LINE_SIDEBAND_SPECTRUM_EXTRACTED_NO_THEORY_FAILURE"
+              decision="R22F_R10B_R11_NO_USABLE_RUN_OUTPUT_LINE_SIDEBAND_SPECTRUM_EXTRACTED_NO_THEORY_FAILURE"
           status={
               "run_id":RUN_ID,
               "decision":decision,
@@ -570,7 +528,7 @@ jobs:
               "no_rescue_applied":True
           }
           (OUT/"STATUS.json").write_text(json.dumps(status,indent=2,sort_keys=True),encoding="utf-8")
-          with (OUT/"R22F_R10B_R10_GO_NO_GO_DECISION.csv").open("w",newline="",encoding="utf-8") as f:
+          with (OUT/"R22F_R10B_R11_GO_NO_GO_DECISION.csv").open("w",newline="",encoding="utf-8") as f:
               w=csv.DictWriter(f, fieldnames=list(status.keys())); w.writeheader(); w.writerow(status)
           rows=[]
           for p in sorted(OUT.rglob("*")):
@@ -591,9 +549,9 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: R22F_R10B_R10_SPI511_PFILES_REPAIR_RESULTS
+          name: R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_RESULTS
           path: |
-            R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION_RESULTS.zip
-            R22F_R10B_R10_SPI511_TARGETED_PFILES_REPAIR_CONTINUATION_RESULTS.zip.sha256.txt
+            R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION_RESULTS.zip
+            R22F_R10B_R11_SPI511_SHELL_ONLY_PFILES_REPAIR_CONTINUATION_RESULTS.zip.sha256.txt
           if-no-files-found: error
           retention-days: 14
